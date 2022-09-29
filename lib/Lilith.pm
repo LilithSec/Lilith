@@ -46,16 +46,12 @@ Perhaps a little code snippet.
 sub run {
 	my ( $blank, %opts ) = @_;
 
-	if ( !defined( $opts{eve} ) ) {
-		die('"eve" is not defined');
-	}
-
 	if ( !defined( $opts{dsn} ) ) {
 		die('"dsn" is not defined');
 	}
 
 	if ( !defined( $opts{user} ) ) {
-		$opts{user}='lilith';
+		$opts{user} = 'lilith';
 	}
 
 	if ( !defined( $opts{sagan} ) ) {
@@ -71,6 +67,17 @@ sub run {
 	# process each file
 	my $file_count = 0;
 	foreach my $item ( keys( %{ $opts{files} } ) ) {
+		if ( !defined( $item->{instance} ) ) {
+			die('No instance name specified for one of the files');
+		}
+
+		if ( !defined( $item->{type} ) ) {
+			die( 'No type specified for ' . $item->{instance} );
+		}
+
+		if ( !defined( $item->{file} ) ) {
+			die( 'No file specified for ' . $item->{instance} );
+		}
 
 		POE::Session->create(
 			inline_states => {
@@ -95,10 +102,11 @@ sub run {
 						}
 						if ( $_[HEAP]{type} eq 'suricata' ) {
 							my $sth = $_[HEAP]{dbh}->do(
-								'insert into ? '
-									. ' ( sensor, host, timestamp, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, app_proto, flow_pkts_toserver, flow_bytes_toserver, flow_pkts_toclient, flow_bytes_toclient, flow_start, raw ) '
+								'insert into '
+									. $_[HEAP]{suricata}
+									. ' ( instance, host, timestamp, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, app_proto, flow_pkts_toserver, flow_bytes_toserver, flow_pkts_toclient, flow_bytes_toclient, flow_start, raw ) '
 									. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
-								$_[HEAP]{suricata},            $_[HEAP]{host},
+								$_[HEAP]{instance},            $_[HEAP]{host},
 								$json->{timestamp},            $json->{flow_id},
 								$json->{in_iface},             $json->{src_ip},
 								$json->{src_port},             $json->{dest_ip},
@@ -111,10 +119,11 @@ sub run {
 						}
 						elsif ( $_[HEAP]{type} eq 'sagan' ) {
 							my $sth = $dbh->prepare(
-								'insert into ?'
-									. ' ( sensor, sensor_host, timestamp, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, facility, host, level, priority, program, proto, xff, stream, raw) '
+								'insert into '
+									. $_[HEAP]{sagan}
+									. ' ( instance, instance_host, timestamp, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, facility, host, level, priority, program, proto, xff, stream, raw) '
 									. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );',
-								$_[HEAP]{suricata}, $_[HEAP]{host},    $json->{timestamp}, $json->{flow_id},
+								$_[HEAP]{instance}, $_[HEAP]{host},    $json->{timestamp}, $json->{flow_id},
 								$json->{in_iface},  $json->{src_ip},   $json->{src_port},  $json->{dest_ip},
 								$json->{dest_port}, $json->{proto},    $json->{facility},  $json->{host},
 								$json->{level},     $json->{priority}, $json->{program},   $json->{proto},
@@ -135,6 +144,7 @@ sub run {
 				sagan    => $opts{sagan},
 				dbh      => $dbh,
 				host     => hostname,
+				instance => $item->{instance},
 			},
 		);
 
@@ -155,7 +165,7 @@ sub create_table {
 	}
 
 	if ( !defined( $opts{user} ) ) {
-		$opts{user}='lilith';
+		$opts{user} = 'lilith';
 	}
 
 	if ( !defined( $opts{sagan} ) ) {
@@ -169,9 +179,10 @@ sub create_table {
 	my $dbh = DBI->connect_cached( $opts{dsn}, $opts{user}, $opts{pass} );
 
 	my $sth
-		= $dbh->prepare( 'create table '.$opts{suricata}.' ('
+		= $dbh->prepare( 'create table '
+			. $opts{suricata} . ' ('
 			. 'id bigserial NOT NULL, '
-			. 'sensor varchar(255),'
+			. 'instance varchar(255),'
 			. 'host varchar(255),'
 			. 'timestamp TIMESTAMP WITH TIME ZONE, '
 			. 'flow_id bigint, '
@@ -189,13 +200,14 @@ sub create_table {
 			. 'flow_start TIMESTAMP WITH TIME ZONE, '
 			. 'raw json NOT NULL, '
 			. 'PRIMARY KEY(id) );' );
-	$sth->execute( );
+	$sth->execute();
 
 	$sth
-		= $dbh->prepare( 'create table '.$opts{sagan}.' ('
+		= $dbh->prepare( 'create table '
+			. $opts{sagan} . ' ('
 			. 'id bigserial NOT NULL, '
-			. 'sensor varchar(255), '
-			. 'sensor_host varchar(255), '
+			. 'instance varchar(255), '
+			. 'instance_host varchar(255), '
 			. 'timestamp TIMESTAMP WITH TIME ZONE, '
 			. 'flow_id bigint, '
 			. 'in_iface varchar(255), '
@@ -213,7 +225,7 @@ sub create_table {
 			. 'stream bigint, '
 			. 'raw json NOT NULL, '
 			. 'PRIMARY KEY(id) );' );
-	$sth->execute( );
+	$sth->execute();
 }
 
 =head1 AUTHOR
