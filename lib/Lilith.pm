@@ -101,42 +101,42 @@ sub run {
 							&& defined( $json->{event_type} )
 							&& $json->{event_type} eq 'alert' )
 						{
+							if ( $_[HEAP]{type} eq 'suricata' ) {
+								my $sth
+									= $_[HEAP]{dbh}->prepare( 'insert into '
+										. $_[HEAP]{suricata}
+										. ' ( instance, host, timestamp, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, app_proto, flow_pkts_toserver, flow_bytes_toserver, flow_pkts_toclient, flow_bytes_toclient, flow_start, raw ) '
+										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);' );
+								$sth->execute(
+									$_[HEAP]{instance},            $_[HEAP]{host},
+									$json->{timestamp},            $json->{flow_id},
+									$json->{in_iface},             $json->{src_ip},
+									$json->{src_port},             $json->{dest_ip},
+									$json->{dest_port},            $json->{proto},
+									$json->{app_proto},            $json->{flow}{pkts_toserver},
+									$json->{flow}{bytes_toserver}, $json->{flow}{pkts_toclient},
+									$json->{flow}{bytes_toclient}, $json->{flow}{start},
+									$json
+								);
+							}
+							elsif ( $_[HEAP]{type} eq 'sagan' ) {
+								my $sth
+									= $dbh->prepare( 'insert into '
+										. $_[HEAP]{sagan}
+										. ' ( instance, instance_host, timestamp, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, facility, host, level, priority, program, proto, xff, stream, raw) '
+										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );' );
+								$sth->execute(
+									$_[HEAP]{instance}, $_[HEAP]{host},    $json->{timestamp}, $json->{flow_id},
+									$json->{in_iface},  $json->{src_ip},   $json->{src_port},  $json->{dest_ip},
+									$json->{dest_port}, $json->{proto},    $json->{facility},  $json->{host},
+									$json->{level},     $json->{priority}, $json->{program},   $json->{proto},
+									$json->{xff},       $json->{stream},   $json,
+								);
+							}
 						}
-						if ( $_[HEAP]{type} eq 'suricata' ) {
-							my $sth
-								= $_[HEAP]{dbh}->prepare( 'insert into '
-									. $_[HEAP]{suricata}
-									. ' ( instance, host, timestamp, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, app_proto, flow_pkts_toserver, flow_bytes_toserver, flow_pkts_toclient, flow_bytes_toclient, flow_start, raw ) '
-									. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);' );
-							$sth->execute(
-								$_[HEAP]{instance},            $_[HEAP]{host},
-								$json->{timestamp},            $json->{flow_id},
-								$json->{in_iface},             $json->{src_ip},
-								$json->{src_port},             $json->{dest_ip},
-								$json->{dest_port},            $json->{proto},
-								$json->{app_proto},            $json->{flow}{pkts_toserver},
-								$json->{flow}{bytes_toserver}, $json->{flow}{pkts_toclient},
-								$json->{flow}{bytes_toclient}, $json->{flow}{start},
-								$json
-							);
+						if ($@) {
+							warn( 'SQL INSERT issue... ' . $@ );
 						}
-						elsif ( $_[HEAP]{type} eq 'sagan' ) {
-							my $sth
-								= $dbh->prepare( 'insert into '
-									. $_[HEAP]{sagan}
-									. ' ( instance, instance_host, timestamp, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, facility, host, level, priority, program, proto, xff, stream, raw) '
-									. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );' );
-							$sth->execute(
-								$_[HEAP]{instance}, $_[HEAP]{host},    $json->{timestamp}, $json->{flow_id},
-								$json->{in_iface},  $json->{src_ip},   $json->{src_port},  $json->{dest_ip},
-								$json->{dest_port}, $json->{proto},    $json->{facility},  $json->{host},
-								$json->{level},     $json->{priority}, $json->{program},   $json->{proto},
-								$json->{xff},       $json->{stream},   $json,
-							);
-						}
-					};
-					if ($@) {
-						warn( 'SQL INSERT issue... ' . $@ );
 					}
 
 				},
