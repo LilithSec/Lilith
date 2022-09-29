@@ -116,7 +116,7 @@ sub run {
 									$json->{app_proto},            $json->{flow}{pkts_toserver},
 									$json->{flow}{bytes_toserver}, $json->{flow}{pkts_toclient},
 									$json->{flow}{bytes_toclient}, $json->{flow}{start},
-									$json
+									$_[ARG0]
 								);
 							}
 							elsif ( $_[HEAP]{type} eq 'sagan' ) {
@@ -130,7 +130,7 @@ sub run {
 									$json->{in_iface},  $json->{src_ip},   $json->{src_port},  $json->{dest_ip},
 									$json->{dest_port}, $json->{proto},    $json->{facility},  $json->{host},
 									$json->{level},     $json->{priority}, $json->{program},   $json->{proto},
-									$json->{xff},       $json->{stream},   $json,
+									$json->{xff},       $json->{stream},   $_[ARG0],
 								);
 							}
 						}
