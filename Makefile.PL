@@ -4,42 +4,55 @@ use warnings;
 use ExtUtils::MakeMaker;
 
 my %WriteMakefileArgs = (
-    NAME             => 'Lilith',
-    AUTHOR           => q{Zane C. Bowers-Hadley <vvelox@vvelox.net>},
-    VERSION_FROM     => 'lib/Lilith.pm',
-    ABSTRACT_FROM    => 'lib/Lilith.pm',
-    LICENSE          => 'artistic_2',
-    MIN_PERL_VERSION => '5.006',
-    CONFIGURE_REQUIRES => {
-        'ExtUtils::MakeMaker' => '0',
-    },
-    TEST_REQUIRES => {
-        'Test::More' => '0',
-    },
-    PREREQ_PM => {
-        #'ABC'              => '1.6',
-        #'Foo::Bar::Module' => '5.0401',
-    },
-    dist  => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
-    clean => { FILES => 'Lilith-*' },
+	NAME               => 'Lilith',
+	AUTHOR             => q{Zane C. Bowers-Hadley <vvelox@vvelox.net>},
+	VERSION_FROM       => 'lib/Lilith.pm',
+	ABSTRACT_FROM      => 'lib/Lilith.pm',
+	LICENSE            => 'artistic_2',
+	MIN_PERL_VERSION   => '5.006',
+	INST_SCRIPT        => 'bin',
+	CONFIGURE_REQUIRES => {
+		'ExtUtils::MakeMaker' => '0',
+	},
+	TEST_REQUIRES => {
+		'Test::More' => '0',
+	},
+	PREREQ_PM => {
+		'POE::Wheel::FollowTail' => '1.368',
+		'TOML'                   => '0.97',
+		'DBI'                    => '1.643',
+		'JSON'                   => '4.06',
+	},
+	dist       => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
+	clean      => { FILES    => 'Lilith-*' },
+	META_MERGE => {
+		"meta-spec" => { version => 2 },
+		resources   => {
+			repository => {
+				type => 'git',
+				url  => 'git@github.com:VVelox/Lilith.git',
+				web  => 'https://github.com/VVelox/Lilith',
+			},
+		},
+	}
 );
 
 # Compatibility with old versions of ExtUtils::MakeMaker
-unless (eval { ExtUtils::MakeMaker->VERSION('6.64'); 1 }) {
-    my $test_requires = delete $WriteMakefileArgs{TEST_REQUIRES} || {};
-    @{$WriteMakefileArgs{PREREQ_PM}}{keys %$test_requires} = values %$test_requires;
+unless ( eval { ExtUtils::MakeMaker->VERSION('6.64'); 1 } ) {
+	my $test_requires = delete $WriteMakefileArgs{TEST_REQUIRES} || {};
+	@{ $WriteMakefileArgs{PREREQ_PM} }{ keys %$test_requires } = values %$test_requires;
 }
 
-unless (eval { ExtUtils::MakeMaker->VERSION('6.55_03'); 1 }) {
-    my $build_requires = delete $WriteMakefileArgs{BUILD_REQUIRES} || {};
-    @{$WriteMakefileArgs{PREREQ_PM}}{keys %$build_requires} = values %$build_requires;
+unless ( eval { ExtUtils::MakeMaker->VERSION('6.55_03'); 1 } ) {
+	my $build_requires = delete $WriteMakefileArgs{BUILD_REQUIRES} || {};
+	@{ $WriteMakefileArgs{PREREQ_PM} }{ keys %$build_requires } = values %$build_requires;
 }
 
 delete $WriteMakefileArgs{CONFIGURE_REQUIRES}
-    unless eval { ExtUtils::MakeMaker->VERSION('6.52'); 1 };
+	unless eval { ExtUtils::MakeMaker->VERSION('6.52'); 1 };
 delete $WriteMakefileArgs{MIN_PERL_VERSION}
-    unless eval { ExtUtils::MakeMaker->VERSION('6.48'); 1 };
+	unless eval { ExtUtils::MakeMaker->VERSION('6.48'); 1 };
 delete $WriteMakefileArgs{LICENSE}
-    unless eval { ExtUtils::MakeMaker->VERSION('6.31'); 1 };
+	unless eval { ExtUtils::MakeMaker->VERSION('6.31'); 1 };
 
 WriteMakefile(%WriteMakefileArgs);

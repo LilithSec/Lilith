@@ -1,0 +1,97 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use Getopt::Long;
+use Lilith;
+use TOML qw(from_toml);
+use File::Slurp qw(read_file);
+
+sub version {
+	print "lilith v. 0.0.1\n";
+}
+
+sub help {
+	&version;
+
+	print '
+
+-c <ini>     Config INI file.
+             Default: /usr/local/etc/lilith.ini
+';
+}
+
+# get the commandline options
+my $help        = 0;
+my $version     = 0;
+my $config_file = '/usr/local/etc/lilith.toml';
+my $create_table;
+Getopt::Long::Configure('no_ignore_case');
+Getopt::Long::Configure('bundling');
+GetOptions(
+	'version' => \$version,
+	'v'       => \$version,
+	'help'    => \$help,
+	'h'       => \$help,
+	'c=s'     => \$config_file,
+	'ct'      => \$create_table,
+);
+
+# print version or help if requested
+if ($help) {
+	&help;
+	exit 42;
+}
+if ($version) {
+	&version;
+	exit 42;
+}
+
+# make sure the file exists
+if ( !-f $config_file ) {
+	die( '"' . $config_file . '" does not exist' );
+}
+
+# read the in or die
+my $toml_raw = read_file($config_file) or die 'Failed to read "' . $config_file . '"';
+
+# read the specified config
+my ( $toml, $err ) = from_toml($toml_raw);
+unless ($toml) {
+	die "Error parsing toml,'" . $config_file . "'" . $err;
+}
+
+# create the tables if requested
+if ($create_table) {
+	Lilith->create_table(
+						 dsn=>$toml->{dsn},
+						 sagan=>$toml->{sagan},
+						 suricata=>$toml->{suricata},
+						 user=>$toml->{user},
+						 pass=>$toml->{pass},
+						 );
+	exit;
+}
+
+my %files;
+my @toml_keys = keys( %{$toml} );
+my $int       = 0;
+while ( defined( $toml_keys[$int] ) ) {
+        my $item = $toml_keys[$int];
+
+        if ( ref( $toml->{$item} ) eq "HASH" ) {
+                # add the file in question
+                $files{$item} = $toml->{$item};
+        }
+
+        $int++;
+}
+
+Lilith->run(
+			dsn=>$toml->{dsn},
+			sagan=>$toml->{sagan},
+			suricata=>$toml->{suricata},
+			user=>$toml->{user},
+			pass=>$toml->{pass},
+			files=>\%files,
+			);
