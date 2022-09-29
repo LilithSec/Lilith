@@ -107,7 +107,7 @@ sub run {
 								= $_[HEAP]{dbh}->prepare( 'insert into '
 									. $_[HEAP]{suricata}
 									. ' ( instance, host, timestamp, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, app_proto, flow_pkts_toserver, flow_bytes_toserver, flow_pkts_toclient, flow_bytes_toclient, flow_start, raw ) '
-									. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);' );
+									. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);' );
 							$sth->execute(
 								$_[HEAP]{instance},            $_[HEAP]{host},
 								$json->{timestamp},            $json->{flow_id},
