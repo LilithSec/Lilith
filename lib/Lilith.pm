@@ -66,16 +66,18 @@ sub run {
 
 	# process each file
 	my $file_count = 0;
-	foreach my $item ( keys( %{ $opts{files} } ) ) {
+	foreach my $item_key ( keys( %{ $opts{files} } ) ) {
+		my $item = $opts{files}->{$item_key};
 		if ( !defined( $item->{instance} ) ) {
-			die('No instance name specified for one of the files');
+			warn( 'No instance name specified for ' . $item_key . ' so using that as the instance name' );
+			$item->{instance} = $item_key;
 		}
 
 		if ( !defined( $item->{type} ) ) {
 			die( 'No type specified for ' . $item->{instance} );
 		}
 
-		if ( !defined( $item->{file} ) ) {
+		if ( !defined( $item->{eve} ) ) {
 			die( 'No file specified for ' . $item->{instance} );
 		}
 
@@ -83,7 +85,7 @@ sub run {
 			inline_states => {
 				_start => sub {
 					$_[HEAP]{tailor} = POE::Wheel::FollowTail->new(
-						Filename   => $_[HEAP]{file},
+						Filename   => $_[HEAP]{eve},
 						InputEvent => "got_log_line",
 					);
 				},
@@ -101,11 +103,12 @@ sub run {
 						{
 						}
 						if ( $_[HEAP]{type} eq 'suricata' ) {
-							my $sth = $_[HEAP]{dbh}->do(
-								'insert into '
+							my $sth
+								= $_[HEAP]{dbh}->prepare( 'insert into '
 									. $_[HEAP]{suricata}
 									. ' ( instance, host, timestamp, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, app_proto, flow_pkts_toserver, flow_bytes_toserver, flow_pkts_toclient, flow_bytes_toclient, flow_start, raw ) '
-									. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+									. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);' );
+							$sth->execute(
 								$_[HEAP]{instance},            $_[HEAP]{host},
 								$json->{timestamp},            $json->{flow_id},
 								$json->{in_iface},             $json->{src_ip},
@@ -118,11 +121,12 @@ sub run {
 							);
 						}
 						elsif ( $_[HEAP]{type} eq 'sagan' ) {
-							my $sth = $dbh->prepare(
-								'insert into '
+							my $sth
+								= $dbh->prepare( 'insert into '
 									. $_[HEAP]{sagan}
 									. ' ( instance, instance_host, timestamp, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, facility, host, level, priority, program, proto, xff, stream, raw) '
-									. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );',
+									. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );' );
+							$sth->execute(
 								$_[HEAP]{instance}, $_[HEAP]{host},    $json->{timestamp}, $json->{flow_id},
 								$json->{in_iface},  $json->{src_ip},   $json->{src_port},  $json->{dest_ip},
 								$json->{dest_port}, $json->{proto},    $json->{facility},  $json->{host},
@@ -138,7 +142,7 @@ sub run {
 				},
 			},
 			heap => {
-				file     => $item->{eve},
+				eve      => $item->{eve},
 				type     => $item->{type},
 				suricata => $opts{suricata},
 				sagan    => $opts{sagan},
