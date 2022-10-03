@@ -7,6 +7,8 @@ use POE qw(Wheel::FollowTail);
 use JSON;
 use Sys::Hostname;
 use DBI;
+use Digest::SHA qw(sha256_base64);
+use File::ReadBackwards;
 
 =head1 NAME
 
@@ -22,24 +24,57 @@ our $VERSION = '0.0.1';
 
 =head1 SYNOPSIS
 
-Quick summary of what the module does.
+    my $toml_raw = read_file($config_file) or die 'Failed to read "' . $config_file . '"';
+    my ( $toml, $err ) = from_toml($toml_raw);
+    unless ($toml) {
+        die "Error parsing toml,'" . $config_file . "'" . $err;
+    }
 
-Perhaps a little code snippet.
+     Lilith->create_table(
+                          dsn=>$toml->{dsn},
+                          sagan=>$toml->{sagan},
+                          suricata=>$toml->{suricata},
+                          user=>$toml->{user},
+                          pass=>$toml->{pass},
+                         );
 
-    use Lilith;
+    my %files;
+    my @toml_keys = keys( %{$toml} );
+    my $int       = 0;
+    while ( defined( $toml_keys[$int] ) ) {
+        my $item = $toml_keys[$int];
 
-    my $lilith = Lilith->run({
-                              dsn=>'dbi:Pg:dbname='
-                              pw=>''
-                              user=>''
-                              eves=>
-                              }
-                             );
+        if ( ref( $toml->{$item} ) eq "HASH" ) {
+                # add the file in question
+                $files{$item} = $toml->{$item};
+        }
 
+        $int++;
+    }
+
+    Lilith->run(
+                dsn=>$toml->{dsn},
+                sagan=>$toml->{sagan},
+                suricata=>$toml->{suricata},
+                user=>$toml->{user},
+                pass=>$toml->{pass},
+                files=>\%files,
+               );
 
 =head1 FUNCTIONS
 
 =head2 run
+
+Start processing.
+
+    Lilith->run(
+                dsn=>$toml->{dsn},
+                sagan=>$toml->{sagan},
+                suricata=>$toml->{suricata},
+                user=>$toml->{user},
+                pass=>$toml->{pass},
+                files=>\%files,
+               );
 
 =cut
 
@@ -81,6 +116,7 @@ sub run {
 			die( 'No file specified for ' . $item->{instance} );
 		}
 
+		# create each POE session out for each EVE file we are following
 		POE::Session->create(
 			inline_states => {
 				_start => sub {
@@ -101,36 +137,47 @@ sub run {
 							&& defined( $json->{event_type} )
 							&& $json->{event_type} eq 'alert' )
 						{
+							# put the event ID together
+							my $event_id
+								= sha256_base64( $_[HEAP]{instance}
+									. $_[HEAP]{host}
+									. $json->{timestamp}
+									. $json->{flow_id}
+									. $json->{in_iface} );
+
+							# handle if suricata
 							if ( $_[HEAP]{type} eq 'suricata' ) {
 								my $sth
 									= $_[HEAP]{dbh}->prepare( 'insert into '
 										. $_[HEAP]{suricata}
-										. ' ( instance, host, timestamp, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, app_proto, flow_pkts_toserver, flow_bytes_toserver, flow_pkts_toclient, flow_bytes_toclient, flow_start, raw ) '
-										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);' );
+										. ' ( instance, host, timestamp, flow_id, event_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, app_proto, flow_pkts_toserver, flow_bytes_toserver, flow_pkts_toclient, flow_bytes_toclient, flow_start, raw ) '
+										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);' );
 								$sth->execute(
-									$_[HEAP]{instance},            $_[HEAP]{host},
-									$json->{timestamp},            $json->{flow_id},
-									$json->{in_iface},             $json->{src_ip},
-									$json->{src_port},             $json->{dest_ip},
-									$json->{dest_port},            $json->{proto},
-									$json->{app_proto},            $json->{flow}{pkts_toserver},
-									$json->{flow}{bytes_toserver}, $json->{flow}{pkts_toclient},
-									$json->{flow}{bytes_toclient}, $json->{flow}{start},
-									$_[ARG0]
+									$_[HEAP]{instance},           $_[HEAP]{host},
+									$json->{timestamp},           $event_id,
+									$json->{flow_id},             $json->{in_iface},
+									$json->{src_ip},              $json->{src_port},
+									$json->{dest_ip},             $json->{dest_port},
+									$json->{proto},               $json->{app_proto},
+									$json->{flow}{pkts_toserver}, $json->{flow}{bytes_toserver},
+									$json->{flow}{pkts_toclient}, $json->{flow}{bytes_toclient},
+									$json->{flow}{start},         $_[ARG0]
 								);
 							}
+
+							#handle if sagan
 							elsif ( $_[HEAP]{type} eq 'sagan' ) {
 								my $sth
 									= $dbh->prepare( 'insert into '
 										. $_[HEAP]{sagan}
-										. ' ( instance, instance_host, timestamp, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, facility, host, level, priority, program, proto, xff, stream, raw) '
-										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );' );
+										. ' ( instance, instance_host, timestamp, event_id, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, facility, host, level, priority, program, proto, xff, stream, raw) '
+										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );' );
 								$sth->execute(
-									$_[HEAP]{instance}, $_[HEAP]{host},    $json->{timestamp}, $json->{flow_id},
-									$json->{in_iface},  $json->{src_ip},   $json->{src_port},  $json->{dest_ip},
-									$json->{dest_port}, $json->{proto},    $json->{facility},  $json->{host},
-									$json->{level},     $json->{priority}, $json->{program},   $json->{proto},
-									$json->{xff},       $json->{stream},   $_[ARG0],
+									$_[HEAP]{instance}, $_[HEAP]{host},     $json->{timestamp}, $event_id,
+									$json->{flow_id},   $json->{in_iface},  $json->{src_ip},    $json->{src_port},
+									$json->{dest_ip},   $json->{dest_port}, $json->{proto},     $json->{facility},
+									$json->{host},      $json->{level},     $json->{priority},  $json->{program},
+									$json->{proto},     $json->{xff},       $json->{stream},    $_[ARG0],
 								);
 							}
 						}
@@ -157,11 +204,21 @@ sub run {
 	POE::Kernel->run;
 }
 
-=head2 create_table
+=head2 create_tables
+
+Just creates the required tables in the DB.
+
+     Lilith->create_tables(
+                          dsn=>$toml->{dsn},
+                          sagan=>$toml->{sagan},
+                          suricata=>$toml->{suricata},
+                          user=>$toml->{user},
+                          pass=>$toml->{pass},
+                         );
 
 =cut
 
-sub create_table {
+sub create_tables {
 	my ( $blank, %opts ) = @_;
 
 	if ( !defined( $opts{dsn} ) ) {
@@ -189,6 +246,7 @@ sub create_table {
 			. 'instance varchar(255),'
 			. 'host varchar(255),'
 			. 'timestamp TIMESTAMP WITH TIME ZONE, '
+			. 'event_id varchar(64), '
 			. 'flow_id bigint, '
 			. 'in_iface varchar(255), '
 			. 'src_ip inet, '
@@ -213,6 +271,7 @@ sub create_table {
 			. 'instance varchar(255), '
 			. 'instance_host varchar(255), '
 			. 'timestamp TIMESTAMP WITH TIME ZONE, '
+			. 'event_id varchar(64), '
 			. 'flow_id bigint, '
 			. 'in_iface varchar(255), '
 			. 'src_ip inet, '
@@ -231,6 +290,175 @@ sub create_table {
 			. 'PRIMARY KEY(id) );' );
 	$sth->execute();
 }
+
+=head2 extend
+
+	Lilith->extend(
+		dsn      => $toml->{dsn},
+		sagan    => $toml->{sagan},
+		suricata => $toml->{suricata},
+		user     => $toml->{user},
+		pass     => $toml->{pass},
+		files    => \%files,
+		rules    => $rules_toml,
+	);
+
+=cut
+
+sub extend {
+	my ( $blank, %opts ) = @_;
+
+	if ( !defined( $opts{max_age} ) ) {
+		$opts{max_age} = 300;
+	}
+
+	my @rule_keys = keys( %{ $opts{rules} } );
+
+	my $host = hostname;
+
+	my $from = time;
+	my $till = $from - $opts{max_age};
+
+	# librenms return hash
+	my $to_return = {
+		data        => {},
+		version     => 1,
+		error       => '0',
+		errorString => '',
+		alert       => '0',
+		alertString => ''
+	};
+
+	# IDs of found alerts
+	my @suricata_alert_ids;
+	my @sagan_alert_ids;
+
+	# process each file
+	my $file_count = 0;
+	foreach my $item_key ( keys( %{ $opts{files} } ) ) {
+		my $item = $opts{files}->{$item_key};
+		if ( !defined( $item->{instance} ) ) {
+			warn( 'No instance name specified for ' . $item_key . ' so using that as the instance name' );
+			$item->{instance} = $item_key;
+		}
+
+		eval {
+			# make sure we have a eve and type specified
+			if ( !defined( $item->{type} ) ) {
+				die( 'No type specified for ' . $item->{instance} );
+			}
+			if ( !defined( $item->{eve} ) ) {
+				die( 'No file specified for ' . $item->{instance} );
+			}
+
+			# ends processing for this file
+			my $process_it = 1;
+
+			# open the file for reading it backwards
+			my $bw;
+			eval {
+				$bw = File::ReadBackwards->new( $item->{eve} )
+					or die( 'Can not read "' . $item->{eve} . '"... ' . $! );
+			};
+			if ($@) {
+				$to_return->{error} = '2';
+				if ( $to_return->{errorString} ne '' ) {
+					$to_return->{errorString} = $to_return->{errorString} . "\n";
+				}
+				$to_return->{errorString} = $to_return->{errorString} . $item->{instance} . ': ' . $@;
+			}
+
+			# get the first line, if possible
+			my $line;
+			my $current_till;
+			if ($process_it) {
+				$line = $bw->readline;
+			}
+			while ( $process_it
+				&& defined($line) )
+			{
+				eval {
+					my $json      = decode_json($line);
+					my $timestamp = $json->{timestamp};
+
+					if (  !defined($current_till)
+						&& defined($timestamp)
+						&& $timestamp =~ /^[0-9]+\-[0-9]+\-[0-9]+T[0-9]+\:[0-9]+\:[0-9\.]+[\-\+][0-9]+/ )
+					{
+						# get the number of hours
+						my $hours = $timestamp;
+						$hours =~ s/.*[\-\+]//g;
+						$hours =~ s/^0//;
+						$hours =~ s/[0-9][0-9]$//;
+
+						# get the number of minutes
+						my $minutes = $timestamp;
+						$minutes =~ s/.*[\-\+]//g;
+						$minutes =~ s/^[0-9][0-9]//;
+
+						my $second_diff = ( $minutes * 60 ) + ( $hours * 60 * 60 );
+
+						if ( $timestamp =~ /\+/ ) {
+							$current_till = $till + $second_diff;
+						}
+						else {
+							$current_till = $till - $second_diff;
+						}
+					}
+					$timestamp =~ s/\..*$//;
+					my $t = Time::Piece->strptime( $timestamp, '%Y-%m-%dT%H:%M:%S' );
+
+					# stop process further lines as we've hit the oldest we care about
+					if ( $t->epoch <= $current_till ) {
+						$process_it = 0;
+					}
+
+					# process found alerts
+					if ( defined( $json->{event_type} )
+						&& $json->{event_type} eq 'alert' )
+					{
+						my $add_it = 0;
+
+						if ( defined( $rule_keys[0] ) ) {
+							foreach my $rule_key (@rule_keys) {
+								if ( ref( $opts{rules}{$rule_key} ) eq "HASH" ) {
+									my $rule = $opts{rules}{$rule_key};
+								}
+							}
+						}
+						else {
+							$add_it = 1;
+						}
+
+						if ($add_it) {
+
+							# put the event ID together
+							my $event_id
+								= sha256_base64(
+								$item->{instance} . $host . $json->{timestamp} . $json->{flow_id} . $json->{in_iface} );
+							if ( $item->{type} eq 'suricata' ) {
+								push( @suricata_alert_ids, $event_id );
+							}
+							elsif ( $item->{type} eq 'sagan' ) {
+								push( @sagan_alert_ids, $event_id );
+							}
+						}
+					}
+
+					# get the next line
+					$line = $bw->readline;
+
+				}
+			}
+			if ($@) {
+				$to_return->{error} = '2';
+				if ( $to_return->{errorString} ne '' ) {
+					$to_return->{errorString} = $to_return->{errorString} . "\n";
+				}
+				$to_return->{errorString} = $to_return->{errorString} . $item->{instance} . ': ' . $@;
+			}
+		}
+	}
 
 =head1 AUTHOR
 
@@ -285,4 +513,4 @@ This is free software, licensed under:
 
 =cut
 
-1;    # End of Lilith
+	1;    # End of Lilith

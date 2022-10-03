@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Getopt::Long;
 use Lilith;
-use TOML qw(from_toml);
+use TOML        qw(from_toml);
 use File::Slurp qw(read_file);
 
 sub version {
@@ -25,7 +25,8 @@ sub help {
 my $help        = 0;
 my $version     = 0;
 my $config_file = '/usr/local/etc/lilith.toml';
-my $create_table;
+my $rules_file  = '/usr/local/etc/lilith_rules.toml';
+my $action;
 Getopt::Long::Configure('no_ignore_case');
 Getopt::Long::Configure('bundling');
 GetOptions(
@@ -34,7 +35,8 @@ GetOptions(
 	'help'    => \$help,
 	'h'       => \$help,
 	'c=s'     => \$config_file,
-	'ct'      => \$create_table,
+	'r=s'     => \$rules_file,
+	'a=s'     => \$action,
 );
 
 # print version or help if requested
@@ -62,14 +64,14 @@ unless ($toml) {
 }
 
 # create the tables if requested
-if ($create_table) {
-	Lilith->create_table(
-						 dsn=>$toml->{dsn},
-						 sagan=>$toml->{sagan},
-						 suricata=>$toml->{suricata},
-						 user=>$toml->{user},
-						 pass=>$toml->{pass},
-						 );
+if ( $action eq 'create_tables' ) {
+	Lilith->create_tables(
+		dsn      => $toml->{dsn},
+		sagan    => $toml->{sagan},
+		suricata => $toml->{suricata},
+		user     => $toml->{user},
+		pass     => $toml->{pass},
+	);
 	exit;
 }
 
@@ -77,21 +79,50 @@ my %files;
 my @toml_keys = keys( %{$toml} );
 my $int       = 0;
 while ( defined( $toml_keys[$int] ) ) {
-        my $item = $toml_keys[$int];
+	my $item = $toml_keys[$int];
 
-        if ( ref( $toml->{$item} ) eq "HASH" ) {
-                # add the file in question
-                $files{$item} = $toml->{$item};
-        }
+	if ( ref( $toml->{$item} ) eq "HASH" ) {
 
-        $int++;
+		# add the file in question
+		$files{$item} = $toml->{$item};
+	}
+
+	$int++;
 }
 
-Lilith->run(
-			dsn=>$toml->{dsn},
-			sagan=>$toml->{sagan},
-			suricata=>$toml->{suricata},
-			user=>$toml->{user},
-			pass=>$toml->{pass},
-			files=>\%files,
-			);
+if ( $action eq 'run' ) {
+	Lilith->run(
+		dsn      => $toml->{dsn},
+		sagan    => $toml->{sagan},
+		suricata => $toml->{suricata},
+		user     => $toml->{user},
+		pass     => $toml->{pass},
+		files    => \%files,
+	);
+}
+
+# default to a empty rule set if the file does not exist
+my $rules_toml = {};
+if ( !-f $rules_file ) {
+
+	# read the rule toml in or die
+	my $rule_toml_raw = read_file($rules_file) or die 'Failed to read "' . $rules_file . '"';
+
+	# read the specified rules
+	my ( $rules_toml, $rule_err ) = from_toml($rule_toml_raw);
+	unless ($rules_toml) {
+		die "Error parsing toml,'" . $rules_file . "'" . $rule_err;
+	}
+}
+
+if ( $action eq 'extend' ) {
+	Lilith->extend(
+		dsn      => $toml->{dsn},
+		sagan    => $toml->{sagan},
+		suricata => $toml->{suricata},
+		user     => $toml->{user},
+		pass     => $toml->{pass},
+		files    => \%files,
+		rules    => $rules_toml,
+	);
+}

@@ -22,6 +22,12 @@ my %WriteMakefileArgs = (
 		'TOML'                   => '0.97',
 		'DBI'                    => '1.643',
 		'JSON'                   => '4.06',
+		'File::ReadBackwards'    => '0',
+		'Digest::SHA'            => '0',
+		'POE'                    => '0',
+		'Sys::Hostname'          => '0',
+		'File::Slurp'            => '0',
+
 	},
 	dist       => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
 	clean      => { FILES    => 'Lilith-*' },
