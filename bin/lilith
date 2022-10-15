@@ -107,6 +107,12 @@ my $desc;
 my $desc_like;
 my $ip;
 my $port;
+my $go_back_minutes = 5;
+my $in_iface;
+my $in_iface_like;
+my $proto;
+my $app_proto;
+my $app_proto_like;
 Getopt::Long::Configure('no_ignore_case');
 Getopt::Long::Configure('bundling');
 GetOptions(
@@ -133,6 +139,13 @@ GetOptions(
 	'dl'      => \$desc_like,
 	'ip=s'    => \$ip,
 	'p=s'     => \$port,
+		   'm=s'     => \$go_back_minutes,
+		   'if=s' =>\$in_iface,
+		   'il' =>\$in_iface_like,
+		   'proto=s' =>\$proto,
+		   'ap=s'=>\$app_proto,
+		   'apl'=>\$app_proto_like,
+
 );
 
 # print version or help if requested
