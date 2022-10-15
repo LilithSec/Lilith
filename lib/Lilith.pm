@@ -434,18 +434,30 @@ sub search {
 
 	if ( defined( $opts{host} ) ) {
 		push( @sql_args, $opts{host} );
-		if (defined($opts{host_like}) && $opts{host_like}) {
+		if ( defined( $opts{host_like} ) && $opts{host_like} ) {
 			$sql = $sql . ' and host like ?';
-		}else {
+		}
+		else {
 			$sql = $sql . ' and host = ?';
+		}
+	}
+
+	if ( defined( $opts{instance_host} ) ) {
+		push( @sql_args, $opts{instance_host} );
+		if ( defined( $opts{host_like} ) && $opts{instance_host_like} ) {
+			$sql = $sql . ' and instance_host like ?';
+		}
+		else {
+			$sql = $sql . ' and instance_host = ?';
 		}
 	}
 
 	if ( defined( $opts{in_iface_like} ) ) {
 		push( @sql_args, $opts{in_iface} );
-		if (defined($opts{in_iface_like}) && $opts{in_iface_like}) {
+		if ( defined( $opts{in_iface_like} ) && $opts{in_iface_like} ) {
 			$sql = $sql . ' and in_iface like ?';
-		}else {
+		}
+		else {
 			$sql = $sql . ' and in_iface = ?';
 		}
 	}
@@ -457,53 +469,52 @@ sub search {
 
 	if ( defined( $opts{app_proto} ) ) {
 		push( @sql_args, $opts{app_proto} );
-		if (defined($opts{app_proto_like}) && $opts{app_proto_like}) {
+		if ( defined( $opts{app_proto_like} ) && $opts{app_proto_like} ) {
 			$sql = $sql . ' and app_proto like ?';
-		}else {
+		}
+		else {
 			$sql = $sql . ' and app_proto = ?';
 		}
 	}
 
 	if ( defined( $opts{instance} ) ) {
-		my $column='host';
-		if ($opts{table} eq 'sagan') {
-			$column='instance_host';
-		}
-
 		push( @sql_args, $opts{instance} );
-		if (defined($opts{instance_like}) && $opts{instance_like}) {
-			$sql = $sql . ' and '.$column.' like ?';
-		}else {
-			$sql = $sql . ' and '.$column.' = ?';
+		if ( defined( $opts{instance_like} ) && $opts{instance_like} ) {
+			$sql = $sql . ' and instance like ?';
+		}
+		else {
+			$sql = $sql . ' and instance = ?';
 		}
 	}
 
 	if ( defined( $opts{class} ) ) {
 		push( @sql_args, $opts{class} );
-		if (defined($opts{class_like}) && $opts{class_like}) {
+		if ( defined( $opts{class_like} ) && $opts{class_like} ) {
 			$sql = $sql . ' and class like ?';
-		}else {
+		}
+		else {
 			$sql = $sql . ' and class = ?';
 		}
 	}
 
 	if ( defined( $opts{desc} ) ) {
 		push( @sql_args, $opts{desc} );
-		if (defined($opts{desc_like}) && $opts{desc_like}) {
+		if ( defined( $opts{desc_like} ) && $opts{desc_like} ) {
 			$sql = $sql . ' and desc like ?';
-		}else {
+		}
+		else {
 			$sql = $sql . ' and desc = ?';
 		}
 	}
 
 	$sql = $sql . ';';
 
-	my $sth = $dbh->prepare( $sql );
+	my $sth = $dbh->prepare($sql);
 	$sth->execute(@sql_args);
 
-	my $found=();
-	while (my $row = $sth->fetchrow_hashref) {
-		push(@{$found}, $row);
+	my $found = ();
+	while ( my $row = $sth->fetchrow_hashref ) {
+		push( @{$found}, $row );
 	}
 
 	return $found;

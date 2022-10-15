@@ -99,6 +99,8 @@ my $alert_id;
 my $table = 'suricata';
 my $host;
 my $host_like;
+my $instance_host;
+my $instance_host_like;
 my $instance;
 my $instance_like;
 my $class;
@@ -131,6 +133,8 @@ GetOptions(
 	't=s'     => \$table,
 	'h=s'     => \$host,
 	'hl'      => \$host_like,
+	'ihl'     => \$instance_host_like,
+	'ih=s'    => \$instance_host,
 	'i=s'     => \$instance,
 	'il'      => \$instance_like,
 	'C=s'     => \$class,
@@ -139,12 +143,12 @@ GetOptions(
 	'dl'      => \$desc_like,
 	'ip=s'    => \$ip,
 	'p=s'     => \$port,
-		   'm=s'     => \$go_back_minutes,
-		   'if=s' =>\$in_iface,
-		   'il' =>\$in_iface_like,
-		   'proto=s' =>\$proto,
-		   'ap=s'=>\$app_proto,
-		   'apl'=>\$app_proto_like,
+	'm=s'     => \$go_back_minutes,
+	'if=s'    => \$in_iface,
+	'il'      => \$in_iface_like,
+	'proto=s' => \$proto,
+	'ap=s'    => \$app_proto,
+	'apl'     => \$app_proto_like,
 
 );
 
