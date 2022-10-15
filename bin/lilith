@@ -217,7 +217,7 @@ while ( defined( $toml_keys[$int] ) ) {
 
 # default to a empty rule set if the file does not exist
 my $rules_toml = {};
-if ( !-f $rules_file ) {
+if ( -f $rules_file ) {
 
 	# read the rule toml in or die
 	my $rule_toml_raw = read_file($rules_file) or die 'Failed to read "' . $rules_file . '"';
