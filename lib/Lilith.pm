@@ -333,132 +333,27 @@ sub extend {
 	my @suricata_alert_ids;
 	my @sagan_alert_ids;
 
-	# process each file
-	my $file_count = 0;
-	foreach my $item_key ( keys( %{ $opts{files} } ) ) {
-		my $item = $opts{files}->{$item_key};
-		if ( !defined( $item->{instance} ) ) {
-			warn( 'No instance name specified for ' . $item_key . ' so using that as the instance name' );
-			$item->{instance} = $item_key;
-		}
+}
 
-		eval {
-			# make sure we have a eve and type specified
-			if ( !defined( $item->{type} ) ) {
-				die( 'No type specified for ' . $item->{instance} );
-			}
-			if ( !defined( $item->{eve} ) ) {
-				die( 'No file specified for ' . $item->{instance} );
-			}
+=head2 search
 
-			# ends processing for this file
-			my $process_it = 1;
+=cut
 
-			# open the file for reading it backwards
-			my $bw;
-			eval {
-				$bw = File::ReadBackwards->new( $item->{eve} )
-					or die( 'Can not read "' . $item->{eve} . '"... ' . $! );
-			};
-			if ($@) {
-				$to_return->{error} = '2';
-				if ( $to_return->{errorString} ne '' ) {
-					$to_return->{errorString} = $to_return->{errorString} . "\n";
-				}
-				$to_return->{errorString} = $to_return->{errorString} . $item->{instance} . ': ' . $@;
-			}
+sub search {
+	my ( $blank, %opts ) = @_;
 
-			# get the first line, if possible
-			my $line;
-			my $current_till;
-			if ($process_it) {
-				$line = $bw->readline;
-			}
-			while ( $process_it
-				&& defined($line) )
-			{
-				eval {
-					my $json      = decode_json($line);
-					my $timestamp = $json->{timestamp};
-
-					if (  !defined($current_till)
-						&& defined($timestamp)
-						&& $timestamp =~ /^[0-9]+\-[0-9]+\-[0-9]+T[0-9]+\:[0-9]+\:[0-9\.]+[\-\+][0-9]+/ )
-					{
-						# get the number of hours
-						my $hours = $timestamp;
-						$hours =~ s/.*[\-\+]//g;
-						$hours =~ s/^0//;
-						$hours =~ s/[0-9][0-9]$//;
-
-						# get the number of minutes
-						my $minutes = $timestamp;
-						$minutes =~ s/.*[\-\+]//g;
-						$minutes =~ s/^[0-9][0-9]//;
-
-						my $second_diff = ( $minutes * 60 ) + ( $hours * 60 * 60 );
-
-						if ( $timestamp =~ /\+/ ) {
-							$current_till = $till + $second_diff;
-						}
-						else {
-							$current_till = $till - $second_diff;
-						}
-					}
-					$timestamp =~ s/\..*$//;
-					my $t = Time::Piece->strptime( $timestamp, '%Y-%m-%dT%H:%M:%S' );
-
-					# stop process further lines as we've hit the oldest we care about
-					if ( $t->epoch <= $current_till ) {
-						$process_it = 0;
-					}
-
-					# process found alerts
-					if ( defined( $json->{event_type} )
-						&& $json->{event_type} eq 'alert' )
-					{
-						my $add_it = 0;
-
-						if ( defined( $rule_keys[0] ) ) {
-							foreach my $rule_key (@rule_keys) {
-								if ( ref( $opts{rules}{$rule_key} ) eq "HASH" ) {
-									my $rule = $opts{rules}{$rule_key};
-								}
-							}
-						}
-						else {
-							$add_it = 1;
-						}
-
-						if ($add_it) {
-
-							# put the event ID together
-							my $event_id
-								= sha256_base64(
-								$item->{instance} . $host . $json->{timestamp} . $json->{flow_id} . $json->{in_iface} );
-							if ( $item->{type} eq 'suricata' ) {
-								push( @suricata_alert_ids, $event_id );
-							}
-							elsif ( $item->{type} eq 'sagan' ) {
-								push( @sagan_alert_ids, $event_id );
-							}
-						}
-					}
-
-					# get the next line
-					$line = $bw->readline;
-
-				}
-			}
-			if ($@) {
-				$to_return->{error} = '2';
-				if ( $to_return->{errorString} ne '' ) {
-					$to_return->{errorString} = $to_return->{errorString} . "\n";
-				}
-				$to_return->{errorString} = $to_return->{errorString} . $item->{instance} . ': ' . $@;
-			}
-		}
+	if ( !defined( $opts{max_age} ) ) {
+		$opts{max_age} = 300;
 	}
+
+	my @rule_keys = keys( %{ $opts{rules} } );
+
+	my $host = hostname;
+
+	my $dbh = DBI->connect_cached( $opts{dsn}, $opts{user}, $opts{pass} );
+
+	
+}
 
 =head1 AUTHOR
 
@@ -513,4 +408,4 @@ This is free software, licensed under:
 
 =cut
 
-	1;    # End of Lilith
+1;    # End of Lilith
