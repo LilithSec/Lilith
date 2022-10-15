@@ -182,18 +182,18 @@ sub run {
 										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );'
 									);
 								$sth->execute(
-									$_[HEAP]{instance},            $_[HEAP]{host},
-									$json->{timestamp},            $json->{flow_id},
-									,                              $event_id,
-									$json->{in_iface},             $json->{src_ip},
-									$json->{src_port},             $json->{dest_ip},
-									$json->{dest_port},            $json->{proto},
-									$json->{app_proto},            $json->{flow}{pkts_toserver},
-									$json->{flow}{bytes_toserver}, $json->{flow}{pkts_toclient},
-									$json->{flow}{bytes_toclient}, $json->{flow}{start},
-									$json->{alert}{category},      $json->{alert}{signature},
-									$json->{alert}{gid},           $json->{alert}{signature_id},
-									$json->{alert}{rev},           $_[ARG0]
+									$_[HEAP]{instance},           $_[HEAP]{host},
+									$json->{timestamp},           $json->{flow_id},
+									$event_id,                    $json->{in_iface},
+									$json->{src_ip},              $json->{src_port},
+									$json->{dest_ip},             $json->{dest_port},
+									$json->{proto},               $json->{app_proto},
+									$json->{flow}{pkts_toserver}, $json->{flow}{bytes_toserver},
+									$json->{flow}{pkts_toclient}, $json->{flow}{bytes_toclient},
+									$json->{flow}{start},         $json->{alert}{category},
+									$json->{alert}{signature},    $json->{alert}{gid},
+									$json->{alert}{signature_id}, $json->{alert}{rev},
+									$_[ARG0]
 								);
 							}
 
