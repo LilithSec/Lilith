@@ -186,15 +186,17 @@ unless ($toml) {
 	die "Error parsing toml,'" . $config_file . "'" . $err;
 }
 
+my $lilith=Lilith->new(
+					   dsn      => $toml->{dsn},
+					   sagan    => $toml->{sagan},
+					   suricata => $toml->{suricata},
+					   user     => $toml->{user},
+					   pass     => $toml->{pass},
+					   );
+
 # create the tables if requested
 if ( $action eq 'create_tables' ) {
-	Lilith->create_tables(
-		dsn      => $toml->{dsn},
-		sagan    => $toml->{sagan},
-		suricata => $toml->{suricata},
-		user     => $toml->{user},
-		pass     => $toml->{pass},
-	);
+	$lilith->create_tables();
 	exit;
 }
 
@@ -226,14 +228,6 @@ if ( !-f $rules_file ) {
 		die "Error parsing toml,'" . $rules_file . "'" . $rule_err;
 	}
 }
-
-my $lilith=Lilith->new(
-					   dsn      => $toml->{dsn},
-					   sagan    => $toml->{sagan},
-					   suricata => $toml->{suricata},
-					   user     => $toml->{user},
-					   pass     => $toml->{pass},
-					   );
 
 if ( $action eq 'run' ) {
 	$lilith->run(
