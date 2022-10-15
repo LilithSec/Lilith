@@ -16,11 +16,11 @@ sub help {
 
 	print '
 
--c <ini>     Config INI file.
-             Default :: /usr/local/etc/lilith.ini
+--config <ini>     Config INI file.
+                   Default :: /usr/local/etc/lilith.ini
 
--a <action>  Action to perform.
-             Default :: search
+-a <action>        Action to perform.
+                   Default :: search
 
 Action :: run
 Description :: Runs the ingestion loop.
@@ -105,8 +105,8 @@ my $instance;
 my $instance_like;
 my $class;
 my $class_like;
-my $desc;
-my $desc_like;
+my $signature;
+my $signature_like;
 my $ip;
 my $port;
 my $go_back_minutes = 5;
@@ -115,40 +115,46 @@ my $in_iface_like;
 my $proto;
 my $app_proto;
 my $app_proto_like;
+my $gid;
+my $sid;
+my $rev;
 Getopt::Long::Configure('no_ignore_case');
 Getopt::Long::Configure('bundling');
 GetOptions(
-	'version' => \$version,
-	'v'       => \$version,
-	'help'    => \$help,
-	'h'       => \$help,
-	'c=s'     => \$config_file,
-	'r=s'     => \$rules_file,
-	'a=s'     => \$action,
-	'si=s'    => \$src_ip,
-	'sp=s'    => \$src_port,
-	'di=s'    => \$dst_ip,
-	'dp=s'    => \$dst_port,
-	'id=s'    => \$alert_id,
-	't=s'     => \$table,
-	'h=s'     => \$host,
-	'hl'      => \$host_like,
-	'ihl'     => \$instance_host_like,
-	'ih=s'    => \$instance_host,
-	'i=s'     => \$instance,
-	'il'      => \$instance_like,
-	'C=s'     => \$class,
-	'Cl'      => \$class_like,
-	'd=s'     => \$desc,
-	'dl'      => \$desc_like,
-	'ip=s'    => \$ip,
-	'p=s'     => \$port,
-	'm=s'     => \$go_back_minutes,
-	'if=s'    => \$in_iface,
-	'il'      => \$in_iface_like,
-	'proto=s' => \$proto,
-	'ap=s'    => \$app_proto,
-	'apl'     => \$app_proto_like,
+	'version'  => \$version,
+	'v'        => \$version,
+	'help'     => \$help,
+	'h'        => \$help,
+	'config=s' => \$config_file,
+	'r=s'      => \$rules_file,
+	'a=s'      => \$action,
+	'si=s'     => \$src_ip,
+	'sp=s'     => \$src_port,
+	'di=s'     => \$dst_ip,
+	'dp=s'     => \$dst_port,
+	'id=s'     => \$alert_id,
+	't=s'      => \$table,
+	'h=s'      => \$host,
+	'hl'       => \$host_like,
+	'ihl'      => \$instance_host_like,
+	'ih=s'     => \$instance_host,
+	'i=s'      => \$instance,
+	'il'       => \$instance_like,
+	'c=s'      => \$class,
+	'cl'       => \$class_like,
+	's=s'      => \$signature,
+	'sl'       => \$signature_like,
+	'ip=s'     => \$ip,
+	'p=s'      => \$port,
+	'm=s'      => \$go_back_minutes,
+	'if=s'     => \$in_iface,
+	'il'       => \$in_iface_like,
+	'proto=s'  => \$proto,
+	'ap=s'     => \$app_proto,
+	'apl'      => \$app_proto_like,
+	'gid=s'    => \$gid,
+	'sid=s'    => \$sid,
+	'rev=s'    => \$rev,
 
 );
 
@@ -244,28 +250,36 @@ if ( $action eq 'extend' ) {
 
 if ( $action eq 'search' ) {
 	my $returned = Lilith->search(
-		dsn           => $toml->{dsn},
-		sagan         => $toml->{sagan},
-		suricata      => $toml->{suricata},
-		user          => $toml->{user},
-		pass          => $toml->{pass},
-		src_ip        => $src_ip,
-		src_port      => $src_port,
-		dst_ip        => $dst_ip,
-		ip            => $ip,
-		port          => $port,
-		alert_id      => $alert_id,
-		table         => $table,
-		host          => $host,
-		host_like     => $host_like,
-		instance      => $instance,
-		instance_like => $instance_like,
-		class         => $class,
-		class_like    => $class_like,
-		desc          => $desc,
-		desc_like     => $desc_like,
-		ip            => $ip,
-		port          => $port,
+		dsn                => $toml->{dsn},
+		sagan              => $toml->{sagan},
+		suricata           => $toml->{suricata},
+		user               => $toml->{user},
+		pass               => $toml->{pass},
+		src_ip             => $src_ip,
+		src_port           => $src_port,
+		dst_ip             => $dst_ip,
+		ip                 => $ip,
+		port               => $port,
+		alert_id           => $alert_id,
+		table              => $table,
+		host               => $host,
+		host_like          => $host_like,
+		instance_host      => $instance_host,
+		instance_host_like => $instance_host_like,
+		instance           => $instance,
+		instance_like      => $instance_like,
+		class              => $class,
+		class_like         => $class_like,
+		signature          => $signature,
+		signature_like     => $signature_like,
+		ip                 => $ip,
+		port               => $port,
+		app_proto          => $app_proto,
+		app_proto_like     => $app_proto_like,
+		proto              => $proto,
+		gid                => $gid,
+		sid                => $sid,
+		rev                => $rev,
 	);
 	print $returned;
 }

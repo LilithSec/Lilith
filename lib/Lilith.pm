@@ -30,13 +30,22 @@ our $VERSION = '0.0.1';
         die "Error parsing toml,'" . $config_file . "'" . $err;
     }
 
-     Lilith->create_table(
-                          dsn=>$toml->{dsn},
-                          sagan=>$toml->{sagan},
-                          suricata=>$toml->{suricata},
-                          user=>$toml->{user},
-                          pass=>$toml->{pass},
-                         );
+     my $lilith=Lilith->new(
+                            dsn=>$toml->{dsn},
+                            sagan=>$toml->{sagan},
+                            suricata=>$toml->{suricata},
+                            user=>$toml->{user},
+                            pass=>$toml->{pass},
+                           );
+
+
+     $lilith->create_table(
+                           dsn=>$toml->{dsn},
+                           sagan=>$toml->{sagan},
+                           suricata=>$toml->{suricata},
+                           user=>$toml->{user},
+                           pass=>$toml->{pass},
+                          );
 
     my %files;
     my @toml_keys = keys( %{$toml} );
@@ -52,33 +61,27 @@ our $VERSION = '0.0.1';
         $int++;
     }
 
-    Lilith->run(
-                dsn=>$toml->{dsn},
-                sagan=>$toml->{sagan},
-                suricata=>$toml->{suricata},
-                user=>$toml->{user},
-                pass=>$toml->{pass},
+    $ilith->run(
                 files=>\%files,
                );
 
 =head1 FUNCTIONS
 
-=head2 run
+=head1 new
 
-Start processing.
+Initiates it.
 
-    Lilith->run(
-                dsn=>$toml->{dsn},
-                sagan=>$toml->{sagan},
-                suricata=>$toml->{suricata},
-                user=>$toml->{user},
-                pass=>$toml->{pass},
-                files=>\%files,
-               );
+    my $lilith=Lilith->run(
+                           dsn=>$toml->{dsn},
+                           sagan=>$toml->{sagan},
+                           suricata=>$toml->{suricata},
+                           user=>$toml->{user},
+                           pass=>$toml->{pass},
+                          );
 
 =cut
 
-sub run {
+sub new{
 	my ( $blank, %opts ) = @_;
 
 	if ( !defined( $opts{dsn} ) ) {
@@ -97,7 +100,32 @@ sub run {
 		$opts{suricata} = 'suricata_alerts';
 	}
 
-	my $dbh = DBI->connect_cached( $opts{dsn}, $opts{user}, $opts{pass} );
+	my $self={
+			  dsn=>$opts{dsn},
+			  user=>$opts{user},
+			  pass=>$opts{pass},
+			  sagan=>$opts{sagan},
+			  suricata=>$opts{suricata},
+			  };
+	bless $self;
+
+	return $self;
+}
+
+=head2 run
+
+Start processing.
+
+    $lilith->run(
+                 files=>\%files,
+                );
+
+=cut
+
+sub run {
+	my ( $self, %opts ) = @_;
+
+	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} );
 
 	# process each file
 	my $file_count = 0;
@@ -150,8 +178,9 @@ sub run {
 								my $sth
 									= $_[HEAP]{dbh}->prepare( 'insert into '
 										. $_[HEAP]{suricata}
-										. ' ( instance, host, timestamp, flow_id, event_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, app_proto, flow_pkts_toserver, flow_bytes_toserver, flow_pkts_toclient, flow_bytes_toclient, flow_start, raw ) '
-										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);' );
+										. ' ( instance, host, timestamp, flow_id, event_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, app_proto, flow_pkts_toserver, flow_bytes_toserver, flow_pkts_toclient, flow_bytes_toclient, flow_start, classification, signature, gid, sid, rev, raw ) '
+										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );'
+									);
 								$sth->execute(
 									$_[HEAP]{instance},           $_[HEAP]{host},
 									$json->{timestamp},           $event_id,
@@ -161,7 +190,10 @@ sub run {
 									$json->{proto},               $json->{app_proto},
 									$json->{flow}{pkts_toserver}, $json->{flow}{bytes_toserver},
 									$json->{flow}{pkts_toclient}, $json->{flow}{bytes_toclient},
-									$json->{flow}{start},         $_[ARG0]
+									$json->{flow}{start},         $json->{alert}{category},
+									$json->{alert}{signature},    $json->{alert}{gid},
+									$json->{alert}{signature_id}, $json->{alert}{rev},
+									$_[ARG0]
 								);
 							}
 
@@ -170,14 +202,23 @@ sub run {
 								my $sth
 									= $dbh->prepare( 'insert into '
 										. $_[HEAP]{sagan}
-										. ' ( instance, instance_host, timestamp, event_id, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, facility, host, level, priority, program, proto, xff, stream, raw) '
-										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );' );
+										. ' ( instance, instance_host, timestamp, event_id, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, facility, host, level, priority, program, proto, xff, stream, classification, signature, gid, sid, rev, raw) '
+										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );'
+									);
 								$sth->execute(
-									$_[HEAP]{instance}, $_[HEAP]{host},     $json->{timestamp}, $event_id,
-									$json->{flow_id},   $json->{in_iface},  $json->{src_ip},    $json->{src_port},
-									$json->{dest_ip},   $json->{dest_port}, $json->{proto},     $json->{facility},
-									$json->{host},      $json->{level},     $json->{priority},  $json->{program},
-									$json->{proto},     $json->{xff},       $json->{stream},    $_[ARG0],
+									$_[HEAP]{instance},           $_[HEAP]{host},
+									$json->{timestamp},           $event_id,
+									$json->{flow_id},             $json->{in_iface},
+									$json->{src_ip},              $json->{src_port},
+									$json->{dest_ip},             $json->{dest_port},
+									$json->{proto},               $json->{facility},
+									$json->{host},                $json->{level},
+									$json->{priority},            $json->{program},
+									$json->{proto},               $json->{xff},
+									$json->{stream},              $json->{alert}{category},
+									$json->{alert}{signature},    $json->{alert}{gid},
+									$json->{alert}{signature_id}, $json->{alert}{rev},
+									$_[ARG0],
 								);
 							}
 						}
@@ -191,8 +232,8 @@ sub run {
 			heap => {
 				eve      => $item->{eve},
 				type     => $item->{type},
-				suricata => $opts{suricata},
-				sagan    => $opts{sagan},
+				suricata => $self->{suricata},
+				sagan    => $self->{sagan},
 				dbh      => $dbh,
 				host     => hostname,
 				instance => $item->{instance},
@@ -208,40 +249,24 @@ sub run {
 
 Just creates the required tables in the DB.
 
-     Lilith->create_tables(
-                          dsn=>$toml->{dsn},
-                          sagan=>$toml->{sagan},
-                          suricata=>$toml->{suricata},
-                          user=>$toml->{user},
-                          pass=>$toml->{pass},
-                         );
+     $lilith->create_tables(
+                            dsn=>$toml->{dsn},
+                            sagan=>$toml->{sagan},
+                            suricata=>$toml->{suricata},
+                            user=>$toml->{user},
+                            pass=>$toml->{pass},
+                           );
 
 =cut
 
 sub create_tables {
-	my ( $blank, %opts ) = @_;
+	my ( $self, %opts ) = @_;
 
-	if ( !defined( $opts{dsn} ) ) {
-		die('"dsn" is not defined');
-	}
-
-	if ( !defined( $opts{user} ) ) {
-		$opts{user} = 'lilith';
-	}
-
-	if ( !defined( $opts{sagan} ) ) {
-		$opts{sagan} = 'sagan_alerts';
-	}
-
-	if ( !defined( $opts{suricata} ) ) {
-		$opts{suricata} = 'suricata_alerts';
-	}
-
-	my $dbh = DBI->connect_cached( $opts{dsn}, $opts{user}, $opts{pass} );
+	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} );
 
 	my $sth
 		= $dbh->prepare( 'create table '
-			. $opts{suricata} . ' ('
+			. $self->{suricata} . ' ('
 			. 'id bigserial NOT NULL, '
 			. 'instance varchar(255),'
 			. 'host varchar(255),'
@@ -260,13 +285,18 @@ sub create_tables {
 			. 'flow_pkts_toclient integer, '
 			. 'flow_bytes_toclient integer, '
 			. 'flow_start TIMESTAMP WITH TIME ZONE, '
+			. 'classification varchar(1024), '
+			. 'signature varchar(2048),'
+			. 'gid int, '
+			. 'sid bigint, '
+			. 'rev bigint, '
 			. 'raw json NOT NULL, '
 			. 'PRIMARY KEY(id) );' );
 	$sth->execute();
 
 	$sth
 		= $dbh->prepare( 'create table '
-			. $opts{sagan} . ' ('
+			. $self->{sagan} . ' ('
 			. 'id bigserial NOT NULL, '
 			. 'instance varchar(255), '
 			. 'instance_host varchar(255), '
@@ -286,6 +316,11 @@ sub create_tables {
 			. 'program varchar(255), '
 			. 'xff inet, '
 			. 'stream bigint, '
+			. 'classification varchar(1024), '
+			. 'signature varchar(2048),'
+			. 'gid int, '
+			. 'sid bigint, '
+			. 'rev bigint, '
 			. 'raw json NOT NULL, '
 			. 'PRIMARY KEY(id) );' );
 	$sth->execute();
@@ -293,23 +328,17 @@ sub create_tables {
 
 =head2 extend
 
-	Lilith->extend(
-		dsn      => $toml->{dsn},
-		sagan    => $toml->{sagan},
-		suricata => $toml->{suricata},
-		user     => $toml->{user},
-		pass     => $toml->{pass},
-		files    => \%files,
-		rules    => $rules_toml,
-	);
+	my $return=$lilith->extend(
+		                       max_age=>5,
+	                          );
 
 =cut
 
 sub extend {
-	my ( $blank, %opts ) = @_;
+	my ( $self, %opts ) = @_;
 
 	if ( !defined( $opts{max_age} ) ) {
-		$opts{max_age} = 300;
+		$opts{max_age} = 5;
 	}
 
 	my @rule_keys = keys( %{ $opts{rules} } );
@@ -340,11 +369,7 @@ sub extend {
 =cut
 
 sub search {
-	my ( $blank, %opts ) = @_;
-
-	if ( !defined( $opts{max_age} ) ) {
-		$opts{max_age} = 300;
-	}
+	my ( $self, %opts ) = @_;
 
 	if ( !defined( $opts{table} ) ) {
 		$opts{table} = 'suricata';
@@ -353,10 +378,6 @@ sub search {
 		if ( $opts{table} ne 'suricata' && $opts{table} ne 'sagan' ) {
 			die( '"' . $opts{table} . '" is not a known table type' );
 		}
-	}
-
-	if ( !defined( $opts{user} ) ) {
-		$opts{user} = 'lilith';
 	}
 
 	if ( !defined( $opts{go_back_minutes} ) ) {
@@ -368,24 +389,16 @@ sub search {
 		}
 	}
 
-	if ( !defined( $opts{sagan} ) ) {
-		$opts{sagan} = 'sagan_alerts';
-	}
-
-	if ( !defined( $opts{suricata} ) ) {
-		$opts{suricata} = 'suricata_alerts';
-	}
-
-	my $table = $opts{suricata};
+	my $table = $self->{suricata};
 	if ( $opts{table} eq 'sagan' ) {
-		$table = $opts{sagan};
+		$table = $self->{sagan};
 	}
 
 	my @rule_keys = keys( %{ $opts{rules} } );
 
 	my $host = hostname;
 
-	my $dbh = DBI->connect_cached( $opts{dsn}, $opts{user}, $opts{pass} );
+	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} );
 
 	my @sql_args;
 	my $sql
@@ -490,20 +503,140 @@ sub search {
 	if ( defined( $opts{class} ) ) {
 		push( @sql_args, $opts{class} );
 		if ( defined( $opts{class_like} ) && $opts{class_like} ) {
-			$sql = $sql . ' and class like ?';
+			$sql = $sql . ' and classification like ?';
 		}
 		else {
-			$sql = $sql . ' and class = ?';
+			$sql = $sql . ' and classification = ?';
 		}
 	}
 
-	if ( defined( $opts{desc} ) ) {
-		push( @sql_args, $opts{desc} );
-		if ( defined( $opts{desc_like} ) && $opts{desc_like} ) {
-			$sql = $sql . ' and desc like ?';
+	if ( defined( $opts{signature} ) ) {
+		push( @sql_args, $opts{signature} );
+		if ( defined( $opts{signature_like} ) && $opts{signature_like} ) {
+			$sql = $sql . ' and signature like ?';
 		}
 		else {
-			$sql = $sql . ' and desc = ?';
+			$sql = $sql . ' and signature = ?';
+		}
+	}
+
+	if (defined($opts{gid})) {
+		# remove and tabs or spaces
+		$opts{gid}=~s/[\ \t]//g;
+		my @arg_split=split(/\,/, $opts{gid});
+		# process each item
+		foreach my $arg (@arg_split) {
+			# match the start of the item
+			if ($arg =~ /^[0-9]+$/) {
+				push(@sql_args, $arg);
+				$sql = $sql . ' and gid = ?';
+			}elsif ($arg =~ /^\<\=[0-9]+$/) {
+				$arg=~s/^\<\=//;
+				push(@sql_args, $arg);
+				$sql = $sql . ' and gid <= ?';
+			}elsif ($arg =~ /^\<[0-9]+$/) {
+				$arg=~s/^\<//;
+				push(@sql_args, $arg);
+				$sql = $sql . ' and gid < ?';
+			}elsif ($arg =~ /^\>\=[0-9]+$/) {
+				$arg=~s/^\>\=//;
+				push(@sql_args, $arg);
+				$sql = $sql . ' and gid >= ?';
+			}elsif ($arg =~ /^\>[0-9]+$/) {
+				$arg=~s/^\>\=//;
+				push(@sql_args, $arg);
+				$sql = $sql . ' and gid > ?';
+			}elsif ($arg =~ /^\![0-9]+$/) {
+				$arg=~s/^\!//;
+				push(@sql_args, $arg);
+				$sql = $sql . ' and gid != ?';
+			}elsif ($arg =~ /^$/) {
+				# only exists for skipping when some one has passes something starting
+				# with a ,, ending with a,, or with ,, in it.
+			}else {
+				# if we get here, it means we don't have a valid use case for what ever was passed and should error
+				die('"'.$arg.'" does not appear to be a valid item for a numeric search for the gid');
+			}
+		}
+	}
+
+	if (defined($opts{sid})) {
+		# remove and tabs or spaces
+		$opts{sid}=~s/[\ \t]//g;
+		my @arg_split=split(/\,/, $opts{sid});
+		# process each item
+		foreach my $arg (@arg_split) {
+			# match the start of the item
+			if ($arg =~ /^[0-9]+$/) {
+				push(@sql_args, $arg);
+				$sql = $sql . ' and sid = ?';
+			}elsif ($arg =~ /^\<\=[0-9]+$/) {
+				$arg=~s/^\<\=//;
+				push(@sql_args, $arg);
+				$sql = $sql . ' and sid <= ?';
+			}elsif ($arg =~ /^\<[0-9]+$/) {
+				$arg=~s/^\<//;
+				push(@sql_args, $arg);
+				$sql = $sql . ' and gid < ?';
+			}elsif ($arg =~ /^\>\=[0-9]+$/) {
+				$arg=~s/^\>\=//;
+				push(@sql_args, $arg);
+				$sql = $sql . ' and sid >= ?';
+			}elsif ($arg =~ /^\>[0-9]+$/) {
+				$arg=~s/^\>\=//;
+				push(@sql_args, $arg);
+				$sql = $sql . ' and sid > ?';
+			}elsif ($arg =~ /^\![0-9]+$/) {
+				$arg=~s/^\!//;
+				push(@sql_args, $arg);
+				$sql = $sql . ' and sid != ?';
+			}elsif ($arg =~ /^$/) {
+				# only exists for skipping when some one has passes something starting
+				# with a ,, ending with a,, or with ,, in it.
+			}else {
+				# if we get here, it means we don't have a valid use case for what ever was passed and should error
+				die('"'.$arg.'" does not appear to be a valid item for a numeric search for the sid');
+			}
+		}
+	}
+
+		if (defined($opts{sid})) {
+		# remove and tabs or spaces
+		$opts{rev}=~s/[\ \t]//g;
+		my @arg_split=split(/\,/, $opts{rev});
+		# process each item
+		foreach my $arg (@arg_split) {
+			# match the start of the item
+			if ($arg =~ /^[0-9]+$/) {
+				push(@sql_args, $arg);
+				$sql = $sql . ' and rev = ?';
+			}elsif ($arg =~ /^\<\=[0-9]+$/) {
+				$arg=~s/^\<\=//;
+				push(@sql_args, $arg);
+				$sql = $sql . ' and rev <= ?';
+			}elsif ($arg =~ /^\<[0-9]+$/) {
+				$arg=~s/^\<//;
+				push(@sql_args, $arg);
+				$sql = $sql . ' and gid < ?';
+			}elsif ($arg =~ /^\>\=[0-9]+$/) {
+				$arg=~s/^\>\=//;
+				push(@sql_args, $arg);
+				$sql = $sql . ' and rev >= ?';
+			}elsif ($arg =~ /^\>[0-9]+$/) {
+				$arg=~s/^\>\=//;
+				push(@sql_args, $arg);
+				$sql = $sql . ' and rev > ?';
+			}elsif ($arg =~ /^\![0-9]+$/) {
+				$arg=~s/^\!//;
+				push(@sql_args, $arg);
+				$sql = $sql . ' and rev != ?';
+			}elsif ($arg =~ /^$/) {
+				# only exists for skipping when some one has passes something starting
+				# with a ,, ending with a,, or with ,, in it.
+			}else {
+				# if we get here, it means we don't have a valid use case for what ever was passed and should error
+				die('"'.$arg.'" does not appear to be a valid item for a numeric search for the rev');
+			}
 		}
 	}
 
