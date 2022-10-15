@@ -227,24 +227,23 @@ if ( !-f $rules_file ) {
 	}
 }
 
+my $lilith=Lilith->new(
+					   dsn      => $toml->{dsn},
+					   sagan    => $toml->{sagan},
+					   suricata => $toml->{suricata},
+					   user     => $toml->{user},
+					   pass     => $toml->{pass},
+					   );
+
 if ( $action eq 'run' ) {
-	Lilith->run(
-		dsn      => $toml->{dsn},
-		sagan    => $toml->{sagan},
-		suricata => $toml->{suricata},
-		user     => $toml->{user},
-		pass     => $toml->{pass},
+	$lilith->run(
 		files    => \%files,
 	);
 }
 
 if ( $action eq 'extend' ) {
-	Lilith->extend(
-		dsn      => $toml->{dsn},
-		sagan    => $toml->{sagan},
-		suricata => $toml->{suricata},
-		user     => $toml->{user},
-		pass     => $toml->{pass},
+	$lilith->extend(
+
 	);
 }
 
