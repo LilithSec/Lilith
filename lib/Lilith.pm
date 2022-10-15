@@ -81,7 +81,7 @@ Initiates it.
 
 =cut
 
-sub new{
+sub new {
 	my ( $blank, %opts ) = @_;
 
 	if ( !defined( $opts{dsn} ) ) {
@@ -100,13 +100,13 @@ sub new{
 		$opts{suricata} = 'suricata_alerts';
 	}
 
-	my $self={
-			  dsn=>$opts{dsn},
-			  user=>$opts{user},
-			  pass=>$opts{pass},
-			  sagan=>$opts{sagan},
-			  suricata=>$opts{suricata},
-			  };
+	my $self = {
+		dsn      => $opts{dsn},
+		user     => $opts{user},
+		pass     => $opts{pass},
+		sagan    => $opts{sagan},
+		suricata => $opts{suricata},
+	};
 	bless $self;
 
 	return $self;
@@ -182,18 +182,18 @@ sub run {
 										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );'
 									);
 								$sth->execute(
-									$_[HEAP]{instance},           $_[HEAP]{host},
-									$json->{timestamp},           $event_id,
-									$json->{flow_id},             $json->{in_iface},
-									$json->{src_ip},              $json->{src_port},
-									$json->{dest_ip},             $json->{dest_port},
-									$json->{proto},               $json->{app_proto},
-									$json->{flow}{pkts_toserver}, $json->{flow}{bytes_toserver},
-									$json->{flow}{pkts_toclient}, $json->{flow}{bytes_toclient},
-									$json->{flow}{start},         $json->{alert}{category},
-									$json->{alert}{signature},    $json->{alert}{gid},
-									$json->{alert}{signature_id}, $json->{alert}{rev},
-									$_[ARG0]
+									$_[HEAP]{instance},            $_[HEAP]{host},
+									$json->{timestamp},            $json->{flow_id},
+									,                              $event_id,
+									$json->{in_iface},             $json->{src_ip},
+									$json->{src_port},             $json->{dest_ip},
+									$json->{dest_port},            $json->{proto},
+									$json->{app_proto},            $json->{flow}{pkts_toserver},
+									$json->{flow}{bytes_toserver}, $json->{flow}{pkts_toclient},
+									$json->{flow}{bytes_toclient}, $json->{flow}{start},
+									$json->{alert}{category},      $json->{alert}{signature},
+									$json->{alert}{gid},           $json->{alert}{signature_id},
+									$json->{alert}{rev},           $_[ARG0]
 								);
 							}
 
@@ -268,28 +268,28 @@ sub create_tables {
 		= $dbh->prepare( 'create table '
 			. $self->{suricata} . ' ('
 			. 'id bigserial NOT NULL, '
-			. 'instance varchar(255),'
-			. 'host varchar(255),'
-			. 'timestamp TIMESTAMP WITH TIME ZONE, '
-			. 'event_id varchar(64), '
-			. 'flow_id bigint, '
-			. 'in_iface varchar(255), '
-			. 'src_ip inet, '
-			. 'src_port integer, '
-			. 'dest_ip inet, '
-			. 'dest_port integer, '
-			. 'proto varchar(32), '
-			. 'app_proto varchar(255), '
-			. 'flow_pkts_toserver integer, '
-			. 'flow_bytes_toserver integer, '
-			. 'flow_pkts_toclient integer, '
-			. 'flow_bytes_toclient integer, '
+			. 'instance varchar(255) NOT NULL,'
+			. 'host varchar(255) NOT NULL,'
+			. 'timestamp TIMESTAMP WITH TIME ZONE NOT NULL, '
+			. 'event_id varchar(64) NOT NULL, '
+			. 'flow_id bigint NOT NULL, '
+			. 'in_iface varchar(255) NOT NULL, '
+			. 'src_ip inet NOT NULL, '
+			. 'src_port integer NOT NULL, '
+			. 'dest_ip inet NOT NULL, '
+			. 'dest_port integer NOT NULL, '
+			. 'proto varchar(32) NOT NULL, '
+			. 'app_proto varchar(255) NOT NULL, '
+			. 'flow_pkts_toserver integer NOT NULL, '
+			. 'flow_bytes_toserver integer NOT NULL, '
+			. 'flow_pkts_toclient integer NOT NULL, '
+			. 'flow_bytes_toclient integer NOT NULL, '
 			. 'flow_start TIMESTAMP WITH TIME ZONE, '
-			. 'classification varchar(1024), '
-			. 'signature varchar(2048),'
-			. 'gid int, '
-			. 'sid bigint, '
-			. 'rev bigint, '
+			. 'classification varchar(1024) NOT NULL, '
+			. 'signature varchar(2048) NOT NULL,'
+			. 'gid int NOT NULL, '
+			. 'sid bigint NOT NULL, '
+			. 'rev bigint NOT NULL, '
 			. 'raw json NOT NULL, '
 			. 'PRIMARY KEY(id) );' );
 	$sth->execute();
@@ -298,29 +298,29 @@ sub create_tables {
 		= $dbh->prepare( 'create table '
 			. $self->{sagan} . ' ('
 			. 'id bigserial NOT NULL, '
-			. 'instance varchar(255), '
-			. 'instance_host varchar(255), '
+			. 'instance varchar(255)  NOT NULL, '
+			. 'instance_host varchar(255)  NOT NULL, '
 			. 'timestamp TIMESTAMP WITH TIME ZONE, '
-			. 'event_id varchar(64), '
-			. 'flow_id bigint, '
-			. 'in_iface varchar(255), '
-			. 'src_ip inet, '
+			. 'event_id varchar(64) NOT NULL, '
+			. 'flow_id bigint  NOT NULL, '
+			. 'in_iface varchar(255) NOT NULL, '
+			. 'src_ip inet NOT NULL, '
 			. 'src_port integer, '
-			. 'dest_ip inet, '
+			. 'dest_ip inet NOT NULL, '
 			. 'dest_port integer, '
 			. 'proto varchar(32), '
 			. 'facility varchar(255), '
-			. 'host varchar(255), '
-			. 'level varchar(255), '
-			. 'priority varchar(255), '
-			. 'program varchar(255), '
+			. 'host varchar(255) NOT NULL, '
+			. 'level varchar(255) NOT NULL, '
+			. 'priority varchar(255) NOT NULL, '
+			. 'program varchar(255) NOT NULL, '
 			. 'xff inet, '
 			. 'stream bigint, '
-			. 'classification varchar(1024), '
-			. 'signature varchar(2048),'
-			. 'gid int, '
-			. 'sid bigint, '
-			. 'rev bigint, '
+			. 'classification varchar(1024) NOT NULL, '
+			. 'signature varchar(2048) NOT NULL,'
+			. 'gid int NOT NULL, '
+			. 'sid bigint NOT NULL, '
+			. 'rev bigint NOT NULL, '
 			. 'raw json NOT NULL, '
 			. 'PRIMARY KEY(id) );' );
 	$sth->execute();
@@ -520,122 +520,155 @@ sub search {
 		}
 	}
 
-	if (defined($opts{gid})) {
+	if ( defined( $opts{gid} ) ) {
+
 		# remove and tabs or spaces
-		$opts{gid}=~s/[\ \t]//g;
-		my @arg_split=split(/\,/, $opts{gid});
+		$opts{gid} =~ s/[\ \t]//g;
+		my @arg_split = split( /\,/, $opts{gid} );
+
 		# process each item
 		foreach my $arg (@arg_split) {
+
 			# match the start of the item
-			if ($arg =~ /^[0-9]+$/) {
-				push(@sql_args, $arg);
+			if ( $arg =~ /^[0-9]+$/ ) {
+				push( @sql_args, $arg );
 				$sql = $sql . ' and gid = ?';
-			}elsif ($arg =~ /^\<\=[0-9]+$/) {
-				$arg=~s/^\<\=//;
-				push(@sql_args, $arg);
+			}
+			elsif ( $arg =~ /^\<\=[0-9]+$/ ) {
+				$arg =~ s/^\<\=//;
+				push( @sql_args, $arg );
 				$sql = $sql . ' and gid <= ?';
-			}elsif ($arg =~ /^\<[0-9]+$/) {
-				$arg=~s/^\<//;
-				push(@sql_args, $arg);
+			}
+			elsif ( $arg =~ /^\<[0-9]+$/ ) {
+				$arg =~ s/^\<//;
+				push( @sql_args, $arg );
 				$sql = $sql . ' and gid < ?';
-			}elsif ($arg =~ /^\>\=[0-9]+$/) {
-				$arg=~s/^\>\=//;
-				push(@sql_args, $arg);
+			}
+			elsif ( $arg =~ /^\>\=[0-9]+$/ ) {
+				$arg =~ s/^\>\=//;
+				push( @sql_args, $arg );
 				$sql = $sql . ' and gid >= ?';
-			}elsif ($arg =~ /^\>[0-9]+$/) {
-				$arg=~s/^\>\=//;
-				push(@sql_args, $arg);
+			}
+			elsif ( $arg =~ /^\>[0-9]+$/ ) {
+				$arg =~ s/^\>\=//;
+				push( @sql_args, $arg );
 				$sql = $sql . ' and gid > ?';
-			}elsif ($arg =~ /^\![0-9]+$/) {
-				$arg=~s/^\!//;
-				push(@sql_args, $arg);
+			}
+			elsif ( $arg =~ /^\![0-9]+$/ ) {
+				$arg =~ s/^\!//;
+				push( @sql_args, $arg );
 				$sql = $sql . ' and gid != ?';
-			}elsif ($arg =~ /^$/) {
+			}
+			elsif ( $arg =~ /^$/ ) {
+
 				# only exists for skipping when some one has passes something starting
 				# with a ,, ending with a,, or with ,, in it.
-			}else {
+			}
+			else {
 				# if we get here, it means we don't have a valid use case for what ever was passed and should error
-				die('"'.$arg.'" does not appear to be a valid item for a numeric search for the gid');
+				die( '"' . $arg . '" does not appear to be a valid item for a numeric search for the gid' );
 			}
 		}
 	}
 
-	if (defined($opts{sid})) {
+	if ( defined( $opts{sid} ) ) {
+
 		# remove and tabs or spaces
-		$opts{sid}=~s/[\ \t]//g;
-		my @arg_split=split(/\,/, $opts{sid});
+		$opts{sid} =~ s/[\ \t]//g;
+		my @arg_split = split( /\,/, $opts{sid} );
+
 		# process each item
 		foreach my $arg (@arg_split) {
+
 			# match the start of the item
-			if ($arg =~ /^[0-9]+$/) {
-				push(@sql_args, $arg);
+			if ( $arg =~ /^[0-9]+$/ ) {
+				push( @sql_args, $arg );
 				$sql = $sql . ' and sid = ?';
-			}elsif ($arg =~ /^\<\=[0-9]+$/) {
-				$arg=~s/^\<\=//;
-				push(@sql_args, $arg);
+			}
+			elsif ( $arg =~ /^\<\=[0-9]+$/ ) {
+				$arg =~ s/^\<\=//;
+				push( @sql_args, $arg );
 				$sql = $sql . ' and sid <= ?';
-			}elsif ($arg =~ /^\<[0-9]+$/) {
-				$arg=~s/^\<//;
-				push(@sql_args, $arg);
+			}
+			elsif ( $arg =~ /^\<[0-9]+$/ ) {
+				$arg =~ s/^\<//;
+				push( @sql_args, $arg );
 				$sql = $sql . ' and gid < ?';
-			}elsif ($arg =~ /^\>\=[0-9]+$/) {
-				$arg=~s/^\>\=//;
-				push(@sql_args, $arg);
+			}
+			elsif ( $arg =~ /^\>\=[0-9]+$/ ) {
+				$arg =~ s/^\>\=//;
+				push( @sql_args, $arg );
 				$sql = $sql . ' and sid >= ?';
-			}elsif ($arg =~ /^\>[0-9]+$/) {
-				$arg=~s/^\>\=//;
-				push(@sql_args, $arg);
+			}
+			elsif ( $arg =~ /^\>[0-9]+$/ ) {
+				$arg =~ s/^\>\=//;
+				push( @sql_args, $arg );
 				$sql = $sql . ' and sid > ?';
-			}elsif ($arg =~ /^\![0-9]+$/) {
-				$arg=~s/^\!//;
-				push(@sql_args, $arg);
+			}
+			elsif ( $arg =~ /^\![0-9]+$/ ) {
+				$arg =~ s/^\!//;
+				push( @sql_args, $arg );
 				$sql = $sql . ' and sid != ?';
-			}elsif ($arg =~ /^$/) {
+			}
+			elsif ( $arg =~ /^$/ ) {
+
 				# only exists for skipping when some one has passes something starting
 				# with a ,, ending with a,, or with ,, in it.
-			}else {
+			}
+			else {
 				# if we get here, it means we don't have a valid use case for what ever was passed and should error
-				die('"'.$arg.'" does not appear to be a valid item for a numeric search for the sid');
+				die( '"' . $arg . '" does not appear to be a valid item for a numeric search for the sid' );
 			}
 		}
 	}
 
-		if (defined($opts{sid})) {
+	if ( defined( $opts{sid} ) ) {
+
 		# remove and tabs or spaces
-		$opts{rev}=~s/[\ \t]//g;
-		my @arg_split=split(/\,/, $opts{rev});
+		$opts{rev} =~ s/[\ \t]//g;
+		my @arg_split = split( /\,/, $opts{rev} );
+
 		# process each item
 		foreach my $arg (@arg_split) {
+
 			# match the start of the item
-			if ($arg =~ /^[0-9]+$/) {
-				push(@sql_args, $arg);
+			if ( $arg =~ /^[0-9]+$/ ) {
+				push( @sql_args, $arg );
 				$sql = $sql . ' and rev = ?';
-			}elsif ($arg =~ /^\<\=[0-9]+$/) {
-				$arg=~s/^\<\=//;
-				push(@sql_args, $arg);
+			}
+			elsif ( $arg =~ /^\<\=[0-9]+$/ ) {
+				$arg =~ s/^\<\=//;
+				push( @sql_args, $arg );
 				$sql = $sql . ' and rev <= ?';
-			}elsif ($arg =~ /^\<[0-9]+$/) {
-				$arg=~s/^\<//;
-				push(@sql_args, $arg);
+			}
+			elsif ( $arg =~ /^\<[0-9]+$/ ) {
+				$arg =~ s/^\<//;
+				push( @sql_args, $arg );
 				$sql = $sql . ' and gid < ?';
-			}elsif ($arg =~ /^\>\=[0-9]+$/) {
-				$arg=~s/^\>\=//;
-				push(@sql_args, $arg);
+			}
+			elsif ( $arg =~ /^\>\=[0-9]+$/ ) {
+				$arg =~ s/^\>\=//;
+				push( @sql_args, $arg );
 				$sql = $sql . ' and rev >= ?';
-			}elsif ($arg =~ /^\>[0-9]+$/) {
-				$arg=~s/^\>\=//;
-				push(@sql_args, $arg);
+			}
+			elsif ( $arg =~ /^\>[0-9]+$/ ) {
+				$arg =~ s/^\>\=//;
+				push( @sql_args, $arg );
 				$sql = $sql . ' and rev > ?';
-			}elsif ($arg =~ /^\![0-9]+$/) {
-				$arg=~s/^\!//;
-				push(@sql_args, $arg);
+			}
+			elsif ( $arg =~ /^\![0-9]+$/ ) {
+				$arg =~ s/^\!//;
+				push( @sql_args, $arg );
 				$sql = $sql . ' and rev != ?';
-			}elsif ($arg =~ /^$/) {
+			}
+			elsif ( $arg =~ /^$/ ) {
+
 				# only exists for skipping when some one has passes something starting
 				# with a ,, ending with a,, or with ,, in it.
-			}else {
+			}
+			else {
 				# if we get here, it means we don't have a valid use case for what ever was passed and should error
-				die('"'.$arg.'" does not appear to be a valid item for a numeric search for the rev');
+				die( '"' . $arg . '" does not appear to be a valid item for a numeric search for the rev' );
 			}
 		}
 	}
