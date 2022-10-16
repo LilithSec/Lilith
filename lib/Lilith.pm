@@ -106,6 +106,7 @@ sub new {
 		pass     => $opts{pass},
 		sagan    => $opts{sagan},
 		suricata => $opts{suricata},
+		debug    => $opts{debug},
 	};
 	bless $self;
 
@@ -503,35 +504,35 @@ sub search {
 		if ( defined( $opts{$item} ) ) {
 
 			# remove and tabs or spaces
-			$opts{item} =~ s/[\ \t]//g;
-			my @arg_split = split( /\,/, $opts{item} );
+			$opts{$item} =~ s/[\ \t]//g;
+			my @arg_split = split( /\,/, $opts{$item} );
 
 			# process each item
 			foreach my $arg (@arg_split) {
 
 				# match the start of the item
 				if ( $arg =~ /^[0-9]+$/ ) {
-					$sql = $sql . " and  = '" . $arg . "'";
+					$sql = $sql . " and " . $item . " = '" . $arg . "'";
 				}
 				elsif ( $arg =~ /^\<\=[0-9]+$/ ) {
 					$arg =~ s/^\<\=//;
-					$sql = $sql . " and sid <= '" . $arg . "'";
+					$sql = $sql . " and " . $item . " <= '" . $arg . "'";
 				}
 				elsif ( $arg =~ /^\<[0-9]+$/ ) {
 					$arg =~ s/^\<//;
-					$sql = $sql . " and gid < '" . $arg . "'";
+					$sql = $sql . " and " . $item . " < '" . $arg . "'";
 				}
 				elsif ( $arg =~ /^\>\=[0-9]+$/ ) {
 					$arg =~ s/^\>\=//;
-					$sql = $sql . " and sid >= '" . $arg . "'";
+					$sql = $sql . " and " . $item . " >= '" . $arg . "'";
 				}
 				elsif ( $arg =~ /^\>[0-9]+$/ ) {
 					$arg =~ s/^\>\=//;
-					$sql = $sql . " and sid > '" . $arg . "'";
+					$sql = $sql . " and " . $item . " > '" . $arg . "'";
 				}
 				elsif ( $arg =~ /^\![0-9]+$/ ) {
 					$arg =~ s/^\!//;
-					$sql = $sql . " and sid != '" . $arg . "'";
+					$sql = $sql . " and " . $item . " != '" . $arg . "'";
 				}
 				elsif ( $arg =~ /^$/ ) {
 
@@ -596,7 +597,9 @@ sub search {
 	#
 
 	$sql = $sql . ';';
-	print $sql. "\n";
+	if ( $self->{debug} ) {
+		warn( 'SQL search "' . $sql . '"' );
+	}
 	my $sth = $dbh->prepare($sql);
 	$sth->execute();
 
