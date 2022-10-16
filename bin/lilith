@@ -213,6 +213,30 @@ if ( !defined( $ENV{Lilith_IP_local_color} ) ) {
 	$ENV{Lilith_IP_local_color} = 'bright_red';
 }
 
+if ( !defined( $ENV{Lilith_timesamp_drop_micro} ) ) {
+	$ENV{Lilith_timestamp_drop_micro} = '0';
+}
+
+if ( !defined( $ENV{Lilith_timesamp_drop_offset} ) ) {
+	$ENV{Lilith_timestamp_drop_offset} = '0';
+}
+
+if ( !defined( $ENV{Lilith_instance_color} ) ) {
+	$ENV{Lilith_instance_color} = '1';
+}
+
+if ( !defined( $ENV{Lilith_instance_type_color} ) ) {
+	$ENV{Lilith_instance_type_color} = 'bright_blue';
+}
+
+if ( !defined( $ENV{Lilith_instance_slug_color} ) ) {
+	$ENV{Lilith_instance_slug_color} = 'bright_magenta';
+}
+
+if ( !defined( $ENV{Lilith_instance_loc_color} ) ) {
+	$ENV{Lilith_instance_loc_color} = 'bright_cyan';
+}
+
 if ( !defined($action) ) {
 	die('No action defined via -a');
 }
@@ -287,53 +311,9 @@ if ( $action eq 'extend' ) {
 
 if ( $action eq 'search' ) {
 
-	my $column_names = {
-		'id'                  => 'id',
-		'instance'            => 'instance',
-		'host'                => 'host',
-		'timestamp'           => 'timestamp',
-		'event_id'            => 'event_id',
-		'flow_id'             => 'flow_id',
-		'in_iface'            => 'in_iface',
-		'src_ip'              => 'src_ip',
-		'src_port'            => 'sport',
-		'dest_ip'             => 'dest_ip',
-		'dest_port'           => 'dport',
-		'proto'               => 'proto',
-		'app_proto'           => 'aproto',
-		'flow_pkts_toserver'  => 'PtS',
-		'flow_bytes_toserver' => 'BtS',
-		'flow_pkts_toclient'  => 'PtC',
-		'flow_bytes_toclient' => 'BtC',
-		'flow_start'          => 'flow_start',
-		'classification'      => 'class',
-		'signature'           => 'signature',
-		'gid'                 => 'gid',
-		'sid'                 => 'sid',
-		'rev'                 => 'rev',
-		'rule_id'             => 'rule_id',
-		'facility'            => 'facility',
-		'level'               => 'level',
-		'priority'            => 'priority',
-		'program'             => 'program',
-		'xff'                 => 'xff',
-		'stream'              => 'stream'
-	};
-
-	if ( !defined($columns) ) {
-		if ( $table eq 'suricata' ) {
-			if ( $column_set eq 'default' ) {
-				$columns
-					= 'id,instance,in_iface,src_ip,src_port,dest_ip,dest_port,proto,app_proto,signature,classification,rule_id';
-			}
-		}
-		else {
-			if ( $column_set eq 'default' ) {
-				$columns = '';
-			}
-		}
-	}
-
+	#
+	# run the search
+	#
 	my $returned = $lilith->search(
 		dsn                => $toml->{dsn},
 		sagan              => $toml->{sagan},
@@ -373,6 +353,9 @@ if ( $action eq 'search' ) {
 		go_back_minutes    => $go_back_minutes,
 	);
 
+	#
+	# assemble the selected output
+	#
 	if ( $search_output eq 'json' ) {
 		my $json = JSON->new;
 		if ($pretty) {
@@ -383,9 +366,96 @@ if ( $action eq 'search' ) {
 		if ( !$pretty ) {
 			print "\n";
 		}
+		exit 0;
 	}
 	elsif ( $search_output eq 'table' ) {
 
+		#
+		# set the columns they had not been manually specified
+		#
+		if ( !defined($columns) ) {
+			if ( $table eq 'suricata' ) {
+				if ( $column_set eq 'default' ) {
+					$columns
+						= 'id,instance,in_iface,src_ip,src_port,dest_ip,dest_port,proto,app_proto,signature,classification,rule_id';
+				}
+				elsif ( $column_set eq 'default_timestamp' ) {
+					$columns
+						= 'timestamp,instance,in_iface,src_ip,src_port,dest_ip,dest_port,proto,app_proto,signature,classification,rule_id';
+				}
+				elsif ( $column_set eq 'default_event' ) {
+					$columns
+						= 'id,event_id,instance,in_iface,src_ip,src_port,dest_ip,dest_port,proto,app_proto,signature,classification,rule_id';
+				}
+				elsif ( $column_set eq 'default_timestamp_event' ) {
+					$columns
+						= 'timestamp,event_id,instance,in_iface,src_ip,src_port,dest_ip,dest_port,proto,app_proto,signature,classification,rule_id';
+				}
+				else {
+					die( '"' . $column_set . '" is not a known column set' );
+				}
+			}
+			else {
+				if ( $column_set eq 'default' ) {
+					$columns
+						= 'id,instance,src_ip,host,xff,facility,level,priority,program,signature,classification,rule_id';
+				}
+				elsif ( $column_set eq 'default_timestamp' ) {
+					$columns
+						= 'timestamp,instance,src_ip,host,xff,facility,level,priority,program,signature,classification,rule_id';
+				}
+				elsif ( $column_set eq 'default_event' ) {
+					$columns
+						= 'id,event_id,instance,src_ip,host,xff,facility,level,priority,program,signature,classification,rule_id';
+				}
+				elsif ( $column_set eq 'default_timestamp_event' ) {
+					$columns
+						= 'timestamp,event_id,instance,src_ip,host,xff,facility,level,priority,program,signature,classification,rule_id';
+				}
+				else {
+					die( '"' . $column_set . '" is not a known column set' );
+				}
+			}
+		}
+
+		# friendly column names
+		my $column_names = {
+			'id'                  => 'id',
+			'instance'            => 'instance',
+			'host'                => 'host',
+			'timestamp'           => 'timestamp',
+			'event_id'            => 'event_id',
+			'flow_id'             => 'flow_id',
+			'in_iface'            => 'if',
+			'src_ip'              => 'src_ip',
+			'src_port'            => 'sport',
+			'dest_ip'             => 'dest_ip',
+			'dest_port'           => 'dport',
+			'proto'               => 'proto',
+			'app_proto'           => 'aproto',
+			'flow_pkts_toserver'  => 'PtS',
+			'flow_bytes_toserver' => 'BtS',
+			'flow_pkts_toclient'  => 'PtC',
+			'flow_bytes_toclient' => 'BtC',
+			'flow_start'          => 'flow_start',
+			'classification'      => 'class',
+			'signature'           => 'signature',
+			'gid'                 => 'gid',
+			'sid'                 => 'sid',
+			'rev'                 => 'rev',
+			'rule_id'             => 'rule_id',
+			'facility'            => 'facility',
+			'level'               => 'level',
+			'priority'            => 'priority',
+			'program'             => 'program',
+			'xff'                 => 'xff',
+			'stream'              => 'stream',
+			'event_id'            => 'event',
+		};
+
+		#
+		# init the table
+		#
 		my $tb = Text::ANSITable->new;
 		$tb->border_style( $ENV{Lilith_table_border} );
 		$tb->color_theme( $ENV{Lilith_table_color} );
@@ -408,6 +478,9 @@ if ( $action eq 'search' ) {
 
 		$tb->columns( \@headers );
 
+		#
+		# process each found row
+		#
 		my @td;
 		foreach my $row ( @{$returned} ) {
 			my @new_line;
@@ -449,7 +522,7 @@ if ( $action eq 'search' ) {
 						push( @new_line, $row->{$column} );
 					}
 				}
-				elsif ( defined( $row->{$column} ) && $column eq 'src_ip' ) {
+				elsif ( defined( $row->{$column} ) && ( $column eq 'src_ip' || $column eq 'dest_ip' ) ) {
 					if ( defined( $ENV{Lilith_IP_color} ) ) {
 						if (   $row->{$column} =~ /^192\.168\./
 							|| $row->{$column} =~ /^10\./
@@ -482,42 +555,23 @@ if ( $action eq 'search' ) {
 					}
 					push( @new_line, $row->{$column} );
 				}
-				elsif ( defined( $row->{$column} ) && $column eq 'dest_ip' ) {
-					if ( defined( $ENV{Lilith_IP_color} ) ) {
-						if (   $row->{$column} =~ /^192\.168\./
-							|| $row->{$column} =~ /^10\./
-							|| $row->{$column} =~ /^172\.16/
-							|| $row->{$column} =~ /^172\.17/
-							|| $row->{$column} =~ /^172\.19/
-							|| $row->{$column} =~ /^172\.19/
-							|| $row->{$column} =~ /^172\.20/
-							|| $row->{$column} =~ /^172\.21/
-							|| $row->{$column} =~ /^172\.22/
-							|| $row->{$column} =~ /^172\.23/
-							|| $row->{$column} =~ /^172\.24/
-							|| $row->{$column} =~ /^172\.25/
-							|| $row->{$column} =~ /^172\.26/
-							|| $row->{$column} =~ /^172\.26/
-							|| $row->{$column} =~ /^172\.27/
-							|| $row->{$column} =~ /^172\.28/
-							|| $row->{$column} =~ /^172\.29/
-							|| $row->{$column} =~ /^172\.30/
-							|| $row->{$column} =~ /^172\.31/ )
-						{
-							$row->{$column} = color( $ENV{Lilith_IP_private_color} ) . $row->{$column} . color('reset');
-						}
-						elsif ( $row->{$column} =~ /^127\./ ||
-								$row->{$column} =~ /^\:\:1$/
-							   ) {
-							$row->{$column} = color( $ENV{Lilith_IP_local_color} ) . $row->{$column} . color('reset');
-						}elsif ( $row->{$column} =~ /\:/
-							   ) {
-							$row->{$column} = $row->{$column};
-						}
-						else {
-							$row->{$column} = color( $ENV{Lilith_IP_remote_color} ) . $row->{$column} . color('reset');
-						}
+				elsif ( defined( $row->{$column} ) && $column eq 'timestamp' ) {
+					if ( $ENV{Lilith_timesamp_drop_micro} ) {
+						$row->{$column} =~ s/\.[0-9]+//;
 					}
+					if ( $ENV{Lilith_timesamp_drop_offset} ) {
+						$row->{$column} =~ s/\-[0-9]+$//;
+					}
+					push( @new_line, $row->{$column} );
+				}
+				elsif ( defined( $row->{$column} ) && $column eq 'instance' && $ENV{Lilith_instance_color} ) {
+					my $color0 = color( $ENV{Lilith_instance_slug_color} );
+					my $color1 = color('reset');
+					my $color3 = color( $ENV{Lilith_instance_type_color} );
+					my $color4 = color( $ENV{Lilith_instance_loc_color} );
+					$row->{$column} =~ s/(^[A-Za-z0-9]+)\-/$color0$1$color1-/;
+					$row->{$column} =~ s/\-(ids|pie|lae)$/-$color3$1$color1/;
+					$row->{$column} =~ s/\-([A-Za-z0-9\-]+)\-/-$color4$1$color1/;
 					push( @new_line, $row->{$column} );
 				}
 				elsif ( defined( $row->{$column} ) ) {
@@ -532,8 +586,14 @@ if ( $action eq 'search' ) {
 			push( @td, \@new_line );
 		}
 
+		#
+		# print the table
+		#
 		$tb->add_rows( \@td );
-
 		print $tb->draw;
+		exit 0;
 	}
+
+	# bad selection via --output
+	die('No applicable output found');
 }
