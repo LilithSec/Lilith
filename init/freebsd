@@ -1,0 +1,47 @@
+#!/bin/sh
+
+# PROVIDE: lilith
+# REQUIRE: LOGIN
+# KEYWORD: shutdown
+#
+#
+#
+# Add the following lines to /etc/rc.conf.local or /etc/rc.conf to enable lilith:
+# lilith_enable (bool):            Set to "NO" by default.
+#                                  Set it to "YES" to enable lilith
+# lilith_flags (string):           Set to "" by default.
+# lilith_user (string):            Set to "nobody" by default.
+
+
+. /etc/rc.subr
+
+name=lilith
+rcvar=lilith_enable
+
+: ${lilith_enable:=NO}
+: ${lilith_user:="nobody"}
+: ${lilith_flags:=""}
+: ${lilith_facility:="daemon"}
+: ${lilith_priority:="debug"}
+
+# daemon
+pidfile="/var/run/${name}.pid"
+command="/usr/local/bin/lilith"
+procname="daemon"
+command_args="-a run"
+start_precmd="${name}_precmd"
+start_cmd="${name}_start"
+
+lilith_precmd()
+{
+    install -o ${lilith_user} /dev/null ${pidfile}
+}
+
+lilith_start() {
+        /usr/sbin/daemon -S -l ${lilith_facility} -s ${lilith_priority} -T ${name} \
+                -u ${lilith_user} -p ${pidfile} \
+                /usr/local/bin/perl $command $command_args $lilith_$flags
+}
+
+load_rc_config $name
+run_rc_command "$1"
