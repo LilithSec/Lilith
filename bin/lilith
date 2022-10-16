@@ -131,6 +131,9 @@ my $columns;
 my $column_set = 'default';
 my $class_shortern;
 my $debug;
+my $event_id;
+my $id;
+my $decode_raw;
 Getopt::Long::Configure('no_ignore_case');
 Getopt::Long::Configure('bundling');
 GetOptions(
@@ -177,6 +180,9 @@ GetOptions(
 	'columns=s'   => \$columns,
 	'columnset=s' => \$column_set,
 	'debug'       => \$debug,
+	'id=s'        => \$id,
+		   'event=s'     => \$event_id,
+		   'raw'=>\$decode_raw,
 );
 
 # print version or help if requested
@@ -596,4 +602,45 @@ if ( $action eq 'search' ) {
 
 	# bad selection via --output
 	die('No applicable output found');
+}
+
+#
+# gets a event
+#
+
+if ( $action eq 'event' ) {
+	if ( defined($id) && defined($event_id) ) {
+		die('Can not search via both --id and --event for fetching a event');
+	}
+
+	my $returned = $lilith->search(
+		table    => $table,
+		id       => $id,
+		event_id => $event_id,
+		debug    => $debug,
+		no_time  => 1,
+		limit    => 1,
+	);
+
+	if (!defined($returned->[0])) {
+		print "{}\n";
+		exit 42;
+	}
+
+	if ($decode_raw&& defined($returned->[0])
+		&& defined( $returned->[0]{raw} )
+		) {
+		$returned->[0]{raw}=decode_json($returned->[0]{raw});
+	}
+
+	my $json = JSON->new;
+	if ($pretty) {
+		$json->canonical(1);
+		$json->pretty(1);
+	}
+	print $json->encode($returned->[0]);
+	if ( !$pretty ) {
+		print "\n";
+	}
+	exit 0;
 }

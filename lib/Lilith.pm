@@ -432,7 +432,8 @@ sub search {
 		'host_like',      'instance_host', 'instance_host_like', 'instance',
 		'instance_like',  'class',         'class_like',         'signature',
 		'signature_like', 'app_proto',     'app_proto_like',     'proto',
-		'gid',            'sid',           'rev',
+		'gid',            'sid',           'rev',                'id',
+		'event_id'
 	);
 
 	foreach my $var_to_check (@to_check) {
@@ -475,18 +476,20 @@ sub search {
 	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} );
 
 	my @sql_args;
-	my $sql
-		= 'select * from '
-		. $table
-		. " where timestamp >= CURRENT_TIMESTAMP - interval '"
-		. $opts{go_back_minutes}
-		. " minutes'";
+	my $sql = 'select * from ' . $table. ' where';
+	if ( defined( $opts{no_time} ) && $opts{no_time} ) {
+		$sql=$sql.' id >= 0';
+	}
+	else {
+
+		$sql = $sql . " timestamp >= CURRENT_TIMESTAMP - interval '" . $opts{go_back_minutes} . " minutes'";
+	}
 
 	#
 	# add simple items
 	#
 
-	my @simple = ( 'src_ip', 'dest_ip', 'alert_id', 'proto' );
+	my @simple = ( 'src_ip', 'dest_ip', 'alert_id', 'proto', 'event_id' );
 
 	foreach my $item (@simple) {
 		if ( defined( $opts{$item} ) ) {
@@ -498,7 +501,7 @@ sub search {
 	# add numeric items
 	#
 
-	my @numeric = ( 'src_port', 'dest_port', 'gid', 'sid', 'rev' );
+	my @numeric = ( 'src_port', 'dest_port', 'gid', 'sid', 'rev', 'id' );
 
 	foreach my $item (@numeric) {
 		if ( defined( $opts{$item} ) ) {
