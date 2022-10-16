@@ -381,12 +381,30 @@ sub search {
 	}
 
 	if ( !defined( $opts{go_back_minutes} ) ) {
-		$opts{go_back_minutes} = '5';
+		$opts{go_back_minutes} = '1440';
 	}
 	else {
 		if ( $opts{go_back_minutes} =~ /^[0-9]+$/ ) {
 			die( '"' . $opts{go_back_minutes} . '" for go_back_minutes is not numeric' );
 		}
+	}
+
+	if (defined($opts{limit}) && $opts{limit} !~ /^[0-9]+$/) {
+		die('"'.$opts{limit}.'" is not numeric and limit needs to be numeric');
+	}
+
+	if (defined($opts{offset}) && $opts{offset} !~ /^[0-9]+$/) {
+		die('"'.$opts{offset}.'" is not numeric and offset needs to be numeric');
+	}
+
+	if (defined($opts{order_by}) && $opts{order_by} !~ /^[\_a-zA-Z]+$/) {
+		die('"'.$opts{order_by}.'" is set for order_by and it does not match /^[\_a-zA-Z]+$/');
+	}
+
+	if (defined($opts{order_dir}) && $opts{order_dir} ne 'ASC' && $opts{order_dir} ne 'DESC' ) {
+		die('"'.$opts{order_dir}.'" for order_dir must by either ASC or DESC');
+	}elsif (!defined($opts{order_dir})) {
+		$opts{order_dir}='DESC';
 	}
 
 	my $table = $self->{suricata};
@@ -672,6 +690,26 @@ sub search {
 			}
 		}
 	}
+
+	#
+	# finalize the SQL query... ORDER, LIMIT, and OFFSET
+	#
+
+	if (defined($opts{order_by})) {
+		$sql=$sql . ' ORDER BY '.$opts{order_by} .' '.$opts{order_dir};
+	}
+
+	if (defined($opts{linit})) {
+		$sql=$sql . ' LIMIT '.$opts{limit};
+	}
+
+	if (defined($opts{offset})) {
+		$sql=$sql . ' OFFSET '.$opts{offset};
+	}
+
+	#
+	# run the query
+	#
 
 	$sql = $sql . ';';
 

@@ -10,7 +10,7 @@
 # lilith_enable (bool):            Set to "NO" by default.
 #                                  Set it to "YES" to enable lilith
 # lilith_flags (string):           Set to "" by default.
-# lilith_user (string):            Set to "nobody" by default.
+# lilith_user (string):            Set to "root" by default.
 
 
 . /etc/rc.subr
@@ -19,7 +19,7 @@ name=lilith
 rcvar=lilith_enable
 
 : ${lilith_enable:=NO}
-: ${lilith_user:="nobody"}
+: ${lilith_user:="root"}
 : ${lilith_flags:=""}
 : ${lilith_facility:="daemon"}
 : ${lilith_priority:="debug"}
