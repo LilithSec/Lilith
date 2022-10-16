@@ -8,6 +8,7 @@ use TOML        qw(from_toml);
 use File::Slurp qw(read_file);
 use JSON;
 use Text::ANSITable;
+use Term::ANSIColor;
 
 sub version {
 	print "lilith v. 0.0.1\n";
@@ -72,8 +73,8 @@ Description :: Searches the specified table returns the results.
 --il            Use like for matching instance.
                 Default :: undef
 
--C <classification> Classification.
-                    Default :: undef
+-C <class>      Classification.
+                Default :: undef
 
 -Cl             Use like for matching classification.
                 Default :: undef
@@ -194,6 +195,22 @@ if ( !defined( $ENV{Lilith_table_color} ) ) {
 
 if ( !defined( $ENV{Lilith_table_border} ) ) {
 	$ENV{Lilith_table_border} = 'ASCII::None';
+}
+
+if ( !defined( $ENV{Lilith_IP_color} ) ) {
+	$ENV{Lilith_IP_color} = '1';
+}
+
+if ( !defined( $ENV{Lilith_IP_private_color} ) ) {
+	$ENV{Lilith_IP_private_color} = 'bright_green';
+}
+
+if ( !defined( $ENV{Lilith_IP_remote_color} ) ) {
+	$ENV{Lilith_IP_remote_color} = 'bright_yellow';
+}
+
+if ( !defined( $ENV{Lilith_IP_local_color} ) ) {
+	$ENV{Lilith_IP_local_color} = 'bright_red';
 }
 
 if ( !defined($action) ) {
@@ -353,6 +370,7 @@ if ( $action eq 'search' ) {
 		order_dir          => $order_dir,
 		limit              => $limit,
 		offset             => $offset,
+		go_back_minutes    => $go_back_minutes,
 	);
 
 	if ( $search_output eq 'json' ) {
@@ -388,7 +406,7 @@ if ( $action eq 'search' ) {
 			$header_int++;
 		}
 
-		$tb->columns( \@columns_array );
+		$tb->columns( \@headers );
 
 		my @td;
 		foreach my $row ( @{$returned} ) {
@@ -420,9 +438,87 @@ if ( $action eq 'search' ) {
 					elsif ( $row->{$column} =~ /^[Aa]ttempted [Ii]nformation [Ll]eak$/ ) {
 						push( @new_line, 'AIL' );
 					}
+					elsif ( $row->{$column} =~ /^[Ii]nformation [Ll]eak$/ ) {
+						push( @new_line, 'IL' );
+
+					}
+					elsif ( $row->{$column} =~ /^[Pp]otentially [Bb]ad [Tt]raffic$/ ) {
+						push( @new_line, 'PBT' );
+					}
 					else {
 						push( @new_line, $row->{$column} );
 					}
+				}
+				elsif ( defined( $row->{$column} ) && $column eq 'src_ip' ) {
+					if ( defined( $ENV{Lilith_IP_color} ) ) {
+						if (   $row->{$column} =~ /^192\.168\./
+							|| $row->{$column} =~ /^10\./
+							|| $row->{$column} =~ /^172\.16/
+							|| $row->{$column} =~ /^172\.17/
+							|| $row->{$column} =~ /^172\.19/
+							|| $row->{$column} =~ /^172\.19/
+							|| $row->{$column} =~ /^172\.20/
+							|| $row->{$column} =~ /^172\.21/
+							|| $row->{$column} =~ /^172\.22/
+							|| $row->{$column} =~ /^172\.23/
+							|| $row->{$column} =~ /^172\.24/
+							|| $row->{$column} =~ /^172\.25/
+							|| $row->{$column} =~ /^172\.26/
+							|| $row->{$column} =~ /^172\.26/
+							|| $row->{$column} =~ /^172\.27/
+							|| $row->{$column} =~ /^172\.28/
+							|| $row->{$column} =~ /^172\.29/
+							|| $row->{$column} =~ /^172\.30/
+							|| $row->{$column} =~ /^172\.31/ )
+						{
+							$row->{$column} = color( $ENV{Lilith_IP_private_color} ) . $row->{$column} . color('reset');
+						}
+						elsif ( $row->{$column} =~ /^127\./ ) {
+							$row->{$column} = color( $ENV{Lilith_IP_local_color} ) . $row->{$column} . color('reset');
+						}
+						else {
+							$row->{$column} = color( $ENV{Lilith_IP_remote_color} ) . $row->{$column} . color('reset');
+						}
+					}
+					push( @new_line, $row->{$column} );
+				}
+				elsif ( defined( $row->{$column} ) && $column eq 'dest_ip' ) {
+					if ( defined( $ENV{Lilith_IP_color} ) ) {
+						if (   $row->{$column} =~ /^192\.168\./
+							|| $row->{$column} =~ /^10\./
+							|| $row->{$column} =~ /^172\.16/
+							|| $row->{$column} =~ /^172\.17/
+							|| $row->{$column} =~ /^172\.19/
+							|| $row->{$column} =~ /^172\.19/
+							|| $row->{$column} =~ /^172\.20/
+							|| $row->{$column} =~ /^172\.21/
+							|| $row->{$column} =~ /^172\.22/
+							|| $row->{$column} =~ /^172\.23/
+							|| $row->{$column} =~ /^172\.24/
+							|| $row->{$column} =~ /^172\.25/
+							|| $row->{$column} =~ /^172\.26/
+							|| $row->{$column} =~ /^172\.26/
+							|| $row->{$column} =~ /^172\.27/
+							|| $row->{$column} =~ /^172\.28/
+							|| $row->{$column} =~ /^172\.29/
+							|| $row->{$column} =~ /^172\.30/
+							|| $row->{$column} =~ /^172\.31/ )
+						{
+							$row->{$column} = color( $ENV{Lilith_IP_private_color} ) . $row->{$column} . color('reset');
+						}
+						elsif ( $row->{$column} =~ /^127\./ ||
+								$row->{$column} =~ /^\:\:1$/
+							   ) {
+							$row->{$column} = color( $ENV{Lilith_IP_local_color} ) . $row->{$column} . color('reset');
+						}elsif ( $row->{$column} =~ /\:/
+							   ) {
+							$row->{$column} = $row->{$column};
+						}
+						else {
+							$row->{$column} = color( $ENV{Lilith_IP_remote_color} ) . $row->{$column} . color('reset');
+						}
+					}
+					push( @new_line, $row->{$column} );
 				}
 				elsif ( defined( $row->{$column} ) ) {
 					push( @new_line, $row->{$column} );

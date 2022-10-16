@@ -389,7 +389,7 @@ sub search {
 		$opts{go_back_minutes} = '1440';
 	}
 	else {
-		if ( $opts{go_back_minutes} =~ /^[0-9]+$/ ) {
+		if ( $opts{go_back_minutes} !~ /^[0-9]+$/ ) {
 			die( '"' . $opts{go_back_minutes} . '" for go_back_minutes is not numeric' );
 		}
 	}
@@ -410,7 +410,7 @@ sub search {
 		die( '"' . $opts{order_dir} . '" for order_dir must by either ASC or DESC' );
 	}
 	elsif ( !defined( $opts{order_dir} ) ) {
-		$opts{order_dir} = 'DESC';
+		$opts{order_dir} = 'ASC';
 	}
 
 	if ( !defined( $opts{order_by} ) ) {
