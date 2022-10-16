@@ -6,6 +6,7 @@ use Getopt::Long;
 use Lilith;
 use TOML        qw(from_toml);
 use File::Slurp qw(read_file);
+use JSON;
 
 sub version {
 	print "lilith v. 0.0.1\n";
@@ -123,6 +124,7 @@ my $order_by;
 my $order_dir;
 my $offset;
 my $search_output = 'table';
+my $pretty;
 Getopt::Long::Configure('no_ignore_case');
 Getopt::Long::Configure('bundling');
 GetOptions(
@@ -162,9 +164,10 @@ GetOptions(
 	'rev=s'      => \$rev,
 	'limit=s'    => \$limit,
 	'offset=s'   => \$offset,
-	'order'      => \$order_by,
+	'order=s'    => \$order_by,
 	'orderdir=s' => \$order_dir,
 	'output=s'   => \$search_output,
+	'pretty'     => \$pretty,
 );
 
 # print version or help if requested
@@ -281,6 +284,26 @@ if ( $action eq 'search' ) {
 		gid                => $gid,
 		sid                => $sid,
 		rev                => $rev,
+		order_by           => $order_by,
+		order_dir          => $order_dir,
+		limit              => $limit,
+		offset             => $offset,
 	);
 
+	if ( $search_output eq 'json' ) {
+		my $json = JSON->new;
+		if ($pretty) {
+			$json->canonical(1);
+			$json->pretty(1);
+		}
+		print $json->encode($returned);
+		if ( !$pretty ) {
+			print "\n";
+		}
+	}
+	elsif ( $search_output eq 'table' ) {
+		foreach my $item ( @{$returned} ) {
+			print "test";
+		}
+	}
 }
