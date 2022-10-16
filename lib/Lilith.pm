@@ -371,6 +371,10 @@ sub extend {
 sub search {
 	my ( $self, %opts ) = @_;
 
+	#
+	# basic requirements sanity checking
+	#
+
 	if ( !defined( $opts{table} ) ) {
 		$opts{table} = 'suricata';
 	}
@@ -389,22 +393,23 @@ sub search {
 		}
 	}
 
-	if (defined($opts{limit}) && $opts{limit} !~ /^[0-9]+$/) {
-		die('"'.$opts{limit}.'" is not numeric and limit needs to be numeric');
+	if ( defined( $opts{limit} ) && $opts{limit} !~ /^[0-9]+$/ ) {
+		die( '"' . $opts{limit} . '" is not numeric and limit needs to be numeric' );
 	}
 
-	if (defined($opts{offset}) && $opts{offset} !~ /^[0-9]+$/) {
-		die('"'.$opts{offset}.'" is not numeric and offset needs to be numeric');
+	if ( defined( $opts{offset} ) && $opts{offset} !~ /^[0-9]+$/ ) {
+		die( '"' . $opts{offset} . '" is not numeric and offset needs to be numeric' );
 	}
 
-	if (defined($opts{order_by}) && $opts{order_by} !~ /^[\_a-zA-Z]+$/) {
-		die('"'.$opts{order_by}.'" is set for order_by and it does not match /^[\_a-zA-Z]+$/');
+	if ( defined( $opts{order_by} ) && $opts{order_by} !~ /^[\_a-zA-Z]+$/ ) {
+		die( '"' . $opts{order_by} . '" is set for order_by and it does not match /^[\_a-zA-Z]+$/' );
 	}
 
-	if (defined($opts{order_dir}) && $opts{order_dir} ne 'ASC' && $opts{order_dir} ne 'DESC' ) {
-		die('"'.$opts{order_dir}.'" for order_dir must by either ASC or DESC');
-	}elsif (!defined($opts{order_dir})) {
-		$opts{order_dir}='DESC';
+	if ( defined( $opts{order_dir} ) && $opts{order_dir} ne 'ASC' && $opts{order_dir} ne 'DESC' ) {
+		die( '"' . $opts{order_dir} . '" for order_dir must by either ASC or DESC' );
+	}
+	elsif ( !defined( $opts{order_dir} ) ) {
+		$opts{order_dir} = 'DESC';
 	}
 
 	my $table = $self->{suricata};
@@ -412,7 +417,28 @@ sub search {
 		$table = $self->{sagan};
 	}
 
-	my @rule_keys = keys( %{ $opts{rules} } );
+	#
+	#
+	#
+
+	my @to_check = (
+		'src_ip',         'src_port',      'dest_ip',            'dest_port',
+		'ip',             'port',          'alert_id',           'host',
+		'host_like',      'instance_host', 'instance_host_like', 'instance',
+		'instance_like',  'class',         'class_like',         'signature',
+		'signature_like', 'app_proto',     'app_proto_like',     'proto',
+		'gid',            'sid',           'rev'
+	);
+
+	foreach my $var_to_check (@to_check) {
+		if ( defined( $opts{$var_to_check} ) && $opts{$var_to_check} =~ /[\;\']/ ) {
+			die( '"' . $opts{$var_to_check} . '" for "' . $var_to_check . '" matched /[\;\']/' );
+		}
+	}
+
+	#
+	# assemble
+	#
 
 	my $host = hostname;
 
@@ -426,285 +452,111 @@ sub search {
 		. $opts{go_back_minutes}
 		. " minutes'";
 
-	if ( defined( $opts{src_ip} ) ) {
-		push( @sql_args, $opts{src_ip} );
-		$sql = $sql . ' and src_ip = ?';
+	#
+	# add simple items
+	#
+
+	my @simple = ( 'src_ip', 'dest_ip', 'alert_id', 'proto' );
+
+	foreach my $item (@simple) {
+		$sql = $sql . " and " . $item . " = '" . $opts{$item} . "'";
 	}
 
-	if ( defined( $opts{src_port} ) ) {
-		push( @sql_args, $opts{src_port} );
-		$sql = $sql . ' and src_port = ?';
+	#
+	# add numeric items
+	#
+
+	my @numeric = ( 'src_port', 'dest_port', 'gid', 'sid', 'rev' );
+
+	foreach my $item (@simple) {
+
+		# remove and tabs or spaces
+		$opts{item} =~ s/[\ \t]//g;
+		my @arg_split = split( /\,/, $opts{item} );
+
+		# process each item
+		foreach my $arg (@arg_split) {
+
+			# match the start of the item
+			if ( $arg =~ /^[0-9]+$/ ) {
+				$sql = $sql . " and  = '" . $arg . "'";
+			}
+			elsif ( $arg =~ /^\<\=[0-9]+$/ ) {
+				$arg =~ s/^\<\=//;
+				$sql = $sql . " and sid <= '" . $arg . "'";
+			}
+			elsif ( $arg =~ /^\<[0-9]+$/ ) {
+				$arg =~ s/^\<//;
+				$sql = $sql . " and gid < '" . $arg . "'";
+			}
+			elsif ( $arg =~ /^\>\=[0-9]+$/ ) {
+				$arg =~ s/^\>\=//;
+				$sql = $sql . " and sid >= '" . $arg . "'";
+			}
+			elsif ( $arg =~ /^\>[0-9]+$/ ) {
+				$arg =~ s/^\>\=//;
+				$sql = $sql . " and sid > '" . $arg . "'";
+			}
+			elsif ( $arg =~ /^\![0-9]+$/ ) {
+				$arg =~ s/^\!//;
+				$sql = $sql . " and sid != '" . $arg . "'";
+			}
+			elsif ( $arg =~ /^$/ ) {
+
+				# only exists for skipping when some one has passes something starting
+				# with a ,, ending with a,, or with ,, in it.
+			}
+			else {
+				# if we get here, it means we don't have a valid use case for what ever was passed and should error
+				die( '"' . $arg . '" does not appear to be a valid item for a numeric search for the ' . $item );
+			}
+		}
+
 	}
 
-	if ( defined( $opts{dst_ip} ) ) {
-		push( @sql_args, $opts{dst_ip} );
-		$sql = $sql . ' and dst_ip = ?';
+	#
+	# handle string items
+	#
+
+	my @strings = ( 'host', 'instance_host', 'instance', 'class', 'signature', 'app_proto', 'in_iface' );
+
+	foreach my $item (@simple) {
+		if ( defined( $opts{$item} ) ) {
+			if ( defined( $opts{ $item . '_like' } ) && $opts{ $item . '_like' } ) {
+				$sql = $sql . " and host like '" . $opts{$item} . "'";
+			}
+			else {
+				$sql = $sql . " and host = '" . $opts{$item} . "'";
+			}
+		}
 	}
 
-	if ( defined( $opts{dst_port} ) ) {
-		push( @sql_args, $opts{dst_port} );
-		$sql = $sql . ' and dst_port = ?';
-	}
+	#
+	# more complex items
+	#
 
 	if ( defined( $opts{ip} ) ) {
-		push( @sql_args, $opts{ip} );
-		push( @sql_args, $opts{ip} );
-		$sql = $sql . ' and ( src_ip = ? or dst_ip = ? )';
+		$sql = $sql . " and ( src_ip = '" . $opts{ip} . "' or dest_ip = '" . $opts{ip} . "' )";
 	}
 
 	if ( defined( $opts{port} ) ) {
-		push( @sql_args, $opts{port} );
-		push( @sql_args, $opts{port} );
-		$sql = $sql . ' and ( src_port = ? or dst_port = ? )';
-	}
-
-	if ( defined( $opts{alert_id} ) ) {
-		push( @sql_args, $opts{alert_id} );
-		$sql = $sql . ' and alert_id = ?';
-	}
-
-	if ( defined( $opts{host} ) ) {
-		push( @sql_args, $opts{host} );
-		if ( defined( $opts{host_like} ) && $opts{host_like} ) {
-			$sql = $sql . ' and host like ?';
-		}
-		else {
-			$sql = $sql . ' and host = ?';
-		}
-	}
-
-	if ( defined( $opts{instance_host} ) ) {
-		push( @sql_args, $opts{instance_host} );
-		if ( defined( $opts{host_like} ) && $opts{instance_host_like} ) {
-			$sql = $sql . ' and instance_host like ?';
-		}
-		else {
-			$sql = $sql . ' and instance_host = ?';
-		}
-	}
-
-	if ( defined( $opts{in_iface_like} ) ) {
-		push( @sql_args, $opts{in_iface} );
-		if ( defined( $opts{in_iface_like} ) && $opts{in_iface_like} ) {
-			$sql = $sql . ' and in_iface like ?';
-		}
-		else {
-			$sql = $sql . ' and in_iface = ?';
-		}
-	}
-
-	if ( defined( $opts{proto} ) ) {
-		push( @sql_args, $opts{proto} );
-		$sql = $sql . ' and proto = ?';
-	}
-
-	if ( defined( $opts{app_proto} ) ) {
-		push( @sql_args, $opts{app_proto} );
-		if ( defined( $opts{app_proto_like} ) && $opts{app_proto_like} ) {
-			$sql = $sql . ' and app_proto like ?';
-		}
-		else {
-			$sql = $sql . ' and app_proto = ?';
-		}
-	}
-
-	if ( defined( $opts{instance} ) ) {
-		push( @sql_args, $opts{instance} );
-		if ( defined( $opts{instance_like} ) && $opts{instance_like} ) {
-			$sql = $sql . ' and instance like ?';
-		}
-		else {
-			$sql = $sql . ' and instance = ?';
-		}
-	}
-
-	if ( defined( $opts{class} ) ) {
-		push( @sql_args, $opts{class} );
-		if ( defined( $opts{class_like} ) && $opts{class_like} ) {
-			$sql = $sql . ' and classification like ?';
-		}
-		else {
-			$sql = $sql . ' and classification = ?';
-		}
-	}
-
-	if ( defined( $opts{signature} ) ) {
-		push( @sql_args, $opts{signature} );
-		if ( defined( $opts{signature_like} ) && $opts{signature_like} ) {
-			$sql = $sql . ' and signature like ?';
-		}
-		else {
-			$sql = $sql . ' and signature = ?';
-		}
-	}
-
-	if ( defined( $opts{gid} ) ) {
-
-		# remove and tabs or spaces
-		$opts{gid} =~ s/[\ \t]//g;
-		my @arg_split = split( /\,/, $opts{gid} );
-
-		# process each item
-		foreach my $arg (@arg_split) {
-
-			# match the start of the item
-			if ( $arg =~ /^[0-9]+$/ ) {
-				push( @sql_args, $arg );
-				$sql = $sql . ' and gid = ?';
-			}
-			elsif ( $arg =~ /^\<\=[0-9]+$/ ) {
-				$arg =~ s/^\<\=//;
-				push( @sql_args, $arg );
-				$sql = $sql . ' and gid <= ?';
-			}
-			elsif ( $arg =~ /^\<[0-9]+$/ ) {
-				$arg =~ s/^\<//;
-				push( @sql_args, $arg );
-				$sql = $sql . ' and gid < ?';
-			}
-			elsif ( $arg =~ /^\>\=[0-9]+$/ ) {
-				$arg =~ s/^\>\=//;
-				push( @sql_args, $arg );
-				$sql = $sql . ' and gid >= ?';
-			}
-			elsif ( $arg =~ /^\>[0-9]+$/ ) {
-				$arg =~ s/^\>\=//;
-				push( @sql_args, $arg );
-				$sql = $sql . ' and gid > ?';
-			}
-			elsif ( $arg =~ /^\![0-9]+$/ ) {
-				$arg =~ s/^\!//;
-				push( @sql_args, $arg );
-				$sql = $sql . ' and gid != ?';
-			}
-			elsif ( $arg =~ /^$/ ) {
-
-				# only exists for skipping when some one has passes something starting
-				# with a ,, ending with a,, or with ,, in it.
-			}
-			else {
-				# if we get here, it means we don't have a valid use case for what ever was passed and should error
-				die( '"' . $arg . '" does not appear to be a valid item for a numeric search for the gid' );
-			}
-		}
-	}
-
-	if ( defined( $opts{sid} ) ) {
-
-		# remove and tabs or spaces
-		$opts{sid} =~ s/[\ \t]//g;
-		my @arg_split = split( /\,/, $opts{sid} );
-
-		# process each item
-		foreach my $arg (@arg_split) {
-
-			# match the start of the item
-			if ( $arg =~ /^[0-9]+$/ ) {
-				push( @sql_args, $arg );
-				$sql = $sql . ' and sid = ?';
-			}
-			elsif ( $arg =~ /^\<\=[0-9]+$/ ) {
-				$arg =~ s/^\<\=//;
-				push( @sql_args, $arg );
-				$sql = $sql . ' and sid <= ?';
-			}
-			elsif ( $arg =~ /^\<[0-9]+$/ ) {
-				$arg =~ s/^\<//;
-				push( @sql_args, $arg );
-				$sql = $sql . ' and gid < ?';
-			}
-			elsif ( $arg =~ /^\>\=[0-9]+$/ ) {
-				$arg =~ s/^\>\=//;
-				push( @sql_args, $arg );
-				$sql = $sql . ' and sid >= ?';
-			}
-			elsif ( $arg =~ /^\>[0-9]+$/ ) {
-				$arg =~ s/^\>\=//;
-				push( @sql_args, $arg );
-				$sql = $sql . ' and sid > ?';
-			}
-			elsif ( $arg =~ /^\![0-9]+$/ ) {
-				$arg =~ s/^\!//;
-				push( @sql_args, $arg );
-				$sql = $sql . ' and sid != ?';
-			}
-			elsif ( $arg =~ /^$/ ) {
-
-				# only exists for skipping when some one has passes something starting
-				# with a ,, ending with a,, or with ,, in it.
-			}
-			else {
-				# if we get here, it means we don't have a valid use case for what ever was passed and should error
-				die( '"' . $arg . '" does not appear to be a valid item for a numeric search for the sid' );
-			}
-		}
-	}
-
-	if ( defined( $opts{sid} ) ) {
-
-		# remove and tabs or spaces
-		$opts{rev} =~ s/[\ \t]//g;
-		my @arg_split = split( /\,/, $opts{rev} );
-
-		# process each item
-		foreach my $arg (@arg_split) {
-
-			# match the start of the item
-			if ( $arg =~ /^[0-9]+$/ ) {
-				push( @sql_args, $arg );
-				$sql = $sql . ' and rev = ?';
-			}
-			elsif ( $arg =~ /^\<\=[0-9]+$/ ) {
-				$arg =~ s/^\<\=//;
-				push( @sql_args, $arg );
-				$sql = $sql . ' and rev <= ?';
-			}
-			elsif ( $arg =~ /^\<[0-9]+$/ ) {
-				$arg =~ s/^\<//;
-				push( @sql_args, $arg );
-				$sql = $sql . ' and gid < ?';
-			}
-			elsif ( $arg =~ /^\>\=[0-9]+$/ ) {
-				$arg =~ s/^\>\=//;
-				push( @sql_args, $arg );
-				$sql = $sql . ' and rev >= ?';
-			}
-			elsif ( $arg =~ /^\>[0-9]+$/ ) {
-				$arg =~ s/^\>\=//;
-				push( @sql_args, $arg );
-				$sql = $sql . ' and rev > ?';
-			}
-			elsif ( $arg =~ /^\![0-9]+$/ ) {
-				$arg =~ s/^\!//;
-				push( @sql_args, $arg );
-				$sql = $sql . ' and rev != ?';
-			}
-			elsif ( $arg =~ /^$/ ) {
-
-				# only exists for skipping when some one has passes something starting
-				# with a ,, ending with a,, or with ,, in it.
-			}
-			else {
-				# if we get here, it means we don't have a valid use case for what ever was passed and should error
-				die( '"' . $arg . '" does not appear to be a valid item for a numeric search for the rev' );
-			}
-		}
+		$sql = $sql . " and ( src_port = '" . $opts{port} . "'  or dest_port = '" . $opts{port} . "' )";
 	}
 
 	#
 	# finalize the SQL query... ORDER, LIMIT, and OFFSET
 	#
 
-	if (defined($opts{order_by})) {
-		$sql=$sql . ' ORDER BY '.$opts{order_by} .' '.$opts{order_dir};
+	if ( defined( $opts{order_by} ) ) {
+		$sql = $sql . ' ORDER BY ' . $opts{order_by} . ' ' . $opts{order_dir};
 	}
 
-	if (defined($opts{linit})) {
-		$sql=$sql . ' LIMIT '.$opts{limit};
+	if ( defined( $opts{linit} ) ) {
+		$sql = $sql . ' LIMIT ' . $opts{limit};
 	}
 
-	if (defined($opts{offset})) {
-		$sql=$sql . ' OFFSET '.$opts{offset};
+	if ( defined( $opts{offset} ) ) {
+		$sql = $sql . ' OFFSET ' . $opts{offset};
 	}
 
 	#
@@ -714,7 +566,7 @@ sub search {
 	$sql = $sql . ';';
 
 	my $sth = $dbh->prepare($sql);
-	$sth->execute(@sql_args);
+	$sth->execute();
 
 	my $found = ();
 	while ( my $row = $sth->fetchrow_hashref ) {

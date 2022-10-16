@@ -92,9 +92,9 @@ my $rules_file  = '/usr/local/etc/lilith_rules.toml';
 my $action      = 'search';
 my $return_type = 'table';
 my $src_ip;
-my $dst_ip;
+my $dest_ip;
 my $src_port;
-my $dst_port;
+my $dest_port;
 my $alert_id;
 my $table = 'suricata';
 my $host;
@@ -122,6 +122,7 @@ my $limit;
 my $order_by;
 my $order_dir;
 my $offset;
+my $search_output = 'table';
 Getopt::Long::Configure('no_ignore_case');
 Getopt::Long::Configure('bundling');
 GetOptions(
@@ -134,8 +135,8 @@ GetOptions(
 	'a=s'        => \$action,
 	'si=s'       => \$src_ip,
 	'sp=s'       => \$src_port,
-	'di=s'       => \$dst_ip,
-	'dp=s'       => \$dst_port,
+	'di=s'       => \$dest_ip,
+	'dp=s'       => \$dest_port,
 	'id=s'       => \$alert_id,
 	't=s'        => \$table,
 	'h=s'        => \$host,
@@ -163,6 +164,7 @@ GetOptions(
 	'offset=s'   => \$offset,
 	'order'      => \$order_by,
 	'orderdir=s' => \$order_dir,
+	'output=s'   => \$search_output,
 );
 
 # print version or help if requested
@@ -247,7 +249,7 @@ if ( $action eq 'extend' ) {
 }
 
 if ( $action eq 'search' ) {
-	my $returned = Lilith->search(
+	my $returned = $lilith->search(
 		dsn                => $toml->{dsn},
 		sagan              => $toml->{sagan},
 		suricata           => $toml->{suricata},
@@ -255,7 +257,8 @@ if ( $action eq 'search' ) {
 		pass               => $toml->{pass},
 		src_ip             => $src_ip,
 		src_port           => $src_port,
-		dst_ip             => $dst_ip,
+		dest_ip            => $dest_ip,
+		dest_port          => $dest_port,
 		ip                 => $ip,
 		port               => $port,
 		alert_id           => $alert_id,
@@ -279,5 +282,5 @@ if ( $action eq 'search' ) {
 		sid                => $sid,
 		rev                => $rev,
 	);
-	print $returned;
+
 }
