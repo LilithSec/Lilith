@@ -286,11 +286,11 @@ sub create_tables {
 			. 'flow_pkts_toclient integer, '
 			. 'flow_bytes_toclient integer, '
 			. 'flow_start TIMESTAMP WITH TIME ZONE, '
-			. 'classification varchar(1024) NOT NULL, '
-			. 'signature varchar(2048) NOT NULL,'
-			. 'gid int NOT NULL, '
-			. 'sid bigint NOT NULL, '
-			. 'rev bigint NOT NULL, '
+			. 'classification varchar(1024), '
+			. 'signature varchar(2048),'
+			. 'gid int, '
+			. 'sid bigint, '
+			. 'rev bigint, '
 			. 'raw json NOT NULL, '
 			. 'PRIMARY KEY(id) );' );
 	$sth->execute();
