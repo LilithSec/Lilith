@@ -16,31 +16,33 @@
 . /etc/rc.subr
 
 name=lilith
-rcvar=lilith_enable
+rcvar=${name}_enable
 
+load_rc_config $name
+
+# set defaults
 : ${lilith_enable:=NO}
 : ${lilith_user:="root"}
 : ${lilith_flags:=""}
 : ${lilith_facility:="daemon"}
 : ${lilith_priority:="debug"}
 
-# daemon
-pidfile="/var/run/${name}.pid"
-command="/usr/local/bin/lilith"
-procname="daemon"
-command_args="-a run"
+pidfile="/var/run/${name}/pid"
+command="/usr/local/bin/${name}"
+command_interpreter="/usr/local/bin/perl"
+pidfile="/var/run/${name}/pid"
+command_args="-a run --daemonize"
 start_precmd="${name}_precmd"
-start_cmd="${name}_start"
 
 lilith_precmd()
 {
-    install -o ${lilith_user} /dev/null ${pidfile}
-}
-
-lilith_start() {
-        /usr/sbin/daemon -S -l ${lilith_facility} -s ${lilith_priority} -T ${name} \
-                -u ${lilith_user} -p ${pidfile} \
-                /usr/local/bin/perl $command $command_args $lilith_$flags
+    if [ ! -d "/var/run/${name}" ]; then
+        mkdir -p "/var/run/${name}"
+        chown "${lilith_user}" "/var/run/${name}"
+    else
+        # incase of user change
+        chown "${lilith_user}" "/var/run/${name}"
+    fi
 }
 
 load_rc_config $name
