@@ -181,8 +181,8 @@ GetOptions(
 	'columnset=s' => \$column_set,
 	'debug'       => \$debug,
 	'id=s'        => \$id,
-		   'event=s'     => \$event_id,
-		   'raw'=>\$decode_raw,
+	'event=s'     => \$event_id,
+	'raw'         => \$decode_raw,
 );
 
 # print version or help if requested
@@ -377,6 +377,55 @@ if ( $action eq 'search' ) {
 	elsif ( $search_output eq 'table' ) {
 
 		#
+		# class mapping
+		#
+		my $suricata_class_map = {
+			'Not Suspicious Traffic'                                      => '!SusT',
+			'Unknown Traffic'                                             => 'Unknown T',
+			'Attempted Information Leak'                                  => '!IL',
+			'Information Leak'                                            => 'IL',
+			'Large Scale Information Leak'                                => 'LrgSclIL',
+			'Attempted Denial of Service'                                 => 'ADoS',
+			'Denial of Service'                                           => 'DoS',
+			'Attempted User Privilege Gain'                               => 'AUPG',
+			'Unsuccessful User Privilege Gain'                            => '!SucUsrPG',
+			'Successful User Privilege Gain'                              => 'SucUsrPG',
+			'Attempted Administrator Privilege Gain'                      => '!SucAdmPG',
+			'Successful Administrator Privilege Gain'                     => 'SucAdmPG',
+			'Decode of an RPC Query'                                      => 'DRPCQ',
+			'Executable code was detected'                                => 'ExeCode',
+			'A suspicious string was detected'                            => 'SusString',
+			'A suspicious filename was detected'                          => 'SusFilename',
+			'An attempted login using a suspicious username was detected' => '!LoginUsername',
+			'A system call was detected'                                  => 'Syscall',
+			'A TCP connection was detected'                               => 'TCPconn',
+			'A Network Trojan was detected'                               => 'NetTrojan',
+			'A client was using an unusual port'                          => 'OddClntPrt',
+			'Detection of a Network Scan'                                 => 'NetScan',
+			'Detection of a Denial of Service Attack'                     => 'DOS',
+			'Detection of a non-standard protocol or event'               => 'NS PoE',
+			'Generic Protocol Command Decode'                             => 'GPCD',
+			'access to a potentially vulnerable web application'          => 'PotVulWebApp',
+			'Web Application Attack'                                      => 'WebAppAtk',
+			'Misc activity'                                               => 'MiscActivity',
+			'Misc Attack'                                                 => 'MiscAtk',
+			'Generic ICMP event'                                          => 'GenICMP',
+			'Inappropriate Content was Detected'                          => '!AppCont',
+			'Potential Corporate Privacy Violation'                       => 'PotCorpPriVio',
+			'Attempt to login by a default username and password'         => '!DefUserPass',
+			'Targeted Malicious Activity was Detected'                    => 'TargetedMalAct',
+			'Exploit Kit Activity Detected'                               => 'ExpKit',
+			'Device Retrieving External IP Address Detected'              => 'RetrExtIP',
+			'Domain Observed Used for C2 Detected'                        => 'C2domain',
+			'Possibly Unwanted Program Detected'                          => 'PotUnwantedProg',
+			'Successful Credential Theft Detected'                        => 'CredTheft',
+			'Possible Social Engineering Attempted'                       => 'PosSocEng',
+			'Crypto Currency Mining Activity Detected'                    => 'Mining',
+			'Malware Command and Control Activity Detected'               => 'MalC2act',
+			'Potentially Bad Traffic'                                     => 'PotBadTraf',
+		};
+
+		#
 		# set the columns they had not been manually specified
 		#
 		if ( !defined($columns) ) {
@@ -500,29 +549,10 @@ if ( $action eq 'search' ) {
 				if ( defined( $row->{$column} ) && $column eq 'rule_id' ) {
 					push( @new_line, $row->{gid} . ':' . $row->{sid} . ':' . $row->{rev} );
 				}
-				elsif ( defined( $row->{$column} ) && $column eq 'classification' ) {
+				elsif ( defined( $row->{$column} ) && $column eq 'classification' && $table eq 'suricata' ) {
 
-					if ( $row->{$column} eq 'Generic Protocol Command Decode' ) {
+					if ( defined( $suricata_class_map->{ $row->{$column} } ) ) {
 						push( @new_line, 'GPCD' );
-					}
-					elsif ( $row->{$column} =~ /^[Mm]isc [Aa]ttack$/ ) {
-						push( @new_line, 'M Attack' );
-					}
-					elsif ( $row->{$column} =~ /^[Mm]isc [Aa]ctivity$/ ) {
-						push( @new_line, 'M Attack' );
-					}
-					elsif ( $row->{$column} =~ /^[Dd]etection of a [Nn]etwork [Ss]can$/ ) {
-						push( @new_line, 'Net Scan' );
-					}
-					elsif ( $row->{$column} =~ /^[Aa]ttempted [Ii]nformation [Ll]eak$/ ) {
-						push( @new_line, 'AIL' );
-					}
-					elsif ( $row->{$column} =~ /^[Ii]nformation [Ll]eak$/ ) {
-						push( @new_line, 'IL' );
-
-					}
-					elsif ( $row->{$column} =~ /^[Pp]otentially [Bb]ad [Tt]raffic$/ ) {
-						push( @new_line, 'PBT' );
 					}
 					else {
 						push( @new_line, $row->{$column} );
@@ -622,15 +652,16 @@ if ( $action eq 'event' ) {
 		limit    => 1,
 	);
 
-	if (!defined($returned->[0])) {
+	if ( !defined( $returned->[0] ) ) {
 		print "{}\n";
 		exit 42;
 	}
 
-	if ($decode_raw&& defined($returned->[0])
-		&& defined( $returned->[0]{raw} )
-		) {
-		$returned->[0]{raw}=decode_json($returned->[0]{raw});
+	if (   $decode_raw
+		&& defined( $returned->[0] )
+		&& defined( $returned->[0]{raw} ) )
+	{
+		$returned->[0]{raw} = decode_json( $returned->[0]{raw} );
 	}
 
 	my $json = JSON->new;
@@ -638,7 +669,7 @@ if ( $action eq 'event' ) {
 		$json->canonical(1);
 		$json->pretty(1);
 	}
-	print $json->encode($returned->[0]);
+	print $json->encode( $returned->[0] );
 	if ( !$pretty ) {
 		print "\n";
 	}
