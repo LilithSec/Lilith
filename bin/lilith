@@ -306,16 +306,35 @@ if ( -f $rules_file ) {
 }
 
 if ( $action eq 'run' ) {
-	print "Lilith starting...\n" . "dsn: "
-		. $toml->{dsn}
-		. "\nsagan: "
-		. $toml->{sagan}
-		. "\nsuricata: "
-		. $toml->{suricata}
-		. "\nuser:  "
-		. $toml->{user}
-		. "\npass: ";
-
+	print "Lilith starting...\n" . "dsn: ";
+	if ( defined( $toml->{dsn} ) ) {
+		print $toml->{dsn} . "\n";
+	}
+	else {
+		print "***undefined***\n";
+	}
+	print "sagan: ";
+	if ( defined( $toml->{sagan} ) ) {
+		print $toml->{sagan} . "\n";
+	}
+	else {
+		print "***undefined***\n";
+	}
+	print "suricata: ";
+	if ( defined( $toml->{suricata} ) ) {
+		print $toml->{suricata} . "\n";
+	}
+	else {
+		print "***undefined***\n";
+	}
+	print "user: ";
+	if ( defined( $toml->{user} ) ) {
+		print $toml->{user} . "\n";
+	}
+	else {
+		print "***undefined***\n";
+	}
+	print "pass: ";
 	if ( defined( $toml->{pass} ) ) {
 		print "***defined***\n";
 	}
@@ -323,7 +342,7 @@ if ( $action eq 'run' ) {
 		print "***undefined***\n";
 	}
 
-	print "Configured Instances...\n" . to_toml( \%files ) . "\n\n\nCalling Lilith->run now....\n";
+	print "\nConfigured Instances...\n" . to_toml( \%files ) . "\n\n\nCalling Lilith->run now....\n";
 
 	$lilith->run( files => \%files, );
 }
