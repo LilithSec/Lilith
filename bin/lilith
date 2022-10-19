@@ -135,6 +135,7 @@ my $debug;
 my $event_id;
 my $id;
 my $decode_raw;
+my $daemonize;
 Getopt::Long::Configure('no_ignore_case');
 Getopt::Long::Configure('bundling');
 GetOptions(
@@ -184,6 +185,7 @@ GetOptions(
 	'id=s'        => \$id,
 	'event=s'     => \$event_id,
 	'raw'         => \$decode_raw,
+	'daemonize'   => \$daemonize,
 );
 
 # print version or help if requested
@@ -345,7 +347,9 @@ if ( $action eq 'run' ) {
 
 	print "\nConfigured Instances...\n" . to_toml( \%files ) . "\n\n\nCalling Lilith->run now....\n";
 
-	daemonize(undef, undef, '/var/run/lilith.pid' );
+	if (!$daemonize) {
+		daemonize( undef, undef, '/var/run/lilith/pid' );
+	};
 
 	$lilith->run( files => \%files, );
 }
