@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Getopt::Long;
 use Lilith;
-use TOML        qw(from_toml);
+use TOML        qw(from_toml to_toml);
 use File::Slurp qw(read_file);
 use JSON;
 use Text::ANSITable;
@@ -306,6 +306,25 @@ if ( -f $rules_file ) {
 }
 
 if ( $action eq 'run' ) {
+	print "Lilith starting...\n" . "dsn: "
+		. $toml->{dsn}
+		. "\nsagan: "
+		. $toml->{sagan}
+		. "\nsuricata: "
+		. $toml->{suricata}
+		. "\nuser:  "
+		. $toml->{user}
+		. "\npass: ";
+
+	if ( defined( $toml->{pass} ) ) {
+		print "***defined***\n";
+	}
+	else {
+		print "***undefined***\n";
+	}
+
+	print "Configured Instances...\n" . to_toml( \%files ) . "\n\n\nCalling Lilith->run now....\n";
+
 	$lilith->run( files => \%files, );
 }
 
@@ -552,7 +571,7 @@ if ( $action eq 'search' ) {
 				elsif ( defined( $row->{$column} ) && $column eq 'classification' && $table eq 'suricata' ) {
 
 					if ( defined( $suricata_class_map->{ $row->{$column} } ) ) {
-						push( @new_line, $suricata_class_map->{ $row->{$column} });
+						push( @new_line, $suricata_class_map->{ $row->{$column} } );
 					}
 					else {
 						push( @new_line, $row->{$column} );
