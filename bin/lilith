@@ -552,7 +552,7 @@ if ( $action eq 'search' ) {
 				elsif ( defined( $row->{$column} ) && $column eq 'classification' && $table eq 'suricata' ) {
 
 					if ( defined( $suricata_class_map->{ $row->{$column} } ) ) {
-						push( @new_line, 'GPCD' );
+						push( @new_line, $suricata_class_map->{ $row->{$column} });
 					}
 					else {
 						push( @new_line, $row->{$column} );
