@@ -9,6 +9,7 @@ use File::Slurp qw(read_file);
 use JSON;
 use Text::ANSITable;
 use Term::ANSIColor;
+use Net::Server::Daemonize qw(daemonize);
 
 sub version {
 	print "lilith v. 0.0.1\n";
@@ -343,6 +344,8 @@ if ( $action eq 'run' ) {
 	}
 
 	print "\nConfigured Instances...\n" . to_toml( \%files ) . "\n\n\nCalling Lilith->run now....\n";
+
+	daemonize(undef, undef, '/var/run/lilith.pid' );
 
 	$lilith->run( files => \%files, );
 }
