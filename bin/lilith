@@ -362,6 +362,7 @@ if ( $action eq 'extend' ) {
 	$lilith->extend(
 
 	);
+	exit 0;
 }
 
 if ( $action eq 'search' ) {
@@ -675,3 +676,55 @@ if ( $action eq 'event' ) {
 	}
 	exit 0;
 }
+
+#
+#
+#
+
+if ( $action eq 'class_map' ) {
+	#
+	# init the table
+	#
+	my $tb = Text::ANSITable->new;
+	$tb->border_style( $ENV{Lilith_table_border} );
+	$tb->color_theme( $ENV{Lilith_table_color} );
+
+	my @columns = ( 'Class', 'Mapping' );
+
+	my $header_int = 0;
+	my $padding;
+	my @headers;
+	foreach my $header (@columns) {
+		push( @headers, $header );
+
+		if   ( ( $header_int % 2 ) != 0 ) { $padding = 1; }
+		else                              { $padding = 0; }
+
+		$tb->set_column_style( $header_int, pad => $padding );
+
+		$header_int++;
+	}
+
+	$tb->columns( \@headers );
+
+	#
+	#
+	#
+	my @td;
+	foreach my $key ( sort( keys( %{ $lilith->{class_map} } ) ) ) {
+		my @row = ( $key, $lilith->{class_map}{$key} );
+		push( @td, \@row );
+	}
+
+	#
+	# print the table
+	#
+	$tb->add_rows( \@td );
+	print $tb->draw;
+	exit 0;
+}
+
+#
+# means we did not match anything
+#
+die( 'No matching action, -a, found for "' . $action . '"' );
