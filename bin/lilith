@@ -29,8 +29,14 @@ sub help {
 Action :: run
 Description :: Runs the ingestion loop.
 
+Action :: class_map
+Description :: Display class to short class mappings.
+
 Action :: create_tables
 Description :: Creates the tables in PostgreSQL.
+
+Action :: event
+Description :: 
 
 Action :: search
 Description :: Searches the specified table returns the results.
@@ -269,12 +275,14 @@ unless ($toml) {
 }
 
 my $lilith = Lilith->new(
-	dsn      => $toml->{dsn},
-	sagan    => $toml->{sagan},
-	suricata => $toml->{suricata},
-	user     => $toml->{user},
-	pass     => $toml->{pass},
-	debug    => $debug,
+	dsn          => $toml->{dsn},
+	sagan        => $toml->{sagan},
+	suricata     => $toml->{suricata},
+	user         => $toml->{user},
+	pass         => $toml->{pass},
+	debug        => $debug,
+	class_ignore => $toml->{class_ignore},
+	sid_ignore   => $toml->{sid_ignore},
 );
 
 # create the tables if requested
@@ -678,7 +686,7 @@ if ( $action eq 'event' ) {
 }
 
 #
-#
+# print the class_map
 #
 
 if ( $action eq 'class_map' ) {
@@ -721,6 +729,7 @@ if ( $action eq 'class_map' ) {
 	#
 	$tb->add_rows( \@td );
 	print $tb->draw;
+
 	exit 0;
 }
 

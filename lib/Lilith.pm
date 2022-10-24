@@ -100,14 +100,26 @@ sub new {
 		$opts{suricata} = 'suricata_alerts';
 	}
 
+	if ( !defined( $opts{sid_ignore} ) ) {
+		my @empty_array;
+		$opts{sid_ignore} = \@empty_array;
+	}
+
+	if ( !defined( $opts{class_ignore} ) ) {
+		my @empty_array;
+		$opts{class_ignore} = \@empty_array;
+	}
+
 	my $self = {
-		dsn       => $opts{dsn},
-		user      => $opts{user},
-		pass      => $opts{pass},
-		sagan     => $opts{sagan},
-		suricata  => $opts{suricata},
-		debug     => $opts{debug},
-		class_map => {
+		sid_ignore   => $opts{sid_ignore},
+		class_ignore => $opts{class_ignore},
+		dsn          => $opts{dsn},
+		user         => $opts{user},
+		pass         => $opts{pass},
+		sagan        => $opts{sagan},
+		suricata     => $opts{suricata},
+		debug        => $opts{debug},
+		class_map    => {
 			'Not Suspicious Traffic'                                      => '!SusT',
 			'Unknown Traffic'                                             => 'Unknown T',
 			'Attempted Information Leak'                                  => '!IL',
@@ -417,8 +429,6 @@ sub extend {
 	if ( !defined( $opts{max_age} ) ) {
 		$opts{max_age} = 5;
 	}
-
-	my @rule_keys = keys( %{ $opts{rules} } );
 
 	my $host = hostname;
 
