@@ -101,12 +101,69 @@ sub new {
 	}
 
 	my $self = {
-		dsn      => $opts{dsn},
-		user     => $opts{user},
-		pass     => $opts{pass},
-		sagan    => $opts{sagan},
-		suricata => $opts{suricata},
-		debug    => $opts{debug},
+		dsn       => $opts{dsn},
+		user      => $opts{user},
+		pass      => $opts{pass},
+		sagan     => $opts{sagan},
+		suricata  => $opts{suricata},
+		debug     => $opts{debug},
+		class_map => {
+			'not suspicious traffic'                                      => '!SusT',
+			'unknown traffic'                                             => 'Unknown T',
+			'attempted information leak'                                  => '!IL',
+			'information leak'                                            => 'IL',
+			'large scale information leak'                                => 'LrgSclIL',
+			'attempted denial of service'                                 => 'ADoS',
+			'denial of service'                                           => 'DoS',
+			'attempted user privilege gain'                               => 'AUPG',
+			'unsuccessful iser privilege gain'                            => '!SucUsrPG',
+			'successful user privilege gain'                              => 'SucUsrPG',
+			'attempted administrator privilege gain'                      => '!SucAdmPG',
+			'unsuccessful admin privilege gain'                           => '!SucAdmPG',
+			'successful administrator privilege gain'                     => 'SucAdmPG',
+			'decode of an rpc query'                                      => 'DRPCQ',
+			'executable code was detected'                                => 'ExeCode',
+			'a suspicious string was detected'                            => 'SusString',
+			'a suspicious filename was detected'                          => 'SusFilename',
+			'an attempted login using a suspicious username was detected' => '!LoginUsername',
+			'a system call was detected'                                  => 'Syscall',
+			'a tcp connection was detected'                               => 'TCPconn',
+			'a network trojan was detected'                               => 'NetTrojan',
+			'a client was using an unusual port'                          => 'OddClntPrt',
+			'detection of a network scan'                                 => 'NetScan',
+			'detection of a denial of service attack'                     => 'DOS',
+			'detection of a non-standard protocol or event'               => 'NS PoE',
+			'generic protocol command decode'                             => 'GPCD',
+			'access to a potentially vulnerable web application'          => 'PotVulWebApp',
+			'web application attack'                                      => 'WebAppAtk',
+			'misc activity'                                               => 'MiscActivity',
+			'misc attack'                                                 => 'MiscAtk',
+			'generic icmp event'                                          => 'GenICMP',
+			'inappropriate content was detected'                          => '!AppCont',
+			'potential corporate privacy violation'                       => 'PotCorpPriVio',
+			'attempt to login by a default username and password'         => '!DefUserPass',
+			'targeted malicious activity was detected'                    => 'TargetedMalAct',
+			'exploit kit activity detected'                               => 'ExpKit',
+			'exploit attempt'                                             => 'ExpAtmpt',
+			'device retrieving external ip address detected'              => 'RetrExtIP',
+			'domain observed used for c2 detected'                        => 'C2domain',
+			'possibly unwanted program detected'                          => 'PotUnwantedProg',
+			'successful credential theft detected'                        => 'CredTheft',
+			'possible social engineering attempted'                       => 'PosSocEng',
+			'crypto currency mining activity detected'                    => 'Mining',
+			'malware command and control activity detected'               => 'MalC2act',
+			'potentially bad traffic'                                     => 'PotBadTraf',
+			'suspicious traffic'                                          => 'SusT',
+			'program error'                                               => 'ProgErr',
+			'suspicious command execution'                                => 'SusProgExec',
+			'network event'                                               => 'NetEvent',
+			'system event'                                                => 'SysEvent',
+			'configuration change'                                        => 'ConfChg',
+			'spam'                                                        => 'Spam',
+			'attempted access to file or directory'                       => 'FoDAccAtmp',
+			'configuration error'                                         => 'ConfErr',
+			'hardware event'                                              => 'HWevent',
+		},
 	};
 	bless $self;
 
@@ -619,6 +676,8 @@ sub search {
 	while ( my $row = $sth->fetchrow_hashref ) {
 		push( @{$found}, $row );
 	}
+
+	$dbh->disconnect;
 
 	return $found;
 }
