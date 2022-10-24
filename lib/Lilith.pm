@@ -126,7 +126,11 @@ Start processing.
 sub run {
 	my ( $self, %opts ) = @_;
 
-	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} );
+	my $dbh;
+	eval { $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} ); };
+	if ($@) {
+		warn($@);
+	}
 
 	# process each file
 	my $file_count = 0;
@@ -155,10 +159,17 @@ sub run {
 					);
 				},
 				got_log_line => sub {
+					my $self = $_[HEAP]{self};
 					my $json;
 					eval { $json = decode_json( $_[ARG0] ) };
 					if ($@) {
 						return;
+					}
+
+					my $dbh;
+					eval { $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} ); };
+					if ($@) {
+						warn($@);
 					}
 
 					eval {
@@ -177,8 +188,8 @@ sub run {
 							# handle if suricata
 							if ( $_[HEAP]{type} eq 'suricata' ) {
 								my $sth
-									= $_[HEAP]{dbh}->prepare( 'insert into '
-										. $_[HEAP]{suricata}
+									= $dbh->prepare( 'insert into '
+										. $self->{suricata}
 										. ' ( instance, host, timestamp, flow_id, event_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, app_proto, flow_pkts_toserver, flow_bytes_toserver, flow_pkts_toclient, flow_bytes_toclient, flow_start, classification, signature, gid, sid, rev, raw ) '
 										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );'
 									);
@@ -202,7 +213,7 @@ sub run {
 							elsif ( $_[HEAP]{type} eq 'sagan' ) {
 								my $sth
 									= $dbh->prepare( 'insert into '
-										. $_[HEAP]{sagan}
+										. $self->{sagan}
 										. ' ( instance, instance_host, timestamp, event_id, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, facility, host, level, priority, program, proto, xff, stream, classification, signature, gid, sid, rev, raw) '
 										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );'
 									);
@@ -233,11 +244,9 @@ sub run {
 			heap => {
 				eve      => $item->{eve},
 				type     => $item->{type},
-				suricata => $self->{suricata},
-				sagan    => $self->{sagan},
-				dbh      => $dbh,
 				host     => hostname,
 				instance => $item->{instance},
+				self     => $self,
 			},
 		);
 
@@ -476,9 +485,9 @@ sub search {
 	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} );
 
 	my @sql_args;
-	my $sql = 'select * from ' . $table. ' where';
+	my $sql = 'select * from ' . $table . ' where';
 	if ( defined( $opts{no_time} ) && $opts{no_time} ) {
-		$sql=$sql.' id >= 0';
+		$sql = $sql . ' id >= 0';
 	}
 	else {
 
