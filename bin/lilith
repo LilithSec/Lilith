@@ -551,8 +551,8 @@ if ( $action eq 'search' ) {
 				}
 				elsif ( defined( $row->{$column} ) && $column eq 'classification' ) {
 
-					if ( defined( $lilith->{class_map}->{ lc( $row->{$column} ) } ) ) {
-						push( @new_line, $lilith->{class_map}->{ lc( $row->{$column} ) } );
+					if ( defined( $lilith->{lc_class_map}->{ lc( $row->{$column} ) } ) ) {
+						push( @new_line, $lilith->{lc_class_map}->{ lc( $row->{$column} ) } );
 					}
 					else {
 						push( @new_line, $row->{$column} );
