@@ -100,26 +100,38 @@ sub new {
 		$opts{suricata} = 'suricata_alerts';
 	}
 
-	if ( !defined( $opts{sid_ignore} ) ) {
+	if ( !defined( $opts{suricata_sid_ignore} ) ) {
 		my @empty_array;
-		$opts{sid_ignore} = \@empty_array;
+		$opts{suricata_sid_ignore} = \@empty_array;
 	}
 
-	if ( !defined( $opts{class_ignore} ) ) {
+	if ( !defined( $opts{suricata_class_ignore} ) ) {
 		my @empty_array;
-		$opts{class_ignore} = \@empty_array;
+		$opts{suricata_class_ignore} = \@empty_array;
+	}
+
+	if ( !defined( $opts{sagan_sid_ignore} ) ) {
+		my @empty_array;
+		$opts{sagan_sid_ignore} = \@empty_array;
+	}
+
+	if ( !defined( $opts{sagan_class_ignore} ) ) {
+		my @empty_array;
+		$opts{sagan_class_ignore} = \@empty_array;
 	}
 
 	my $self = {
-		sid_ignore   => $opts{sid_ignore},
-		class_ignore => $opts{class_ignore},
-		dsn          => $opts{dsn},
-		user         => $opts{user},
-		pass         => $opts{pass},
-		sagan        => $opts{sagan},
-		suricata     => $opts{suricata},
-		debug        => $opts{debug},
-		class_map    => {
+		suricata_sid_ignore   => $opts{suricata_sid_ignore},
+		sagan_sid_ignore      => $opts{sagan_sid_ignore},
+		suricata_class_ignore => $opts{suricata_class_ignore},
+		sagan_class_ignore    => $opts{sagan_class_ignore},
+		dsn                   => $opts{dsn},
+		user                  => $opts{user},
+		pass                  => $opts{pass},
+		sagan                 => $opts{sagan},
+		suricata              => $opts{suricata},
+		debug                 => $opts{debug},
+		class_map             => {
 			'Not Suspicious Traffic'                                      => '!SusT',
 			'Unknown Traffic'                                             => 'Unknown T',
 			'Attempted Information Leak'                                  => '!IL',
@@ -426,14 +438,11 @@ sub create_tables {
 sub extend {
 	my ( $self, %opts ) = @_;
 
-	if ( !defined( $opts{max_age} ) ) {
-		$opts{max_age} = 5;
+	if ( !defined( $opts{go_back_minutes} ) ) {
+		$opts{go_back_minutes} = 5;
 	}
 
 	my $host = hostname;
-
-	my $from = time;
-	my $till = $from - $opts{max_age};
 
 	# librenms return hash
 	my $to_return = {
@@ -448,6 +457,119 @@ sub extend {
 	# IDs of found alerts
 	my @suricata_alert_ids;
 	my @sagan_alert_ids;
+
+	my $dbh;
+	eval { $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} ); };
+	if ($@) {
+		die( 'DBI->connect_cached failure.. ' . $@ );
+	}
+
+	#
+	# suricata SQL bit
+	#
+
+	my $sql
+		= 'select * from '
+		. $self->{suricata}
+		. " where timestamp >= CURRENT_TIMESTAMP - interval '"
+		. $opts{go_back_minutes}
+		. " minutes'";
+
+	if ( defined( $self->{suricata_class_ignore}[0] ) ) {
+		my $int = 0;
+		while ( defined( $self->{suricata_class_ignore}[$int] ) ) {
+			my $class = $self->{suricata_class_ignore}[$int];
+
+			if ( defined( $self->{rev_class_map}{$class} ) ) {
+				$class = $self->{rev_class_map}{$class};
+			}
+			elsif ( defined( $self->{lc_rev_class_map}{$class} ) ) {
+				$class = $self->{lc_rev_class_map}{$class};
+			}
+
+			$sql = $sql . " and class != '" . $class . "'";
+
+			$int++;
+		}
+	}
+
+	if ( defined( $self->{suricata_sid_ignore}[0] ) ) {
+		my $int = 0;
+		while ( defined( $self->{suricata_sid_ignore}[$int] ) ) {
+			my $sid = $self->{suricata_sid_ignore}[$int];
+
+			$sql = $sql . " and sid != '" . $sid . "'";
+
+			$int++;
+		}
+	}
+
+	$sql = $sql .';';
+
+	$sql = $sql . ';';
+	if ( $self->{debug} ) {
+		warn( 'SQL search "' . $sql . '"' );
+	}
+	my $sth = $dbh->prepare($sql);
+	$sth->execute();
+
+	my $suricata_found = ();
+	while ( my $row = $sth->fetchrow_hashref ) {
+		push( @{$suricata_found}, $row );
+	}
+
+		#
+	# suricata SQL bit
+	#
+
+	$sql
+		= 'select * from '
+		. $self->{sagan}
+		. " where timestamp >= CURRENT_TIMESTAMP - interval '"
+		. $opts{go_back_minutes}
+		. " minutes'";
+
+	if ( defined( $self->{sagan_class_ignore}[0] ) ) {
+		my $int = 0;
+		while ( defined( $self->{sagan_class_ignore}[$int] ) ) {
+			my $class = $self->{sagan_class_ignore}[$int];
+
+			if ( defined( $self->{rev_sagan_map}{$class} ) ) {
+				$class = $self->{rev_sagan_map}{$class};
+			}
+			elsif ( defined( $self->{lc_rev_sagan_map}{$class} ) ) {
+				$class = $self->{lc_rev_sagan_map}{$class};
+			}
+
+			$sql = $sql . " and class != '" . $class . "'";
+
+			$int++;
+		}
+	}
+
+	if ( defined( $self->{sagan_sid_ignore}[0] ) ) {
+		my $int = 0;
+		while ( defined( $self->{sagan_sid_ignore}[$int] ) ) {
+			my $sid = $self->{sagan_sid_ignore}[$int];
+
+			$sql = $sql . " and sid != '" . $sid . "'";
+
+			$int++;
+		}
+	}
+
+	$sql = $sql . ';';
+	if ( $self->{debug} ) {
+		warn( 'SQL search "' . $sql . '"' );
+	}
+	$sth = $dbh->prepare($sql);
+	$sth->execute();
+
+	my $sagan_found = ();
+	while ( my $row = $sth->fetchrow_hashref ) {
+		push( @{$sagan_found}, $row );
+	}
+
 
 }
 
@@ -561,7 +683,6 @@ sub search {
 
 	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} );
 
-	my @sql_args;
 	my $sql = 'select * from ' . $table . ' where';
 	if ( defined( $opts{no_time} ) && $opts{no_time} ) {
 		$sql = $sql . ' id >= 0';

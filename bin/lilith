@@ -367,9 +367,20 @@ if ( $action eq 'run' ) {
 }
 
 if ( $action eq 'extend' ) {
-	$lilith->extend(
 
-	);
+	my $to_return=$lilith->extend(
+
+								  );
+	my $json = JSON->new;
+	if ($pretty) {
+		$json->canonical(1);
+		$json->pretty(1);
+	}
+	print $json->encode($to_return);
+	if ( !$pretty ) {
+		print "\n";
+	}
+
 	exit 0;
 }
 
