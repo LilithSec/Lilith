@@ -6,7 +6,7 @@
 *.o
 *.pm.tdy
 *.bs
-bin/.exists
+bin/lilith
 
 # Devel::Cover
 cover_db/
