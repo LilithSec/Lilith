@@ -368,9 +368,9 @@ if ( $action eq 'run' ) {
 
 if ( $action eq 'extend' ) {
 
-	my $to_return=$lilith->extend(
+	my $to_return = $lilith->extend(
 
-								  );
+	);
 	my $json = JSON->new;
 	if ($pretty) {
 		$json->canonical(1);
@@ -570,13 +570,7 @@ if ( $action eq 'search' ) {
 					push( @new_line, $row->{gid} . ':' . $row->{sid} . ':' . $row->{rev} );
 				}
 				elsif ( defined( $row->{$column} ) && $column eq 'classification' ) {
-
-					if ( defined( $lilith->{lc_class_map}->{ lc( $row->{$column} ) } ) ) {
-						push( @new_line, $lilith->{lc_class_map}->{ lc( $row->{$column} ) } );
-					}
-					else {
-						push( @new_line, $row->{$column} );
-					}
+					push( @new_line, $lilith->get_short_class( $row->{$column} ) );
 				}
 				elsif ( defined( $row->{$column} ) && ( $column eq 'src_ip' || $column eq 'dest_ip' ) ) {
 					if ( defined( $ENV{Lilith_IP_color} ) ) {
