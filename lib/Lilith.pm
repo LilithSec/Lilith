@@ -12,7 +12,7 @@ use File::ReadBackwards;
 
 =head1 NAME
 
-Lilith - Reads 
+Lilith - Work with Suricata/Sagan EVE logs and PostgreSQL.
 
 =head1 VERSION
 
@@ -78,6 +78,38 @@ Initiates it.
                            user=>$toml->{user},
                            pass=>$toml->{pass},
                           );
+
+The args taken by this are as below.
+
+    - dsn :: The DSN to use for with DBI.
+
+    - sagan :: Name of the table for Sagan alerts.
+      Default :: sagan_alerts
+
+    - suricata :: Name of the table for Suricata alerts.
+      Default :: suricata_alerts
+
+    - user :: Name for use with DBI for the DB connection.
+      Default :: lilith
+
+    - pass :: pass for use with DBI for the DB connection.
+      Default :: undef
+
+    - suricata_sid_ignore :: Array of SIDs to ignore for Suricata
+                             for the extend.
+      Default :: undef
+
+    - suricata_class_ignore :: Array of classes to ignore for the
+                               extend for suricata.
+      Default :: undef
+
+    - sagan_sid_ignore :: Array of SIDs to ignore for Sagan for
+                          the extend.
+      Default :: undef
+
+    - sagan_class_ignore :: Array of classes to ignore for the
+                            extend for Sagan.
+      Default :: undef
 
 =cut
 
@@ -187,18 +219,24 @@ sub new {
 			'Suspicious Traffic'                                          => 'SusT',
 			'Configuration Error'                                         => 'ConfErr',
 			'Hardware Event'                                              => 'HWevent',
+			''                                                            => 'empty',
 		},
 		lc_class_map     => {},
 		rev_class_map    => {},
 		lc_rev_class_map => {},
+		snmp_class_map   => {},
 	};
 	bless $self;
 
 	my @keys = keys( %{ $self->{class_map} } );
 	foreach my $key (@keys) {
-		$self->{lc_class_map}{ lc($key) }                           = $self->{class_map}{$key};
+		my $lc_key = lc($key);
+		$self->{lc_class_map}{$lc_key}                              = $self->{class_map}{$key};
 		$self->{rev_class_map}{ $self->{class_map}{$key} }          = $key;
 		$self->{lc_rev_class_map}{ lc( $self->{class_map}{$key} ) } = $key;
+		$self->{snmp_class_map}{$lc_key}                            = $self->{class_map}{$key};
+		$self->{snmp_class_map}{$lc_key}                            = $self->{class_map}{$key};
+		$self->{snmp_class_map}{$lc_key} =~ s/^\!/not\_/;
 	}
 
 	return $self;
@@ -206,11 +244,32 @@ sub new {
 
 =head2 run
 
-Start processing.
+Start processing. This method is not expected to return.
 
     $lilith->run(
-                 files=>\%files,
+                 files=>{
+                        foo=>{
+                              type=>'suricata',
+                              instance=>'foo-pie',
+                              eve=>'/var/log/suricata/alerts-pie.json',
+                              },
+                        'foo-lae'=>{
+                                    type=>'sagan',
+                                    eve=>'/var/log/sagan/alerts-lae.json',
+                                    },
+                        },
                 );
+
+One argument named 'files' is taken and it is hash of
+hashes. The keys are below.
+
+    - type :: Either 'suricata' or 'sagan', depending
+              on the type it is.
+
+    - eve :: Path to the EVE file to read.
+
+    - instance :: Instance name. If not specified the key
+                  is used.
 
 =cut
 
@@ -350,13 +409,7 @@ sub run {
 
 Just creates the required tables in the DB.
 
-     $lilith->create_tables(
-                            dsn=>$toml->{dsn},
-                            sagan=>$toml->{sagan},
-                            suricata=>$toml->{suricata},
-                            user=>$toml->{user},
-                            pass=>$toml->{pass},
-                           );
+     $lilith->create_tables;
 
 =cut
 
@@ -450,126 +503,130 @@ sub extend {
 		version     => 1,
 		error       => '0',
 		errorString => '',
-		alert       => '0',
-		alertString => ''
 	};
 
 	# IDs of found alerts
 	my @suricata_alert_ids;
 	my @sagan_alert_ids;
 
-	my $dbh;
-	eval { $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} ); };
-	if ($@) {
-		die( 'DBI->connect_cached failure.. ' . $@ );
-	}
-
-	#
-	# suricata SQL bit
-	#
-
-	my $sql
-		= 'select * from '
-		. $self->{suricata}
-		. " where timestamp >= CURRENT_TIMESTAMP - interval '"
-		. $opts{go_back_minutes}
-		. " minutes'";
-
-	if ( defined( $self->{suricata_class_ignore}[0] ) ) {
-		my $int = 0;
-		while ( defined( $self->{suricata_class_ignore}[$int] ) ) {
-			my $class = $self->{suricata_class_ignore}[$int];
-
-			if ( defined( $self->{rev_class_map}{$class} ) ) {
-				$class = $self->{rev_class_map}{$class};
-			}
-			elsif ( defined( $self->{lc_rev_class_map}{$class} ) ) {
-				$class = $self->{lc_rev_class_map}{$class};
-			}
-
-			$sql = $sql . " and class != '" . $class . "'";
-
-			$int++;
-		}
-	}
-
-	if ( defined( $self->{suricata_sid_ignore}[0] ) ) {
-		my $int = 0;
-		while ( defined( $self->{suricata_sid_ignore}[$int] ) ) {
-			my $sid = $self->{suricata_sid_ignore}[$int];
-
-			$sql = $sql . " and sid != '" . $sid . "'";
-
-			$int++;
-		}
-	}
-
-	$sql = $sql .';';
-
-	$sql = $sql . ';';
-	if ( $self->{debug} ) {
-		warn( 'SQL search "' . $sql . '"' );
-	}
-	my $sth = $dbh->prepare($sql);
-	$sth->execute();
-
+	my $sagan_found    = ();
 	my $suricata_found = ();
-	while ( my $row = $sth->fetchrow_hashref ) {
-		push( @{$suricata_found}, $row );
-	}
+	eval {
+		my $dbh;
+		eval { $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} ); };
+		if ($@) {
+			die( 'DBI->connect_cached failure.. ' . $@ );
+		}
 
 		#
-	# suricata SQL bit
-	#
+		# suricata SQL bit
+		#
 
-	$sql
-		= 'select * from '
-		. $self->{sagan}
-		. " where timestamp >= CURRENT_TIMESTAMP - interval '"
-		. $opts{go_back_minutes}
-		. " minutes'";
+		my $sql
+			= 'select * from '
+			. $self->{suricata}
+			. " where timestamp >= CURRENT_TIMESTAMP - interval '"
+			. $opts{go_back_minutes}
+			. " minutes'";
 
-	if ( defined( $self->{sagan_class_ignore}[0] ) ) {
-		my $int = 0;
-		while ( defined( $self->{sagan_class_ignore}[$int] ) ) {
-			my $class = $self->{sagan_class_ignore}[$int];
+		if ( defined( $self->{suricata_class_ignore}[0] ) ) {
+			my $int = 0;
+			while ( defined( $self->{suricata_class_ignore}[$int] ) ) {
+				my $class = $self->{suricata_class_ignore}[$int];
 
-			if ( defined( $self->{rev_sagan_map}{$class} ) ) {
-				$class = $self->{rev_sagan_map}{$class};
+				if ( defined( $self->{rev_class_map}{$class} ) ) {
+					$class = $self->{rev_class_map}{$class};
+				}
+				elsif ( defined( $self->{lc_rev_class_map}{$class} ) ) {
+					$class = $self->{lc_rev_class_map}{$class};
+				}
+
+				$sql = $sql . " and class != '" . $class . "'";
+
+				$int++;
 			}
-			elsif ( defined( $self->{lc_rev_sagan_map}{$class} ) ) {
-				$class = $self->{lc_rev_sagan_map}{$class};
+		}
+
+		if ( defined( $self->{suricata_sid_ignore}[0] ) ) {
+			my $int = 0;
+			while ( defined( $self->{suricata_sid_ignore}[$int] ) ) {
+				my $sid = $self->{suricata_sid_ignore}[$int];
+
+				$sql = $sql . " and sid != '" . $sid . "'";
+
+				$int++;
 			}
-
-			$sql = $sql . " and class != '" . $class . "'";
-
-			$int++;
 		}
-	}
 
-	if ( defined( $self->{sagan_sid_ignore}[0] ) ) {
-		my $int = 0;
-		while ( defined( $self->{sagan_sid_ignore}[$int] ) ) {
-			my $sid = $self->{sagan_sid_ignore}[$int];
+		$sql = $sql . ';';
 
-			$sql = $sql . " and sid != '" . $sid . "'";
-
-			$int++;
+		$sql = $sql . ';';
+		if ( $self->{debug} ) {
+			warn( 'SQL search "' . $sql . '"' );
 		}
-	}
+		my $sth = $dbh->prepare($sql);
+		$sth->execute();
 
-	$sql = $sql . ';';
-	if ( $self->{debug} ) {
-		warn( 'SQL search "' . $sql . '"' );
-	}
-	$sth = $dbh->prepare($sql);
-	$sth->execute();
+		while ( my $row = $sth->fetchrow_hashref ) {
+			push( @{$suricata_found}, $row );
+		}
 
-	my $sagan_found = ();
-	while ( my $row = $sth->fetchrow_hashref ) {
-		push( @{$sagan_found}, $row );
-	}
+		#
+		# Sagan SQL bit
+		#
 
+		$sql
+			= 'select * from '
+			. $self->{sagan}
+			. " where timestamp >= CURRENT_TIMESTAMP - interval '"
+			. $opts{go_back_minutes}
+			. " minutes'";
+
+		if ( defined( $self->{sagan_class_ignore}[0] ) ) {
+			my $int = 0;
+			while ( defined( $self->{sagan_class_ignore}[$int] ) ) {
+				my $class = $self->{sagan_class_ignore}[$int];
+
+				if ( defined( $self->{rev_sagan_map}{$class} ) ) {
+					$class = $self->{rev_sagan_map}{$class};
+				}
+				elsif ( defined( $self->{lc_rev_sagan_map}{$class} ) ) {
+					$class = $self->{lc_rev_sagan_map}{$class};
+				}
+
+				$sql = $sql . " and class != '" . $class . "'";
+
+				$int++;
+			}
+		}
+
+		if ( defined( $self->{sagan_sid_ignore}[0] ) ) {
+			my $int = 0;
+			while ( defined( $self->{sagan_sid_ignore}[$int] ) ) {
+				my $sid = $self->{sagan_sid_ignore}[$int];
+
+				$sql = $sql . " and sid != '" . $sid . "'";
+
+				$int++;
+			}
+		}
+
+		$sql = $sql . ';';
+		if ( $self->{debug} ) {
+			warn( 'SQL search "' . $sql . '"' );
+		}
+		$sth = $dbh->prepare($sql);
+		$sth->execute();
+
+		while ( my $row = $sth->fetchrow_hashref ) {
+			push( @{$sagan_found}, $row );
+		}
+
+	};
+	if ($@) {
+		$to_return->{error}       = 1;
+		$to_return->{errorString} = $@;
+	}
 
 }
 
