@@ -219,7 +219,7 @@ sub new {
 			'Suspicious Traffic'                                          => 'SusT',
 			'Configuration Error'                                         => 'ConfErr',
 			'Hardware Event'                                              => 'HWevent',
-			''                                                            => 'empty',
+			''                                                            => 'blankC',
 		},
 		lc_class_map     => {},
 		rev_class_map    => {},
@@ -628,6 +628,42 @@ sub extend {
 		$to_return->{errorString} = $@;
 	}
 
+}
+
+=head2 get_short_class
+
+=cut
+
+sub get_short_class{
+	my ( $self, $class ) = @_;
+
+	if (!defined($class)) {
+		return('undefC');
+	}
+
+	if ( defined( $self->{lc_class_map}->{ lc( $class ) } ) ) {
+		return $self->{lc_class_map}->{ lc( $class ) };
+	}
+
+	return('unknownC');
+}
+
+=head2 get_short_class
+
+=cut
+
+sub get_short_class_snmp{
+	my ( $self, $class ) = @_;
+
+	if (!defined($class)) {
+		return('undefC');
+	}
+
+	if ( defined( $self->{snmp_class_map}->{ lc( $class ) } ) ) {
+		return $self->{snmp_class_map}->{ lc( $class ) };
+	}
+
+	return('unknownC');
 }
 
 =head2 search
