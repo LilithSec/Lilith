@@ -108,22 +108,29 @@ my $dest_port;
 my $alert_id;
 my $table = 'suricata';
 my $host;
+my $host_not;
 my $host_like;
 my $instance_host;
+my $instance_host_not;
 my $instance_host_like;
 my $instance;
+my $instance_not;
 my $instance_like;
 my $class;
+my $class_not;
 my $class_like;
 my $signature;
+my $signature_not;
 my $signature_like;
 my $ip;
 my $port;
 my $go_back_minutes = 1440;
 my $in_iface;
+my $in_iface_not;
 my $in_iface_like;
 my $proto;
 my $app_proto;
+my $app_proto_not;
 my $app_proto_like;
 my $gid;
 my $sid;
@@ -161,22 +168,29 @@ GetOptions(
 	'id=s'        => \$alert_id,
 	't=s'         => \$table,
 	'h=s'         => \$host,
+	'hN=s'        => \$host_not,
 	'hl'          => \$host_like,
 	'ihl'         => \$instance_host_like,
+	'ihN=s'       => \$instance_host_not,
 	'ih=s'        => \$instance_host,
 	'i=s'         => \$instance,
+	'iN=s'        => \$instance_not,
 	'il'          => \$instance_like,
 	'c=s'         => \$class,
+	'cN=s'        => \$class_not,
 	'cl'          => \$class_like,
 	's=s'         => \$signature,
+	'sN=s'        => \$signature_not,
 	'sl'          => \$signature_like,
 	'ip=s'        => \$ip,
 	'p=s'         => \$port,
 	'm=s'         => \$go_back_minutes,
 	'if=s'        => \$in_iface,
-	'il'          => \$in_iface_like,
+	'ifN=s'       => \$in_iface_not,
+	'ifl'         => \$in_iface_like,
 	'proto=s'     => \$proto,
 	'ap=s'        => \$app_proto,
+	'apN=s'       => \$app_proto_not,
 	'apl'         => \$app_proto_like,
 	'gid=s'       => \$gid,
 	'sid=s'       => \$sid,
@@ -390,11 +404,6 @@ if ( $action eq 'search' ) {
 	# run the search
 	#
 	my $returned = $lilith->search(
-		dsn                => $toml->{dsn},
-		sagan              => $toml->{sagan},
-		suricata           => $toml->{suricata},
-		user               => $toml->{user},
-		pass               => $toml->{pass},
 		src_ip             => $src_ip,
 		src_port           => $src_port,
 		dest_ip            => $dest_ip,
@@ -404,18 +413,24 @@ if ( $action eq 'search' ) {
 		alert_id           => $alert_id,
 		table              => $table,
 		host               => $host,
+		host_not           => $host_not,
 		host_like          => $host_like,
 		instance_host      => $instance_host,
+		instance_host_not  => $instance_host_not,
 		instance_host_like => $instance_host_like,
 		instance           => $instance,
+		instance_not       => $instance_not,
 		instance_like      => $instance_like,
 		class              => $class,
+		class_not          => $class_not,
 		class_like         => $class_like,
 		signature          => $signature,
+		signature_not      => $signature_not,
 		signature_like     => $signature_like,
 		ip                 => $ip,
 		port               => $port,
 		app_proto          => $app_proto,
+		app_proto_not      => $app_proto_not,
 		app_proto_like     => $app_proto_like,
 		proto              => $proto,
 		gid                => $gid,
@@ -734,6 +749,16 @@ if ( $action eq 'class_map' ) {
 	#
 	$tb->add_rows( \@td );
 	print $tb->draw;
+
+	exit 0;
+}
+
+if ( $action eq 'get_short_class_snmp_list' ) {
+	my $class_list = $lilith->get_short_class_snmp_list;
+
+	foreach my $item ( @{$class_list} ) {
+		print $item. "\n";
+	}
 
 	exit 0;
 }

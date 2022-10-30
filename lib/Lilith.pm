@@ -499,15 +499,17 @@ sub extend {
 
 	# librenms return hash
 	my $to_return = {
-		data        => {},
+		data        => { count => {}, sagan => [], suricata => [] },
 		version     => 1,
 		error       => '0',
 		errorString => '',
 	};
 
-	# IDs of found alerts
-	my @suricata_alert_ids;
-	my @sagan_alert_ids;
+	# shove the snmp class names into the count array
+	my $class_list = $self->get_short_class_snmp_list;
+	foreach my $item ( @{$class_list} ) {
+		$to_return->{data}{count}{$item} = 0;
+	}
 
 	my $sagan_found    = ();
 	my $suricata_found = ();
@@ -628,45 +630,174 @@ sub extend {
 		$to_return->{errorString} = $@;
 	}
 
+	foreach my $row ( @{$suricata_found} ) {
+		push( @{ $to_return->{data}{suricata} }, $row->{event_id} );
+		my $snmp_class = $self->get_short_class_snmp( $row->{classification} );
+		$to_return->{data}{count}{$snmp_class}++;
+	}
+
+	foreach my $row ( @{$sagan_found} ) {
+		push( @{ $to_return->{data}{sagan} }, $row->{event_id} );
+		my $snmp_class = $self->get_short_class_snmp( $row->{classification} );
+		$to_return->{data}{count}{$snmp_class}++;
+	}
+
+	return $to_return;
 }
 
 =head2 get_short_class
 
+Get SNMP short class name for a class.
+
+    my $short_class_name=$lilith->get_short_class($class);
+
 =cut
 
-sub get_short_class{
+sub get_short_class {
 	my ( $self, $class ) = @_;
 
-	if (!defined($class)) {
-		return('undefC');
+	if ( !defined($class) ) {
+		return ('undefC');
 	}
 
-	if ( defined( $self->{lc_class_map}->{ lc( $class ) } ) ) {
-		return $self->{lc_class_map}->{ lc( $class ) };
+	if ( defined( $self->{lc_class_map}->{ lc($class) } ) ) {
+		return $self->{lc_class_map}->{ lc($class) };
 	}
 
-	return('unknownC');
+	return ('unknownC');
 }
 
-=head2 get_short_class
+=head2 get_short_class_snmp
+
+Get SNMP short class name for a class. This
+is the same as the short class name, but with /^\!/
+replaced with 'not_'.
+
+    my $snmp_class_name=$lilith->get_short_class_snmp($class);
 
 =cut
 
-sub get_short_class_snmp{
+sub get_short_class_snmp {
 	my ( $self, $class ) = @_;
 
-	if (!defined($class)) {
-		return('undefC');
+	if ( !defined($class) ) {
+		return ('undefC');
 	}
 
-	if ( defined( $self->{snmp_class_map}->{ lc( $class ) } ) ) {
-		return $self->{snmp_class_map}->{ lc( $class ) };
+	if ( defined( $self->{snmp_class_map}->{ lc($class) } ) ) {
+		return $self->{snmp_class_map}->{ lc($class) };
 	}
 
-	return('unknownC');
+	return ('unknownC');
+}
+
+=head2 get_short_class_snmp_list
+
+Gets a list of short SNMP class names.
+
+    my $snmp_classes=$lilith->get_short_class_snmp_list;
+
+    foreach my $item (@{ $snmp_classes }){
+        print $item."\n";
+    }
+
+=cut
+
+sub get_short_class_snmp_list {
+	my ($self) = @_;
+
+	my $snmp_classes = [ 'undefC', 'unknownC' ];
+	foreach my $item ( keys( %{ $self->{snmp_class_map} } ) ) {
+		push( @{$snmp_classes}, $self->{snmp_class_map}{$item} );
+	}
+
+	return $snmp_classes;
 }
 
 =head2 search
+
+Searches the specified table and returns a array of found rows.
+
+    - table :: 'suricata' or 'sagan' depending on the desired table to
+               use. Will die if something other is specified. The table
+               name used is based on what was passed to new(if not the
+               default).
+      Default :: suricata
+
+    - go_back_minutes :: How far back to search in minutes.
+      Default :: 1440
+
+    - limit :: Limit on how many to return.
+      Default :: undef
+
+    - offset :: Offset for when using limit.
+      Default :: undef
+
+    - order_by :: Column to order by.
+      Default :: timetamp
+
+    - order_dir :: Direction to order.
+      Default :: ASC
+
+Below are simple search items that if given will be matched via a basic equality.
+
+    - src_ip
+    - dest_ip
+    - event_id
+
+    # will become "and src_ip = '192.168.1.2'"
+    src_ip => '192.168.1.2',
+
+Below are a list of numeric items. The value taken is a array and anything
+prefixed '!' with add as a and not equal.
+
+    - src_port
+    - dest_port
+    - gid
+    - sid
+    - rev
+    - id
+
+    # will become "and src_port = '22' and src_port != ''512'"
+    src_port => ['22', '!512'],
+
+Below are a list of string items. On top of these variables,
+any of those with '_like' or '_not' will my modified respectively.
+
+    - host
+    - instance_host
+    - instance
+    - class
+    - signature
+    - app_proto
+    - app_proto
+
+    # will become "and host = 'foo.bar'"
+    host => 'foo.bar',
+
+    # will become "and class != 'foo'"
+    class => 'foo',
+    class_not => 1,
+
+    # will become "and instance like '%foo'"
+    instance => '%foo',
+    instance_like => 1,
+
+    # will become "and instance not like '%foo'"
+    instance => '%foo',
+    instance_like => 1,
+    instance_not => 1,
+
+Below are complex items.
+
+    - ip
+    - port
+
+    # will become "and ( src_ip != '192.168.1.2' or dest_ip != '192.168.1.2' )"
+    ip => '192.16.1.2'
+
+    # will become "and ( src_port != '22' or dest_port != '22' )"
+    port => '22'
 
 =cut
 
@@ -728,13 +859,12 @@ sub search {
 	#
 
 	my @to_check = (
-		'src_ip',         'src_port',      'dest_ip',            'dest_port',
-		'ip',             'port',          'alert_id',           'host',
-		'host_like',      'instance_host', 'instance_host_like', 'instance',
-		'instance_like',  'class',         'class_like',         'signature',
-		'signature_like', 'app_proto',     'app_proto_like',     'proto',
-		'gid',            'sid',           'rev',                'id',
-		'event_id'
+		'src_ip',        'src_port',           'dest_ip',   'dest_port',
+		'ip',            'port',               'host',      'host_like',
+		'instance_host', 'instance_host_like', 'instance',  'instance_like',
+		'class',         'class_like',         'signature', 'signature_like',
+		'app_proto',     'app_proto_like',     'proto',     'gid',
+		'sid',           'rev',                'id',        'event_id'
 	);
 
 	foreach my $var_to_check (@to_check) {
@@ -748,12 +878,12 @@ sub search {
 	#
 
 	my @order_by = (
-		'src_ip',             'src_port',  'dest_ip',        'dest_port',
-		'alert_id',           'host',      'host_like',      'instance_host',
-		'instance_host_like', 'instance',  'instance_like',  'class',
-		'class_like',         'signature', 'signature_like', 'app_proto',
-		'app_proto_like',     'proto',     'gid',            'sid',
-		'rev',                'timestamp', 'id'
+		'src_ip',    'src_port',       'dest_ip',       'dest_port',
+		'host',      'host_like',      'instance_host', 'instance_host_like',
+		'instance',  'instance_like',  'class',         'class_like',
+		'signature', 'signature_like', 'app_proto',     'app_proto_like',
+		'proto',     'gid',            'sid',           'rev',
+		'timestamp', 'id'
 	);
 
 	my $valid_order_by;
@@ -789,7 +919,7 @@ sub search {
 	# add simple items
 	#
 
-	my @simple = ( 'src_ip', 'dest_ip', 'alert_id', 'proto', 'event_id' );
+	my @simple = ( 'src_ip', 'dest_ip', 'proto', 'event_id' );
 
 	foreach my $item (@simple) {
 		if ( defined( $opts{$item} ) ) {
@@ -859,10 +989,20 @@ sub search {
 	foreach my $item (@strings) {
 		if ( defined( $opts{$item} ) ) {
 			if ( defined( $opts{ $item . '_like' } ) && $opts{ $item . '_like' } ) {
-				$sql = $sql . " and host like '" . $opts{$item} . "'";
+				if ( defined( $opts{$item} . '_not' ) && !$opts{ $item . '_not' } ) {
+					$sql = $sql . " and " . $item . " like '" . $opts{$item} . "'";
+				}
+				else {
+					$sql = $sql . " and " . $item . " not like '" . $opts{$item} . "'";
+				}
 			}
 			else {
-				$sql = $sql . " and " . $item . " = '" . $opts{$item} . "'";
+				if ( defined( $opts{$item} . '_not' ) && !$opts{ $item . '_not' } ) {
+					$sql = $sql . " and " . $item . " = '" . $opts{$item} . "'";
+				}
+				else {
+					$sql = $sql . " and " . $item . " != '" . $opts{$item} . "'";
+				}
 			}
 		}
 	}
