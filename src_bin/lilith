@@ -10,6 +10,8 @@ use JSON;
 use Text::ANSITable;
 use Term::ANSIColor;
 use Net::Server::Daemonize qw(daemonize);
+use MIME::Base64;
+use Gzip::Faster;
 
 sub version {
 	print "lilith v. 0.0.1\n";
@@ -151,6 +153,7 @@ my $decode_raw;
 my $daemonize;
 my $user  = 0;
 my $group = 0;
+my $librenms_compress;
 Getopt::Long::Configure('no_ignore_case');
 Getopt::Long::Configure('bundling');
 GetOptions(
@@ -210,6 +213,7 @@ GetOptions(
 	'daemonize'   => \$daemonize,
 	'user=s'      => \$user,
 	'group=s'     => \$user,
+	'Z'           => \$librenms_compress,
 );
 
 # print version or help if requested
@@ -390,8 +394,18 @@ if ( $action eq 'extend' ) {
 		$json->canonical(1);
 		$json->pretty(1);
 	}
-	print $json->encode($to_return);
-	if ( !$pretty ) {
+
+	my $raw_json = $json->encode($to_return);
+	if ($librenms_compress) {
+		my $compressed = encode_base64( gzip($raw_json) );
+		$compressed =~ s/\n//g;
+		$compressed = $compressed . "\n";
+		print $compressed;
+	}
+	else {
+		print $raw_json;
+	}
+	if ( !$pretty && !$librenms_compress ) {
 		print "\n";
 	}
 
@@ -698,7 +712,8 @@ if ( $action eq 'event' ) {
 		$json->canonical(1);
 		$json->pretty(1);
 	}
-	print $json->encode( $returned->[0] );
+	my $raw_json = $json->encode( $returned->[0] );
+	print $raw_json;
 	if ( !$pretty ) {
 		print "\n";
 	}

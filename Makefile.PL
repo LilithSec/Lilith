@@ -11,7 +11,7 @@ my %WriteMakefileArgs = (
 	LICENSE            => 'artistic_2',
 	MIN_PERL_VERSION   => '5.006',
 	INST_SCRIPT        => 'bin',
-	EXE_FILES=>['src_bin/lilith'],
+	EXE_FILES          => ['src_bin/lilith'],
 	CONFIGURE_REQUIRES => {
 		'ExtUtils::MakeMaker' => '0',
 	},
@@ -28,6 +28,8 @@ my %WriteMakefileArgs = (
 		'POE'                    => '0',
 		'Sys::Hostname'          => '0',
 		'File::Slurp'            => '0',
+		'MIME::Base64'           => '0',
+		'Gzip::Faster'           => '0',
 
 	},
 	dist       => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
