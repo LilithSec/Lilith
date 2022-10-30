@@ -30,6 +30,7 @@ my %WriteMakefileArgs = (
 		'File::Slurp'            => '0',
 		'MIME::Base64'           => '0',
 		'Gzip::Faster'           => '0',
+		'DBD::Pg'                => '0',
 
 	},
 	dist       => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
