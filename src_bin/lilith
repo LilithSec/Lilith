@@ -126,7 +126,7 @@ my $signature_not;
 my $signature_like;
 my $ip;
 my $port;
-my $go_back_minutes = 1440;
+my $go_back_minutes;
 my $in_iface;
 my $in_iface_not;
 my $in_iface_like;
@@ -386,10 +386,12 @@ if ( $action eq 'run' ) {
 
 if ( $action eq 'extend' ) {
 
-	my $to_return = $lilith->extend(
+	if ( !defined($go_back_minutes) ) {
+		$go_back_minutes = 5,;
+	}
 
-	);
-	my $json = JSON->new;
+	my $to_return = $lilith->extend( go_back_minutes => $go_back_minutes, );
+	my $json      = JSON->new;
 	if ($pretty) {
 		$json->canonical(1);
 		$json->pretty(1);

@@ -483,7 +483,7 @@ sub create_tables {
 =head2 extend
 
 	my $return=$lilith->extend(
-		                       max_age=>5,
+		                       go_back_minutes=>5,
 	                          );
 
 =cut
