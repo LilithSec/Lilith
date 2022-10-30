@@ -95,12 +95,20 @@ The args taken by this are as below.
     - pass :: pass for use with DBI for the DB connection.
       Default :: undef
 
+    - sid_ignore :: Array of SIDs to ignore for Suricata and Sagan
+                    for the extend.
+      Default :: undef
+
+    - class_ignore :: Array of classes to ignore for the
+                      extend for Suricata and Sagan
+      Default :: undef
+
     - suricata_sid_ignore :: Array of SIDs to ignore for Suricata
                              for the extend.
       Default :: undef
 
     - suricata_class_ignore :: Array of classes to ignore for the
-                               extend for suricata.
+                               extend for Suricata.
       Default :: undef
 
     - sagan_sid_ignore :: Array of SIDs to ignore for Sagan for
@@ -132,6 +140,16 @@ sub new {
 		$opts{suricata} = 'suricata_alerts';
 	}
 
+	if ( !defined( $opts{sid_ignore} ) ) {
+		my @empty_array;
+		$opts{sid_ignore} = \@empty_array;
+	}
+
+	if ( !defined( $opts{class_ignore} ) ) {
+		my @empty_array;
+		$opts{class_ignore} = \@empty_array;
+	}
+
 	if ( !defined( $opts{suricata_sid_ignore} ) ) {
 		my @empty_array;
 		$opts{suricata_sid_ignore} = \@empty_array;
@@ -153,8 +171,10 @@ sub new {
 	}
 
 	my $self = {
+		sid_ignore            => $opts{sid_ignore},
 		suricata_sid_ignore   => $opts{suricata_sid_ignore},
 		sagan_sid_ignore      => $opts{sagan_sid_ignore},
+		class_ignore          => $opts{class_ignore},
 		suricata_class_ignore => $opts{suricata_class_ignore},
 		sagan_class_ignore    => $opts{sagan_class_ignore},
 		dsn                   => $opts{dsn},
@@ -495,7 +515,60 @@ sub extend {
 		$opts{go_back_minutes} = 5;
 	}
 
-	my $host = hostname;
+	#
+	# put together the hashes of items to ignore
+	#
+
+	my $suricata_sid_ignore   = {};
+	my $suricata_class_ignore = {};
+	my $sagan_class_ignore    = {};
+	my $sagan_sid_ignore      = {};
+
+	if ( defined( $self->{suricata_sid_ignore}[0] ) ) {
+		foreach my $item ( @{ $self->{suricata_sid_ignore} } ) {
+			$suricata_sid_ignore->{$item} = 1;
+		}
+	}
+
+	if ( defined( $self->{sagan_sid_ignore}[0] ) ) {
+		foreach my $item ( @{ $self->{sagan_sid_ignore} } ) {
+			$sagan_sid_ignore->{$item} = 1;
+		}
+	}
+
+	if ( defined( $self->{sagan_class_ignore}[0] ) ) {
+		foreach my $item ( @{ $self->{sagan_class_ignore} } ) {
+			my $lc_item = lc($item);
+			if ( defined( $self->{rev_class_map}{$item} ) ) {
+				$sagan_class_ignore->{ $self->{rev_class_map}{$item} } = 1;
+			}
+			elsif ( defined( $self->{lc_rev_class_map}{$item} ) ) {
+				$sagan_class_ignore->{ $self->{lc_rev_class_map}{$item} } = 1;
+			}
+			else {
+				$sagan_class_ignore->{$item} = 1;
+			}
+		}
+	}
+
+	if ( defined( $self->{suricata_class_ignore}[0] ) ) {
+		foreach my $item ( @{ $self->{suricata_class_ignore} } ) {
+			my $lc_item = lc($item);
+			if ( defined( $self->{rev_class_map}{$item} ) ) {
+				$suricata_class_ignore->{ $self->{rev_class_map}{$item} } = 1;
+			}
+			elsif ( defined( $self->{lc_rev_class_map}{$item} ) ) {
+				$suricata_class_ignore->{ $self->{lc_rev_class_map}{$item} } = 1;
+			}
+			else {
+				$suricata_class_ignore->{$item} = 1;
+			}
+		}
+	}
+
+	#
+	# basic initial stuff
+	#
 
 	# librenms return hash
 	my $to_return = {
@@ -510,6 +583,10 @@ sub extend {
 	foreach my $item ( @{$class_list} ) {
 		$to_return->{data}{count}{$item} = 0;
 	}
+
+	#
+	# Do the search in eval incase of failure
+	#
 
 	my $sagan_found    = ();
 	my $suricata_found = ();
@@ -529,38 +606,8 @@ sub extend {
 			. $self->{suricata}
 			. " where timestamp >= CURRENT_TIMESTAMP - interval '"
 			. $opts{go_back_minutes}
-			. " minutes'";
-
-		if ( defined( $self->{suricata_class_ignore}[0] ) ) {
-			my $int = 0;
-			while ( defined( $self->{suricata_class_ignore}[$int] ) ) {
-				my $class = $self->{suricata_class_ignore}[$int];
-
-				if ( defined( $self->{rev_class_map}{$class} ) ) {
-					$class = $self->{rev_class_map}{$class};
-				}
-				elsif ( defined( $self->{lc_rev_class_map}{$class} ) ) {
-					$class = $self->{lc_rev_class_map}{$class};
-				}
-
-				$sql = $sql . " and class != '" . $class . "'";
-
-				$int++;
-			}
-		}
-
-		if ( defined( $self->{suricata_sid_ignore}[0] ) ) {
-			my $int = 0;
-			while ( defined( $self->{suricata_sid_ignore}[$int] ) ) {
-				my $sid = $self->{suricata_sid_ignore}[$int];
-
-				$sql = $sql . " and sid != '" . $sid . "'";
-
-				$int++;
-			}
-		}
-
-		$sql = $sql . ';';
+			. " minutes' and host ='"
+			. hostname . "'";
 
 		$sql = $sql . ';';
 		if ( $self->{debug} ) {
@@ -582,36 +629,8 @@ sub extend {
 			. $self->{sagan}
 			. " where timestamp >= CURRENT_TIMESTAMP - interval '"
 			. $opts{go_back_minutes}
-			. " minutes'";
-
-		if ( defined( $self->{sagan_class_ignore}[0] ) ) {
-			my $int = 0;
-			while ( defined( $self->{sagan_class_ignore}[$int] ) ) {
-				my $class = $self->{sagan_class_ignore}[$int];
-
-				if ( defined( $self->{rev_sagan_map}{$class} ) ) {
-					$class = $self->{rev_sagan_map}{$class};
-				}
-				elsif ( defined( $self->{lc_rev_sagan_map}{$class} ) ) {
-					$class = $self->{lc_rev_sagan_map}{$class};
-				}
-
-				$sql = $sql . " and class != '" . $class . "'";
-
-				$int++;
-			}
-		}
-
-		if ( defined( $self->{sagan_sid_ignore}[0] ) ) {
-			my $int = 0;
-			while ( defined( $self->{sagan_sid_ignore}[$int] ) ) {
-				my $sid = $self->{sagan_sid_ignore}[$int];
-
-				$sql = $sql . " and sid != '" . $sid . "'";
-
-				$int++;
-			}
-		}
+			. " minutes' and instance_host = '"
+			. hostname . "'";
 
 		$sql = $sql . ';';
 		if ( $self->{debug} ) {

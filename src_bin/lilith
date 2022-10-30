@@ -12,6 +12,7 @@ use Term::ANSIColor;
 use Net::Server::Daemonize qw(daemonize);
 use MIME::Base64;
 use Gzip::Faster;
+use Data::Dumper;
 
 sub version {
 	print "lilith v. 0.0.1\n";
@@ -36,6 +37,9 @@ Description :: Display class to short class mappings.
 
 Action :: create_tables
 Description :: Creates the tables in PostgreSQL.
+
+Action :: dump_self
+Description :: Dumps $lilith via Data::Dumper
 
 Action :: event
 Description :: Fetch the information for the specified event.
@@ -419,14 +423,18 @@ unless ($toml) {
 }
 
 my $lilith = Lilith->new(
-	dsn          => $toml->{dsn},
-	sagan        => $toml->{sagan},
-	suricata     => $toml->{suricata},
-	user         => $toml->{user},
-	pass         => $toml->{pass},
-	debug        => $debug,
-	class_ignore => $toml->{class_ignore},
-	sid_ignore   => $toml->{sid_ignore},
+	dsn                   => $toml->{dsn},
+	sagan                 => $toml->{sagan},
+	suricata              => $toml->{suricata},
+	user                  => $toml->{user},
+	pass                  => $toml->{pass},
+	debug                 => $debug,
+	class_ignore          => $toml->{class_ignore},
+	sid_ignore            => $toml->{sid_ignore},
+	suricata_class_ignore => $toml->{suricata_class_ignore},
+	suricata_sid_ignore   => $toml->{suricata_sid_ignore},
+	sagan_class_ignore    => $toml->{sagan_class_ignore},
+	sagan_sid_ignore      => $toml->{sagan_sid_ignore},
 );
 
 # create the tables if requested
@@ -434,6 +442,13 @@ if ( $action eq 'create_tables' ) {
 	$lilith->create_tables();
 	exit;
 }
+
+# dump self if asked
+if ( $action eq 'dump_self' ) {
+	print Dumper($lilith);
+	exit 0;
+}
+
 
 my %files;
 my @toml_keys = keys( %{$toml} );

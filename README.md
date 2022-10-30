@@ -2,6 +2,9 @@
 
 Lilith reads in EVE files from Suricata and Sagan into PostgreSQL.
 
+From there that data can then be searched and information on specific
+events fetched.
+
 ## Intalation
 
 ### Debian
