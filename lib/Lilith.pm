@@ -770,7 +770,7 @@ any of those with '_like' or '_not' will my modified respectively.
     - class
     - signature
     - app_proto
-    - app_proto
+    - in_iface
 
     # will become "and host = 'foo.bar'"
     host => 'foo.bar',
@@ -859,12 +859,11 @@ sub search {
 	#
 
 	my @to_check = (
-		'src_ip',        'src_port',           'dest_ip',   'dest_port',
-		'ip',            'port',               'host',      'host_like',
-		'instance_host', 'instance_host_like', 'instance',  'instance_like',
-		'class',         'class_like',         'signature', 'signature_like',
-		'app_proto',     'app_proto_like',     'proto',     'gid',
-		'sid',           'rev',                'id',        'event_id'
+		'src_ip', 'src_port',   'dest_ip',       'dest_port',     'ip',        'port',
+		'host',   'host',       'instance_host', 'instance_host', 'instance',  'instance',
+		'class',  'class_like', 'signature',     'signature',     'app_proto', 'app_proto_like',
+		'proto',  'gid',        'sid',           'rev',           'id',        'event_id',
+		'in_iface'
 	);
 
 	foreach my $var_to_check (@to_check) {
@@ -878,12 +877,10 @@ sub search {
 	#
 
 	my @order_by = (
-		'src_ip',    'src_port',       'dest_ip',       'dest_port',
-		'host',      'host_like',      'instance_host', 'instance_host_like',
-		'instance',  'instance_like',  'class',         'class_like',
-		'signature', 'signature_like', 'app_proto',     'app_proto_like',
-		'proto',     'gid',            'sid',           'rev',
-		'timestamp', 'id'
+		'src_ip',        'src_port',      'dest_ip',   'dest_port', 'host',  'host_like',
+		'instance_host', 'instance_host', 'instance',  'instance',  'class', 'class',
+		'signature',     'signature',     'app_proto', 'app_proto', 'proto', 'gid',
+		'sid',           'rev',           'timestamp', 'id',        'in_iface'
 	);
 
 	my $valid_order_by;
