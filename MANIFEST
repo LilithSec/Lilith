@@ -9,3 +9,4 @@ t/pod-coverage.t
 t/pod.t
 bin/.exists
 src_bin/lilith
+init/freebsd
