@@ -449,7 +449,6 @@ if ( $action eq 'dump_self' ) {
 	exit 0;
 }
 
-
 my %files;
 my @toml_keys = keys( %{$toml} );
 my $int       = 0;

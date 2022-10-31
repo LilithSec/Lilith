@@ -10,7 +10,9 @@ events fetched.
 ### Debian
 
 ```
-apt-get install zlib1g-dev cpanminus libjson-perl
+apt-get install zlib1g-dev cpanminus libjson-perl libtoml-perl \
+ libdbi-perl libfile-readbackwards-perl libdigest-sha-perl libpoe-perl \
+ libfile-slurp-perl libdbd-pg-perl
 cpanm Lilith
 ```
 
@@ -55,6 +57,12 @@ Now we just need to setup the tables.
 
 ```
 lilith -a create_tables
+```
+
+If using snmpd.
+
+```
+extend lilith /usr/local/bin/lilith -a extend
 ```
 
 ## --help
