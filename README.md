@@ -20,7 +20,7 @@ cpanm Lilith
 
 ```
 pkg install p5-App-cpanminus p5-JSON p5-MIME-Base64 p5-Gzip-Faster \
- p5-TOML p5 p5-DBI p5-File-ReadBackwards p5-Digest-SHA p5-POE \
+ p5-TOML p5-DBI p5-File-ReadBackwards p5-Digest-SHA p5-POE \
  p5-MIME-Base64 p5-Gzip-Faster p5-DBD-Pg
 cpanm Lilith
 ```
