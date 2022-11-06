@@ -32,6 +32,7 @@ my %WriteMakefileArgs = (
 		'Gzip::Faster'           => '0',
 		'DBD::Pg'                => '0',
 		'Data::Dumper'           => '0',
+		'Text::ANSITable'        => '0.608',
 
 	},
 	dist       => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
