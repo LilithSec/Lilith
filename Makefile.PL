@@ -33,7 +33,7 @@ my %WriteMakefileArgs = (
 		'DBD::Pg'                => '0',
 		'Data::Dumper'           => '0',
 		'Text::ANSITable'        => '0.608',
-
+		'Net::Server::Daemonize' => '0',
 	},
 	dist       => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
 	clean      => { FILES    => 'Lilith-*' },
