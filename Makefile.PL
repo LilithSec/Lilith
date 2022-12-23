@@ -42,8 +42,8 @@ my %WriteMakefileArgs = (
 		resources   => {
 			repository => {
 				type => 'git',
-				url  => 'git@github.com:VVelox/Lilith.git',
-				web  => 'https://github.com/VVelox/Lilith',
+				url  => 'git@github.com:LilithSec/Lilith.git',
+				web  => 'https://github.com/LilithSec/Lilith',
 			},
 		},
 	}
