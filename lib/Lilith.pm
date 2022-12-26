@@ -9,6 +9,7 @@ use Sys::Hostname;
 use DBI;
 use Digest::SHA qw(sha256_base64);
 use File::ReadBackwards;
+use Sys::Syslog;
 
 =head1 NAME
 
@@ -300,6 +301,9 @@ sub run {
 	eval { $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} ); };
 	if ($@) {
 		warn($@);
+		openlog( 'lilith', undef, 'daemon' );
+		syslog( 'LOG_ERR', $@ );
+		closelog;
 	}
 
 	# process each file
@@ -340,6 +344,9 @@ sub run {
 					eval { $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} ); };
 					if ($@) {
 						warn($@);
+						openlog( 'lilith', undef, 'daemon' );
+						syslog( 'LOG_ERR', $@ );
+						closelog;
 					}
 
 					eval {
@@ -406,6 +413,9 @@ sub run {
 						}
 						if ($@) {
 							warn( 'SQL INSERT issue... ' . $@ );
+							openlog( 'lilith', undef, 'daemon' );
+							syslog( 'LOG_ERR', 'SQL INSERT issue... ' . $@ );
+							closelog;
 						}
 					}
 
