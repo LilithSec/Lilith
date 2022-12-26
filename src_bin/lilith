@@ -16,7 +16,7 @@ use Data::Dumper;
 use Sys::Syslog;
 
 sub version {
-	print "lilith v. 0.0.1\n";
+	print "lilith v. 0.1.0\n";
 }
 
 sub help {
