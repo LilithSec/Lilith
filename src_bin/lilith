@@ -525,7 +525,7 @@ if ( $action eq 'run' ) {
 	syslog( 'info', $message );
 	print $message. "\n";
 
-	foreach my $line ( split( /\n/, @{ to_toml( \%files ) } ) ) {
+	foreach my $line ( split( /\n/, to_toml( \%files ) ) ) {
 		syslog( 'info', $line );
 		print $line. "\n";
 	}
