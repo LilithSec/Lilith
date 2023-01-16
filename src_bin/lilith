@@ -49,7 +49,7 @@ The config file to use.
 
     - Default :: /usr/local/etc/lilith.toml
 
-=head3 -t <table>
+=head2 -t <table>
 
 Table to operate on.
 
