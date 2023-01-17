@@ -491,6 +491,11 @@ Description :: LibreNMS style SNMP extend.
                 then base64 encoded.
                 Default :: undef
 
+Action :: generate_baphomet_yamls
+Description :: Generate Baphomet rule YAMLs.
+
+--dir <dir>     Dir to output to.
+
 Action :: search
 Description :: Searches the specified table returns the results.
 

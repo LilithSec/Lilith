@@ -19,11 +19,11 @@ Lilith - Work with Suricata/Sagan EVE logs and PostgreSQL.
 
 =head1 VERSION
 
-Version 0.2.0
+Version 0.2.1
 
 =cut
 
-our $VERSION = '0.2.0';
+our $VERSION = '0.2.1';
 
 =head1 SYNOPSIS
 
@@ -713,8 +713,8 @@ sub generate_baphomet_yamls {
 				},
 				start_chomp   => 1,
 				start_pattern => '[== fastlog_chomp ==]',
-				includes      => ('common.yaml'),
-				regexp        => ('[== fastlog_chomped_with_class  ==]'),
+				includes      => ['common.yaml'],
+				regexp        => ['[== fastlog_chomped_with_class  ==]'],
 			}
 		);
 

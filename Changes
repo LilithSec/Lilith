@@ -1,5 +1,9 @@
 Revision history for Lilith
 
+0.2.0	 2023-01-16/20:15
+		 -Baphomet YAML fix.
+		 -Minor doc cleanup.
+
 0.2.0	 2023-01-16/06:30
 		 -Baphomet YAML rule generation.
 		 -Add POD for script.
