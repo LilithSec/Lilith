@@ -19,11 +19,11 @@ Lilith - Work with Suricata/Sagan EVE logs and PostgreSQL.
 
 =head1 VERSION
 
-Version 0.2.1
+Version 0.2.2
 
 =cut
 
-our $VERSION = '0.2.1';
+our $VERSION = '0.2.2';
 
 =head1 SYNOPSIS
 
@@ -702,7 +702,7 @@ sub generate_baphomet_yamls {
 
 	my $ypp  = YAML::PP->new( schema => [qw/ + Perl /] );
 	my @keys = keys( %{ $self->{class_map} } );
-	foreach my $class (@keys) {
+	foreach my $class (sort(@keys)) {
 		my $lc_key    = lc($class);
 		my $snmp_name = $self->{snmp_class_map}{$lc_key};
 
@@ -719,6 +719,7 @@ sub generate_baphomet_yamls {
 		);
 
 		my $name = 'fastlog_' . $snmp_name;
+		$name=~s/\ /_/g;
 		write_file( $dir . '/' . $name . '.yaml', $yaml );
 	}
 
