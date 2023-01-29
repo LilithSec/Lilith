@@ -535,12 +535,11 @@ sub extend {
 	# librenms return hash
 	my $to_return = {
 		data => {
-			total              => 0,
-			totals             => {},
+			totals             => { total => 0, },
 			sagan_instances    => {},
 			suricata_instances => {},
-			sagan_totals       => {},
-			suricata_totals    => {},
+			sagan_totals       => { total => 0, },
+			suricata_totals    => { total => 0, },
 		},
 		version     => 1,
 		error       => '0',
@@ -560,7 +559,7 @@ sub extend {
 			die( 'DBI->connect_cached failure.. ' . $@ );
 		}
 
-		my $hostname='nibbles0.vulpes.vvelox.net';
+		my $hostname = 'nibbles0.vulpes.vvelox.net';
 
 		#
 		# suricata SQL bit
@@ -615,7 +614,8 @@ sub extend {
 	}
 
 	foreach my $row ( @{$suricata_found} ) {
-		$to_return->{data}{total}++;
+		$to_return->{data}{totals}{total}++;
+		$to_return->{data}{suricata_totals}{total}++;
 		my $snmp_class = $self->get_short_class_snmp( $row->{classification} );
 		if ( !defined( $to_return->{data}{totals}{$snmp_class} ) ) {
 			$to_return->{data}{totals}{$snmp_class} = 1;
@@ -630,8 +630,9 @@ sub extend {
 			$to_return->{data}{suricata_totals}{$snmp_class}++;
 		}
 		if ( !defined( $to_return->{data}{suricata_instances}{ $row->{instance} } ) ) {
-			$to_return->{data}{suricata_instances}{ $row->{instance} } = {};
+			$to_return->{data}{suricata_instances}{ $row->{instance} } = { total => 0 };
 		}
+		$to_return->{data}{suricata_instances}{ $row->{instance} }{total}++;
 		if ( !defined( $to_return->{data}{suricata_instances}{ $row->{instance} }{$snmp_class} ) ) {
 			$to_return->{data}{suricata_instances}{ $row->{instance} }{$snmp_class} = 1;
 		}
@@ -641,7 +642,8 @@ sub extend {
 	}
 
 	foreach my $row ( @{$sagan_found} ) {
-		$to_return->{data}{total}++;
+		$to_return->{data}{totals}{total}++;
+		$to_return->{data}{sagan_totals}{total}++;
 		my $snmp_class = $self->get_short_class_snmp( $row->{classification} );
 		if ( !defined( $to_return->{data}{totals}{$snmp_class} ) ) {
 			$to_return->{data}{totals}{$snmp_class} = 1;
@@ -656,8 +658,9 @@ sub extend {
 			$to_return->{data}{sagan_totals}{$snmp_class}++;
 		}
 		if ( !defined( $to_return->{data}{sagan_instances}{ $row->{instance} } ) ) {
-			$to_return->{data}{sagan_instances}{ $row->{instance} } = {};
+			$to_return->{data}{sagan_instances}{ $row->{instance} } = { total => 0 };
 		}
+		$to_return->{data}{sagan_instances}{ $row->{instance} }{total}++;
 		if ( !defined( $to_return->{data}{sagan_instances}{ $row->{instance} }{$snmp_class} ) ) {
 			$to_return->{data}{sagan_instances}{ $row->{instance} }{$snmp_class} = 1;
 		}
