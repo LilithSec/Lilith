@@ -559,7 +559,7 @@ sub extend {
 			die( 'DBI->connect_cached failure.. ' . $@ );
 		}
 
-		my $hostname = 'nibbles0.vulpes.vvelox.net';
+		my $hostname = hostname;
 
 		#
 		# suricata SQL bit
