@@ -19,11 +19,11 @@ Lilith - Work with Suricata/Sagan EVE logs and PostgreSQL.
 
 =head1 VERSION
 
-Version 0.2.2
+Version 0.3.0
 
 =cut
 
-our $VERSION = '0.2.2';
+our $VERSION = '0.3.0';
 
 =head1 SYNOPSIS
 
@@ -188,7 +188,7 @@ sub new {
 		debug                 => $opts{debug},
 		class_map             => {
 			'Not Suspicious Traffic'                                      => '!SusT',
-			'Unknown Traffic'                                             => 'Unknown T',
+			'Unknown Traffic'                                             => 'UnknownT',
 			'Attempted Information Leak'                                  => '!IL',
 			'Information Leak'                                            => 'IL',
 			'Large Scale Information Leak'                                => 'LrgSclIL',
@@ -203,7 +203,7 @@ sub new {
 			'Executable code was detected'                                => 'ExeCode',
 			'A suspicious string was detected'                            => 'SusString',
 			'A suspicious filename was detected'                          => 'SusFilename',
-			'An attempted login using a suspicious username was detected' => '!LoginUsername',
+			'An attempted login using a suspicious username was detected' => '!LoginUser',
 			'A system call was detected'                                  => 'Syscall',
 			'A TCP connection was detected'                               => 'TCPconn',
 			'A Network Trojan was detected'                               => 'NetTrojan',
@@ -260,6 +260,7 @@ sub new {
 		$self->{snmp_class_map}{$lc_key}                            = $self->{class_map}{$key};
 		$self->{snmp_class_map}{$lc_key}                            = $self->{class_map}{$key};
 		$self->{snmp_class_map}{$lc_key} =~ s/^\!/not\_/;
+		$self->{snmp_class_map}{$lc_key} =~ s/\ /\_/;
 	}
 
 	return $self;
@@ -528,73 +529,23 @@ sub extend {
 	}
 
 	#
-	# put together the hashes of items to ignore
-	#
-
-	my $suricata_sid_ignore   = {};
-	my $suricata_class_ignore = {};
-	my $sagan_class_ignore    = {};
-	my $sagan_sid_ignore      = {};
-
-	if ( defined( $self->{suricata_sid_ignore}[0] ) ) {
-		foreach my $item ( @{ $self->{suricata_sid_ignore} } ) {
-			$suricata_sid_ignore->{$item} = 1;
-		}
-	}
-
-	if ( defined( $self->{sagan_sid_ignore}[0] ) ) {
-		foreach my $item ( @{ $self->{sagan_sid_ignore} } ) {
-			$sagan_sid_ignore->{$item} = 1;
-		}
-	}
-
-	if ( defined( $self->{sagan_class_ignore}[0] ) ) {
-		foreach my $item ( @{ $self->{sagan_class_ignore} } ) {
-			my $lc_item = lc($item);
-			if ( defined( $self->{rev_class_map}{$item} ) ) {
-				$sagan_class_ignore->{ $self->{rev_class_map}{$item} } = 1;
-			}
-			elsif ( defined( $self->{lc_rev_class_map}{$item} ) ) {
-				$sagan_class_ignore->{ $self->{lc_rev_class_map}{$item} } = 1;
-			}
-			else {
-				$sagan_class_ignore->{$item} = 1;
-			}
-		}
-	}
-
-	if ( defined( $self->{suricata_class_ignore}[0] ) ) {
-		foreach my $item ( @{ $self->{suricata_class_ignore} } ) {
-			my $lc_item = lc($item);
-			if ( defined( $self->{rev_class_map}{$item} ) ) {
-				$suricata_class_ignore->{ $self->{rev_class_map}{$item} } = 1;
-			}
-			elsif ( defined( $self->{lc_rev_class_map}{$item} ) ) {
-				$suricata_class_ignore->{ $self->{lc_rev_class_map}{$item} } = 1;
-			}
-			else {
-				$suricata_class_ignore->{$item} = 1;
-			}
-		}
-	}
-
-	#
 	# basic initial stuff
 	#
 
 	# librenms return hash
 	my $to_return = {
-		data        => { count => {}, sagan => [], suricata => [] },
+		data => {
+			total              => 0,
+			totals             => {},
+			sagan_instances    => {},
+			suricata_instances => {},
+			sagan_totals       => {},
+			suricata_totals    => {},
+		},
 		version     => 1,
 		error       => '0',
 		errorString => '',
 	};
-
-	# shove the snmp class names into the count array
-	my $class_list = $self->get_short_class_snmp_list;
-	foreach my $item ( @{$class_list} ) {
-		$to_return->{data}{count}{$item} = 0;
-	}
 
 	#
 	# Do the search in eval incase of failure
@@ -609,6 +560,8 @@ sub extend {
 			die( 'DBI->connect_cached failure.. ' . $@ );
 		}
 
+		my $hostname='nibbles0.vulpes.vvelox.net';
+
 		#
 		# suricata SQL bit
 		#
@@ -619,7 +572,7 @@ sub extend {
 			. " where timestamp >= CURRENT_TIMESTAMP - interval '"
 			. $opts{go_back_minutes}
 			. " minutes' and host ='"
-			. hostname . "'";
+			. $hostname . "'";
 
 		$sql = $sql . ';';
 		if ( $self->{debug} ) {
@@ -642,7 +595,7 @@ sub extend {
 			. " where timestamp >= CURRENT_TIMESTAMP - interval '"
 			. $opts{go_back_minutes}
 			. " minutes' and instance_host = '"
-			. hostname . "'";
+			. $hostname . "'";
 
 		$sql = $sql . ';';
 		if ( $self->{debug} ) {
@@ -662,15 +615,55 @@ sub extend {
 	}
 
 	foreach my $row ( @{$suricata_found} ) {
-		push( @{ $to_return->{data}{suricata} }, $row->{event_id} );
+		$to_return->{data}{total}++;
 		my $snmp_class = $self->get_short_class_snmp( $row->{classification} );
-		$to_return->{data}{count}{$snmp_class}++;
+		if ( !defined( $to_return->{data}{totals}{$snmp_class} ) ) {
+			$to_return->{data}{totals}{$snmp_class} = 1;
+		}
+		else {
+			$to_return->{data}{totals}{$snmp_class}++;
+		}
+		if ( !defined( $to_return->{data}{suricata_totals}{$snmp_class} ) ) {
+			$to_return->{data}{suricata_totals}{$snmp_class} = 1;
+		}
+		else {
+			$to_return->{data}{suricata_totals}{$snmp_class}++;
+		}
+		if ( !defined( $to_return->{data}{suricata_instances}{ $row->{instance} } ) ) {
+			$to_return->{data}{suricata_instances}{ $row->{instance} } = {};
+		}
+		if ( !defined( $to_return->{data}{suricata_instances}{ $row->{instance} }{$snmp_class} ) ) {
+			$to_return->{data}{suricata_instances}{ $row->{instance} }{$snmp_class} = 1;
+		}
+		else {
+			$to_return->{data}{suricata_instances}{ $row->{instance} }{$snmp_class}++;
+		}
 	}
 
 	foreach my $row ( @{$sagan_found} ) {
-		push( @{ $to_return->{data}{sagan} }, $row->{event_id} );
+		$to_return->{data}{total}++;
 		my $snmp_class = $self->get_short_class_snmp( $row->{classification} );
-		$to_return->{data}{count}{$snmp_class}++;
+		if ( !defined( $to_return->{data}{totals}{$snmp_class} ) ) {
+			$to_return->{data}{totals}{$snmp_class} = 1;
+		}
+		else {
+			$to_return->{data}{totals}{$snmp_class}++;
+		}
+		if ( !defined( $to_return->{data}{sagan_totals}{$snmp_class} ) ) {
+			$to_return->{data}{sagan_totals}{$snmp_class} = 1;
+		}
+		else {
+			$to_return->{data}{sagan_totals}{$snmp_class}++;
+		}
+		if ( !defined( $to_return->{data}{sagan_instances}{ $row->{instance} } ) ) {
+			$to_return->{data}{sagan_instances}{ $row->{instance} } = {};
+		}
+		if ( !defined( $to_return->{data}{sagan_instances}{ $row->{instance} }{$snmp_class} ) ) {
+			$to_return->{data}{sagan_instances}{ $row->{instance} }{$snmp_class} = 1;
+		}
+		else {
+			$to_return->{data}{sagan_instances}{ $row->{instance} }{$snmp_class}++;
+		}
 	}
 
 	return $to_return;
@@ -702,7 +695,7 @@ sub generate_baphomet_yamls {
 
 	my $ypp  = YAML::PP->new( schema => [qw/ + Perl /] );
 	my @keys = keys( %{ $self->{class_map} } );
-	foreach my $class (sort(@keys)) {
+	foreach my $class ( sort(@keys) ) {
 		my $lc_key    = lc($class);
 		my $snmp_name = $self->{snmp_class_map}{$lc_key};
 
@@ -719,7 +712,7 @@ sub generate_baphomet_yamls {
 		);
 
 		my $name = 'fastlog_' . $snmp_name;
-		$name=~s/\ /_/g;
+		$name =~ s/\ /_/g;
 		write_file( $dir . '/' . $name . '.yaml', $yaml );
 	}
 

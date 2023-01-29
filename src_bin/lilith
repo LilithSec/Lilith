@@ -18,6 +18,8 @@ lilith [B<-c> <config>] B<-a> event [B<-t> <table>] B<--id> <row_id>
 
 lilith [B<-c> <config>] B<-a> event [B<-t> <table>] B<--event> <event_id>
 
+lilith [B<-c> <config>] B<-a> extend
+
 lilith [B<-c> <config>] B<-a> generate_baphomet_yamls B<--dir> <dir>
 
 lilith [B<-c> <config>] B<-a> get_short_class_snmp_list
@@ -1374,7 +1376,6 @@ if ( $action eq 'class_map' ) {
 #
 # print short SNMP class names
 #
-
 
 if ( $action eq 'get_short_class_snmp_list' ) {
 	my $class_list = $lilith->get_short_class_snmp_list;
