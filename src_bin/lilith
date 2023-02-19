@@ -14,9 +14,9 @@ lilith [B<-c> <config>] B<-a> create_tables
 
 lilith [B<-c> <config>] B<-a> dump_self
 
-lilith [B<-c> <config>] B<-a> event [B<-t> <table>] B<--id> <row_id>
+lilith [B<-c> <config>] B<-a> event [B<-t> <table>] B<--id> <row_id> [B<--raw>]
 
-lilith [B<-c> <config>] B<-a> event [B<-t> <table>] B<--event> <event_id>
+lilith [B<-c> <config>] B<-a> event [B<-t> <table>] B<--event> <event_id> [B<--raw>]
 
 lilith [B<-c> <config>] B<-a> extend [B<-Z>] [B<-m> <minutes>]
 
@@ -498,6 +498,9 @@ Description :: Fetch the information for the specified event.
 --event <id>   Event ID to fetch.
                Default :: undef
 
+--raw          Print the raw EVE JSON.
+               Default :: undef
+
 Action :: extend
 Description :: LibreNMS style SNMP extend.
 
@@ -744,6 +747,7 @@ my $user  = 0;
 my $group = 0;
 my $librenms_compress;
 my $dir;
+my $raw;
 Getopt::Long::Configure('no_ignore_case');
 Getopt::Long::Configure('bundling');
 GetOptions(
