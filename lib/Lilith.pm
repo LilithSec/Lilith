@@ -711,6 +711,78 @@ sub generate_baphomet_yamls {
 				start_pattern => '[== fastlog_chomp ==]',
 				includes      => ['common.yaml'],
 				regexp        => ['[== fastlog_chomped_with_class  ==]'],
+				tests         => {
+					found_1 => {
+						line =>
+							'03/26/2023-19:30:50.356934  [**] [1:0123456:123] Rule Description Goes Here [**] [Classification: '
+							. $class
+							. '] [Priority: 2] {TCP} 5.6.7.8:6163 -> 1.2.3.4:443',
+						found => 1,
+						data  => {
+							'group'    => '1',
+							'rule'     => '0123456',
+							'rev'      => '123',
+							'SRC'      => '5.6.7.8',
+							'DEST'     => '1.2.3.4',
+							'pri'      => '2',
+							'proto'    => 'TCP',
+							'dst_port' => '443',
+							'src_port' => '6163',
+						},
+						undefed => [ 'HOST', 'SUBNET', 'IP4', 'IP6', 'ADDR', 'DNS' ],
+					},
+					found_2 => {
+						line =>
+							'03/26/2023-19:30:50.356934  [**] [1:0123456:123] Rule Description Goes Here [**] [Classification: '
+							. $class
+							. '] [Priority: 2] {UDP} 5.6.7.8:26163 -> 1.2.3.4:4',
+						found => 1,
+						data  => {
+							'group'    => '1',
+							'rule'     => '0123456',
+							'rev'      => '123',
+							'SRC'      => '5.6.7.8',
+							'DEST'     => '1.2.3.4',
+							'pri'      => '2',
+							'proto'    => 'UDP',
+							'dst_port' => '4',
+							'src_port' => '26163',
+						},
+						undefed => [ 'HOST', 'SUBNET', 'IP4', 'IP6', 'ADDR', 'DNS' ],
+					},
+					found_3 => {
+						line =>
+							'03/26/2023-19:30:50  [**] [1:0123456:123] Rule Description Goes Here [**] [Classification: '
+							. $class
+							. '] [Priority: 2] {UDP} 5.6.7.8:26163 -> 1.2.3.4:4',
+						found => 1,
+						data  => {
+							'group'    => '1',
+							'rule'     => '0123456',
+							'rev'      => '123',
+							'SRC'      => '5.6.7.8',
+							'DEST'     => '1.2.3.4',
+							'pri'      => '2',
+							'proto'    => 'UDP',
+							'dst_port' => '4',
+							'src_port' => '26163',
+						},
+						undefed => [ 'HOST', 'SUBNET', 'IP4', 'IP6', 'ADDR', 'DNS' ],
+					},
+					notFound_1 => {
+						line =>
+							'03/26/2023-19:30:50.356934  [**] [1:0123456:123] Rule Description Goes Here [**] [Classification: '
+							. reverse($class)
+							. '] [Priority: 2] {UDP} 5.6.7.8:26163 -> 1.2.3.4:4',
+						found   => 0,
+						data    => {},
+						undefed => [
+							'HOST',  'SUBNET',   'IP4',  'IP6', 'ADDR', 'DNS',
+							'DEST',  'SRC',      'rule', 'rev', 'pri',  'group',
+							'proto', 'dst_port', 'src_port'
+						],
+					},
+				}
 			}
 		);
 
