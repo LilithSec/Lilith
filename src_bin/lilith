@@ -462,7 +462,7 @@ use Data::Dumper;
 use Sys::Syslog;
 
 sub version {
-	print "lilith v. 0.2.0\n";
+	print 'lilith v. '.$Lilith::VERSION."\n";
 }
 
 sub help {
@@ -1308,6 +1308,10 @@ if ( $action eq 'search' ) {
 if ( $action eq 'event' ) {
 	if ( defined($id) && defined($event_id) ) {
 		die('Can not search via both --id and --event for fetching a event');
+	}
+
+	if ( ! defined($id) && ! defined($event_id) ) {
+		die('Either --id and --event for fetching a event');
 	}
 
 	my $returned = $lilith->search(
