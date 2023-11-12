@@ -98,6 +98,7 @@ Sub hashes are then treated as a instance. The following values are
 available for that.
 
 | Variable | Required | Description                                                        |
+|----------|----------|--------------------------------------------------------------------|
 | eve      | yes      | The EVE file to follow.                                            |
 | type     | yes      | `sagan` or `suricata`, depending on which it is.                   |
 | instance | no       | The name for the instance. If not specified the hash name is used. |
