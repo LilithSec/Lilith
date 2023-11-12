@@ -107,34 +107,34 @@ available for that.
 
 ### SYNOPSIS
 
-lilith [-c <config>] -a run
+lilith \[-c \<config\>\] -a run
 
-lilith [-c <config>] -a class_map
+lilith -a class_map
 
-lilith [-c <config>] -a create_tables
+lilith \[-c \<config\>\] -a create_tables
 
-lilith [-c <config>] -a dump_self
+lilith \[-c \<config\>\] -a dump_self
 
-lilith [-c <config>] -a event [-t <table>] --id <row_id> [--raw]
-[--virani <remote> [--pcap <output file>] [--buffer <buffer secodns>]]
+lilith \[-c \<config>\] -a event \[-t \<table\>\] --id \<row_id\> \[--raw\]
+\[\[--virani \<remote\>\] \[--pcap \<output file\>\] \[--buffer \<buffer secodns\>\]\]
 
-lilith [-c <config>] -a event [-t <table>] --event <event_id> [--raw]
-[--virani <remote> [--pcap <output file>] [--buffer <buffer secodns>]]
+lilith \[-c \<config\>\] -a event \[-t \<table\>\] --event \<event_id\> \[--raw\]
+\[\[--virani \<remote\>\] \[--pcap \<output file\>\] \[--buffer \<buffer secodns\>\]\]
 
-lilith [-c <config>] -a extend [-Z] [-m <minutes>]
+lilith \[-c \<config\>\] -a extend \[-Z\] \[-m \<minutes\>\]
 
-lilith [-c <config>] -a generate_baphomet_yamls --dir <dir>
+lilith -a generate_baphomet_yamls --dir \<dir\>
 
-lilith [-c <config>] -a get_short_class_snmp_list
+lilith \[-c \<config\>\] -a get_short_class_snmp_list
 
-lilith [-c <config>] -a search [--output <return>] [-t <table>]
-[-m <minutes>] [--order <clm>] [--limit <int>] [--offset <int>]
-[--orderdir <dir>] [--si <src_ip>] [--di <dst_ip>] [--ip <ip>]
-[--sp <src_port>] [--dp <dst_port>] [--port <port>] [--host <host>]
-[--hostl] [--hosN] [--ih <host>] [--ihl] [--ihN] [-i <instance>]
-[-il] [-iN] [-c <class>] [--cl] [--cN] [-s <sig>] [--sl]
-[--sN] [--if <if>] [--ifl] [--ifN] [--ap <proto>] [--apl] [--apN]
-[--gid <gid>] [--sid <sid>] [--rev <rev>]
+lilith \[-c \<config\>\] -a search \[--output \<return\>\] \[-t \<table\>\]
+\[-m \<minutes\>\] \[--order \<clm\>\] \[--limit \<int\>\] \[--offset \<int\>\]
+\[--orderdir \<dir\>\] \[--si \<src_ip\>\] \[--di \<dst_ip\>\] \[--ip \<ip\>\]
+\[--sp \<src_port\>\] \[--dp \<dst_port\>\] \[--port \<port\>\] \[--host \<host\>\]
+\[--hostl\] \[--hosN\] \[--ih \<host\>\] \[--ihl\] \[--ihN\] \[-i \<instance\>\]
+\[-il\] \[-iN\] \[-c \<class\>\] \[--cl\] \[--cN\] \[-s \<sig\>\] \[--sl\]
+\[--sN\] \[--if \<if\>\] \[--ifl\] \[--ifN\] \[--ap \<proto\>\] \[--apl\] \[--apN\]
+\[--gid \<gid\>\] \[--sid \<sid\>\] \[--rev \<rev\>\]
 
 ### GENERAL SWITCHES
 
