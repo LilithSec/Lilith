@@ -89,6 +89,10 @@ Fetch event via row ID.
 
 Fetch the event via the event ID.
 
+=head2 --raw
+
+Do not decode the EVE JSON.
+
 =head3 --pcap <file>
 
 Fetch the remote PCAP via Virani and write it to the file. Only usable for with Suricata tables.
