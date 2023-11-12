@@ -51,6 +51,24 @@ pass="WhateverYouSetAsApassword"
 user="lilith"
 # a handy one to ignore for the extend as it is spammy
 class_ignore=["Generic Protocol Command Decode"]
+
+# add a suricata instance to monitor
+[suricata-eve]
+instance="foo-pie"
+type="suricata"
+eve="/var/log/suricata/alert.json"
+
+# add a second suricata instance to monitor
+[another-eve]
+instance="foo2-pie"
+type="suricata"
+eve="/var/log/suricata/alert2.json"
+
+# add a sagan eve to monitor
+# instance name is 'foo-lae', given there is no value for instance
+[foo-lae]
+type="sagan"
+eve="/var/log/sagan/alert.json"
 ```
 
 Now we just need to setup the tables.
@@ -64,6 +82,25 @@ If using snmpd.
 ```
 extend lilith /usr/local/bin/lilith -a extend
 ```
+
+### Config File
+
+The default config file is `/usr/local/etc/lilith.toml`.
+
+| Variable     | Description                                                                                                            |
+|--------------|------------------------------------------------------------------------------------------------------------------------|
+| dsn          | A DSN connection string to be used by [DBI][https://metacpan.org/pod/DBI]. [DBD::Pg][https://metacpan.org/pod/DBD::Pg] |
+| pass         | Password to use for the connection.                                                                                    |
+| user         | User to use for the connetion.                                                                                         |
+| class_ignore | Array of classes to ignore.                                                                                            |
+
+Sub hashes are then treated as a instance. The following values are
+available for that.
+
+| Variable | Required | Description                                                        |
+| eve      | yes      | The EVE file to follow.                                            |
+| type     | yes      | `sagan` or `suricata`, depending on which it is.                   |
+| instance | no       | The name for the instance. If not specified the hash name is used. |
 
 ## Options
 
