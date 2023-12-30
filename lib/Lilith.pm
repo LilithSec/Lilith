@@ -19,11 +19,11 @@ Lilith - Work with Suricata/Sagan EVE logs and PostgreSQL.
 
 =head1 VERSION
 
-Version 0.5.0
+Version 0.6.0
 
 =cut
 
-our $VERSION = '0.5.0';
+our $VERSION = '0.6.0';
 
 =head1 SYNOPSIS
 
@@ -328,6 +328,8 @@ sub run {
 
 		if ( !defined( $item->{type} ) ) {
 			die( 'No type specified for ' . $item->{instance} );
+		} elsif ( $item->{type} ne 'suricata' && $item->{type} ne 'sagan' && $item->{type} ne 'cape' ) {
+			die( 'Type, ' . $item->{type} . ', for instance ' . $item->{instance} . ' is not a known type' );
 		}
 
 		if ( !defined( $item->{eve} ) ) {
@@ -420,7 +422,71 @@ sub run {
 									$json->{alert}{signature_id}, $json->{alert}{rev},
 									$_[ARG0],
 								);
-							} ## end elsif ( $_[HEAP]{type} eq 'sagan' )
+							} elsif ( $_[HEAP]{type} eq 'cape' ) {
+								my $sth
+									= $dbh->prepare( 'insert into '
+										. $self->{cape}
+										. ' ( instance, filename, instance_host, task, start, stop, malscore, subbed_from_ip, subbed_from_host, pkg, md5, sha1, sha256, slug, raw ) '
+										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );' );
+
+								# figure out what to use for the filename
+								my $filename;
+								if ( defined( $json->{cape_submit}{name} ) ) {
+									$filename = $json->{cape_submit}{name};
+								} elsif ( defined( $json->{suricata_extract_submit}{name} ) ) {
+									$filename = $json->{suricata_extract_submit}{name};
+								} else {
+									$filename = $json->{row}{target};
+								}
+
+								my $subbed_from_ip;
+								if ( defined( $json->{cape_submit}{remote_ip} ) ) {
+									$subbed_from_ip = $json->{cape_submit}{remote_ip};
+								}
+
+								my $subbed_from_host;
+								if ( defined( $json->{suricata_extract_submit}{host} ) ) {
+									$subbed_from_host = $json->{suricata_extract_submit}{host};
+								}
+
+								my $md5;
+								if ( defined( $json->{cape_submit}{md5} ) ) {
+									$md5 = $json->{cape_submit}{md5};
+								} elsif ( defined( $json->{suricata_extract_submit}{md5} ) ) {
+									$md5 = $json->{suricata_extract_submit}{md5};
+								}
+
+								my $sha1;
+								if ( defined( $json->{cape_submit}{sha1} ) ) {
+									$sha1 = $json->{cape_submit}{sha1};
+								} elsif ( defined( $json->{suricata_extract_submit}{sha1} ) ) {
+									$sha1 = $json->{suricata_extract_submit}{sha1};
+								}
+
+								my $sha256;
+								if ( defined( $json->{cape_submit}{sha256} ) ) {
+									$sha256 = $json->{cape_submit}{sha256};
+								} elsif ( defined( $json->{suricata_extract_submit}{sha256} ) ) {
+									$sha256 = $json->{suricata_extract_submit}{sha256};
+								}
+
+								my $slug;
+								if ( defined( $json->{suricata_extract_submit}{slug} ) ) {
+									$slug = $json->{suricata_extract_submit}{slug};
+								}
+
+								$filename =~ s/^.*\///g;
+								$sth->execute(
+									$_[HEAP]{instance},       $filename,
+									$_[HEAP]{host},           $json->{row}{id},
+									$json->{row}{started_on}, $json->{row}{completed_on},
+									$json->{malscore},        $subbed_from_ip,
+									$subbed_from_host,        $json->{row}{package},
+									$md5,                     $sha1,
+									$sha256,                  $slug,
+									$_[ARG0],
+								);
+							} ## end elsif ( $_[HEAP]{type} eq 'cape' )
 						} ## end if ( defined($json) && defined( $json->{event_type...}))
 						if ($@) {
 							warn( 'SQL INSERT issue... ' . $@ );
@@ -527,6 +593,7 @@ sub create_tables {
 			. 'instance varchar(255)  NOT NULL, '
 			. 'filename varchar(255)  NOT NULL, '
 			. 'instance_host varchar(255)  NOT NULL, '
+			. 'task bigserial NOT NULL, '
 			. 'start TIMESTAMP WITH TIME ZONE, '
 			. 'stop TIMESTAMP WITH TIME ZONE, '
 			. 'malscore bigint NOT NULL, '
