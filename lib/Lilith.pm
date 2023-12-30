@@ -92,6 +92,9 @@ The args taken by this are as below.
     - suricata :: Name of the table for Suricata alerts.
       Default :: suricata_alerts
 
+    - cape :: Name of the table for CAPEv2 alerts.
+      Default :: cape_alerts
+
     - user :: Name for use with DBI for the DB connection.
       Default :: lilith
 
@@ -143,6 +146,10 @@ sub new {
 		$opts{suricata} = 'suricata_alerts';
 	}
 
+	if ( !defined( $opts{cape} ) ) {
+		$opts{suricata} = 'cape_alerts';
+	}
+
 	if ( !defined( $opts{sid_ignore} ) ) {
 		my @empty_array;
 		$opts{sid_ignore} = \@empty_array;
@@ -185,6 +192,7 @@ sub new {
 		pass                  => $opts{pass},
 		sagan                 => $opts{sagan},
 		suricata              => $opts{suricata},
+		cape                  => $opts{cape},
 		debug                 => $opts{debug},
 		class_map             => {
 			'Not Suspicious Traffic'                                      => '!SusT',
@@ -261,10 +269,10 @@ sub new {
 		$self->{snmp_class_map}{$lc_key}                            = $self->{class_map}{$key};
 		$self->{snmp_class_map}{$lc_key} =~ s/^\!/not\_/;
 		$self->{snmp_class_map}{$lc_key} =~ s/\ /\_/;
-	}
+	} ## end foreach my $key (@keys)
 
 	return $self;
-}
+} ## end sub new
 
 =head2 run
 
@@ -387,7 +395,7 @@ sub run {
 									$json->{alert}{signature_id}, $json->{alert}{rev},
 									$_[ARG0]
 								);
-							}
+							} ## end if ( $_[HEAP]{type} eq 'suricata' )
 
 							#handle if sagan
 							elsif ( $_[HEAP]{type} eq 'sagan' ) {
@@ -412,15 +420,15 @@ sub run {
 									$json->{alert}{signature_id}, $json->{alert}{rev},
 									$_[ARG0],
 								);
-							}
-						}
+							} ## end elsif ( $_[HEAP]{type} eq 'sagan' )
+						} ## end if ( defined($json) && defined( $json->{event_type...}))
 						if ($@) {
 							warn( 'SQL INSERT issue... ' . $@ );
 							openlog( 'lilith', undef, 'daemon' );
 							syslog( 'LOG_ERR', 'SQL INSERT issue... ' . $@ );
 							closelog;
 						}
-					}
+					} ## end eval
 
 				},
 			},
@@ -433,10 +441,10 @@ sub run {
 			},
 		);
 
-	}
+	} ## end foreach my $item_key ( keys( %{ $opts{files} } ...))
 
 	POE::Kernel->run;
-}
+} ## end sub run
 
 =head2 create_tables
 
@@ -511,7 +519,29 @@ sub create_tables {
 			. 'raw json NOT NULL, '
 			. 'PRIMARY KEY(id) );' );
 	$sth->execute();
-}
+
+	$sth
+		= $dbh->prepare( 'create table '
+			. $self->{cape} . ' ('
+			. 'id bigserial NOT NULL, '
+			. 'instance varchar(255)  NOT NULL, '
+			. 'filename varchar(255)  NOT NULL, '
+			. 'instance_host varchar(255)  NOT NULL, '
+			. 'start TIMESTAMP WITH TIME ZONE, '
+			. 'stop TIMESTAMP WITH TIME ZONE, '
+			. 'malscore bigint NOT NULL, '
+			. 'subbed_from_ip inet, '
+			. 'subbed_from_host varchar(255), '
+			. 'pkg varchar(255), '
+			. 'md5 varchar(255), '
+			. 'sha1 varchar(255), '
+			. 'sha256 varchar(255), '
+			. 'slug varchar(255), '
+			. 'raw json NOT NULL, '
+			. 'PRIMARY KEY(id) );' );
+	$sth->execute();
+
+} ## end sub create_tables
 
 =head2 extend
 
@@ -619,14 +649,12 @@ sub extend {
 		my $snmp_class = $self->get_short_class_snmp( $row->{classification} );
 		if ( !defined( $to_return->{data}{totals}{$snmp_class} ) ) {
 			$to_return->{data}{totals}{$snmp_class} = 1;
-		}
-		else {
+		} else {
 			$to_return->{data}{totals}{$snmp_class}++;
 		}
 		if ( !defined( $to_return->{data}{suricata_totals}{$snmp_class} ) ) {
 			$to_return->{data}{suricata_totals}{$snmp_class} = 1;
-		}
-		else {
+		} else {
 			$to_return->{data}{suricata_totals}{$snmp_class}++;
 		}
 		if ( !defined( $to_return->{data}{suricata_instances}{ $row->{instance} } ) ) {
@@ -635,11 +663,10 @@ sub extend {
 		$to_return->{data}{suricata_instances}{ $row->{instance} }{total}++;
 		if ( !defined( $to_return->{data}{suricata_instances}{ $row->{instance} }{$snmp_class} ) ) {
 			$to_return->{data}{suricata_instances}{ $row->{instance} }{$snmp_class} = 1;
-		}
-		else {
+		} else {
 			$to_return->{data}{suricata_instances}{ $row->{instance} }{$snmp_class}++;
 		}
-	}
+	} ## end foreach my $row ( @{$suricata_found} )
 
 	foreach my $row ( @{$sagan_found} ) {
 		$to_return->{data}{totals}{total}++;
@@ -647,14 +674,12 @@ sub extend {
 		my $snmp_class = $self->get_short_class_snmp( $row->{classification} );
 		if ( !defined( $to_return->{data}{totals}{$snmp_class} ) ) {
 			$to_return->{data}{totals}{$snmp_class} = 1;
-		}
-		else {
+		} else {
 			$to_return->{data}{totals}{$snmp_class}++;
 		}
 		if ( !defined( $to_return->{data}{sagan_totals}{$snmp_class} ) ) {
 			$to_return->{data}{sagan_totals}{$snmp_class} = 1;
-		}
-		else {
+		} else {
 			$to_return->{data}{sagan_totals}{$snmp_class}++;
 		}
 		if ( !defined( $to_return->{data}{sagan_instances}{ $row->{instance} } ) ) {
@@ -663,14 +688,13 @@ sub extend {
 		$to_return->{data}{sagan_instances}{ $row->{instance} }{total}++;
 		if ( !defined( $to_return->{data}{sagan_instances}{ $row->{instance} }{$snmp_class} ) ) {
 			$to_return->{data}{sagan_instances}{ $row->{instance} }{$snmp_class} = 1;
-		}
-		else {
+		} else {
 			$to_return->{data}{sagan_instances}{ $row->{instance} }{$snmp_class}++;
 		}
-	}
+	} ## end foreach my $row ( @{$sagan_found} )
 
 	return $to_return;
-}
+} ## end sub extend
 
 =head2 generate_baphomet_yamls
 
@@ -688,11 +712,9 @@ sub generate_baphomet_yamls {
 	# run some basic checks prior to starting trying to write them all
 	if ( !defined($dir) ) {
 		die('No directory specified to write files to');
-	}
-	elsif ( !-d $dir ) {
+	} elsif ( !-d $dir ) {
 		die( '"' . $dir . '" is not a directory' );
-	}
-	elsif ( !-w $dir ) {
+	} elsif ( !-w $dir ) {
 		die( '"' . $dir . '" is not writable' );
 	}
 
@@ -789,10 +811,10 @@ sub generate_baphomet_yamls {
 		my $name = 'fastlog_' . $snmp_name;
 		$name =~ s/\ /_/g;
 		write_file( $dir . '/' . $name . '.yaml', $yaml );
-	}
+	} ## end foreach my $class ( sort(@keys) )
 
 	return 1;
-}
+} ## end sub generate_baphomet_yamls
 
 =head2 get_short_class
 
@@ -814,7 +836,7 @@ sub get_short_class {
 	}
 
 	return ('unknownC');
-}
+} ## end sub get_short_class
 
 =head2 get_short_class_snmp
 
@@ -838,7 +860,7 @@ sub get_short_class_snmp {
 	}
 
 	return ('unknownC');
-}
+} ## end sub get_short_class_snmp
 
 =head2 get_short_class_snmp_list
 
@@ -861,7 +883,7 @@ sub get_short_class_snmp_list {
 	}
 
 	return $snmp_classes;
-}
+} ## end sub get_short_class_snmp_list
 
 =head2 search
 
@@ -959,8 +981,7 @@ sub search {
 
 	if ( !defined( $opts{table} ) ) {
 		$opts{table} = 'suricata';
-	}
-	else {
+	} else {
 		if ( $opts{table} ne 'suricata' && $opts{table} ne 'sagan' ) {
 			die( '"' . $opts{table} . '" is not a known table type' );
 		}
@@ -968,8 +989,7 @@ sub search {
 
 	if ( !defined( $opts{go_back_minutes} ) ) {
 		$opts{go_back_minutes} = '1440';
-	}
-	else {
+	} else {
 		if ( $opts{go_back_minutes} !~ /^[0-9]+$/ ) {
 			die( '"' . $opts{go_back_minutes} . '" for go_back_minutes is not numeric' );
 		}
@@ -989,8 +1009,7 @@ sub search {
 
 	if ( defined( $opts{order_dir} ) && $opts{order_dir} ne 'ASC' && $opts{order_dir} ne 'DESC' ) {
 		die( '"' . $opts{order_dir} . '" for order_dir must by either ASC or DESC' );
-	}
-	elsif ( !defined( $opts{order_dir} ) ) {
+	} elsif ( !defined( $opts{order_dir} ) ) {
 		$opts{order_dir} = 'ASC';
 	}
 
@@ -1055,8 +1074,7 @@ sub search {
 	my $sql = 'select * from ' . $table . ' where';
 	if ( defined( $opts{no_time} ) && $opts{no_time} ) {
 		$sql = $sql . ' id >= 0';
-	}
-	else {
+	} else {
 
 		$sql = $sql . " timestamp >= CURRENT_TIMESTAMP - interval '" . $opts{go_back_minutes} . " minutes'";
 	}
@@ -1092,39 +1110,32 @@ sub search {
 				# match the start of the item
 				if ( $arg =~ /^[0-9]+$/ ) {
 					$sql = $sql . " and " . $item . " = '" . $arg . "'";
-				}
-				elsif ( $arg =~ /^\<\=[0-9]+$/ ) {
+				} elsif ( $arg =~ /^\<\=[0-9]+$/ ) {
 					$arg =~ s/^\<\=//;
 					$sql = $sql . " and " . $item . " <= '" . $arg . "'";
-				}
-				elsif ( $arg =~ /^\<[0-9]+$/ ) {
+				} elsif ( $arg =~ /^\<[0-9]+$/ ) {
 					$arg =~ s/^\<//;
 					$sql = $sql . " and " . $item . " < '" . $arg . "'";
-				}
-				elsif ( $arg =~ /^\>\=[0-9]+$/ ) {
+				} elsif ( $arg =~ /^\>\=[0-9]+$/ ) {
 					$arg =~ s/^\>\=//;
 					$sql = $sql . " and " . $item . " >= '" . $arg . "'";
-				}
-				elsif ( $arg =~ /^\>[0-9]+$/ ) {
+				} elsif ( $arg =~ /^\>[0-9]+$/ ) {
 					$arg =~ s/^\>\=//;
 					$sql = $sql . " and " . $item . " > '" . $arg . "'";
-				}
-				elsif ( $arg =~ /^\![0-9]+$/ ) {
+				} elsif ( $arg =~ /^\![0-9]+$/ ) {
 					$arg =~ s/^\!//;
 					$sql = $sql . " and " . $item . " != '" . $arg . "'";
-				}
-				elsif ( $arg =~ /^$/ ) {
+				} elsif ( $arg =~ /^$/ ) {
 
 					# only exists for skipping when some one has passes something starting
 					# with a ,, ending with a,, or with ,, in it.
-				}
-				else {
+				} else {
 					# if we get here, it means we don't have a valid use case for what ever was passed and should error
 					die( '"' . $arg . '" does not appear to be a valid item for a numeric search for the ' . $item );
 				}
-			}
-		}
-	}
+			} ## end foreach my $arg (@arg_split)
+		} ## end if ( defined( $opts{$item} ) )
+	} ## end foreach my $item (@numeric)
 
 	#
 	# handle string items
@@ -1137,21 +1148,18 @@ sub search {
 			if ( defined( $opts{ $item . '_like' } ) && $opts{ $item . '_like' } ) {
 				if ( defined( $opts{$item} . '_not' ) && !$opts{ $item . '_not' } ) {
 					$sql = $sql . " and " . $item . " like '" . $opts{$item} . "'";
-				}
-				else {
+				} else {
 					$sql = $sql . " and " . $item . " not like '" . $opts{$item} . "'";
 				}
-			}
-			else {
+			} else {
 				if ( defined( $opts{$item} . '_not' ) && !$opts{ $item . '_not' } ) {
 					$sql = $sql . " and " . $item . " = '" . $opts{$item} . "'";
-				}
-				else {
+				} else {
 					$sql = $sql . " and " . $item . " != '" . $opts{$item} . "'";
 				}
 			}
-		}
-	}
+		} ## end if ( defined( $opts{$item} ) )
+	} ## end foreach my $item (@strings)
 
 	#
 	# more complex items
@@ -1200,7 +1208,7 @@ sub search {
 	$dbh->disconnect;
 
 	return $found;
-}
+} ## end sub search
 
 =head1 AUTHOR
 
