@@ -147,7 +147,7 @@ sub new {
 	}
 
 	if ( !defined( $opts{cape} ) ) {
-		$opts{suricata} = 'cape_alerts';
+		$opts{cape} = 'cape_alerts';
 	}
 
 	if ( !defined( $opts{sid_ignore} ) ) {
@@ -295,7 +295,7 @@ Start processing. This method is not expected to return.
 One argument named 'files' is taken and it is hash of
 hashes. The keys are below.
 
-    - type :: Either 'suricata' or 'sagan', depending
+    - type :: Either 'suricata', 'sagan', or 'cape', depending
               on the type it is.
 
     - eve :: Path to the EVE file to read.
@@ -956,7 +956,7 @@ sub get_short_class_snmp_list {
 
 Searches the specified table and returns a array of found rows.
 
-    - table :: 'suricata' or 'sagan' depending on the desired table to
+    - table :: 'suricata', 'cape', 'sagan' depending on the desired table to
                use. Will die if something other is specified. The table
                name used is based on what was passed to new(if not the
                default).
@@ -1049,7 +1049,7 @@ sub search {
 	if ( !defined( $opts{table} ) ) {
 		$opts{table} = 'suricata';
 	} else {
-		if ( $opts{table} ne 'suricata' && $opts{table} ne 'sagan' ) {
+		if ( $opts{table} ne 'suricata' && $opts{table} ne 'sagan' && $opts{table} ne 'cape' ) {
 			die( '"' . $opts{table} . '" is not a known table type' );
 		}
 	}
@@ -1087,6 +1087,8 @@ sub search {
 	my $table = $self->{suricata};
 	if ( $opts{table} eq 'sagan' ) {
 		$table = $self->{sagan};
+	}elsif ($opts{table} eq 'sagan') {
+		$table = $self->{cape};
 	}
 
 	#
