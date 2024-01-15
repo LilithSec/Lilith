@@ -426,64 +426,125 @@ sub run {
 								my $sth
 									= $dbh->prepare( 'insert into '
 										. $self->{cape}
-										. ' ( instance, filename, instance_host, task, start, stop, malscore, subbed_from_ip, subbed_from_host, pkg, md5, sha1, sha256, slug, raw ) '
-										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );' );
+										. ' ( instance, target, instance_host, task, start, stop, malscore, subbed_from_ip, subbed_from_host, pkg, md5, sha1, sha256, slug, url, url_hostname, proto, src_ip, src_port, src_ip, src_port, size, raw ) '
+										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );'
+									);
 
-								# figure out what to use for the filename
-								my $filename;
-								if ( defined( $json->{cape_submit}{name} ) ) {
-									$filename = $json->{cape_submit}{name};
-								} elsif ( defined( $json->{suricata_extract_submit}{name} ) ) {
-									$filename = $json->{suricata_extract_submit}{name};
+								my $url;
+								if ( defined( $json->{http} ) && defined( $json->{http}{url} ) ) {
+									$url = $json->{http}{url};
+								}
+
+								my $url_hostname;
+								if ( defined( $json->{http} ) && defined( $json->{http}{hostname} ) ) {
+									$url_hostname = $json->{http}{hostname};
+								}
+
+								my $proto;
+								if ( defined( $json->{proto} ) ) {
+									$proto = $json->{proto};
+								}
+
+								my $src_ip;
+								if ( defined( $json->{src_ip} ) ) {
+									$src_ip = $json->{src_ip};
+								}
+
+								my $src_port;
+								if ( defined( $json->{src_port} ) ) {
+									$src_port = $json->{src_port};
+								}
+
+								my $dest_ip;
+								if ( defined( $json->{dest_ip} ) ) {
+									$dest_ip = $json->{dest_ip};
+								}
+
+								my $dest_port;
+								if ( defined( $json->{dest_port} ) ) {
+									$dest_port = $json->{dest_port};
+								}
+
+								my $size;
+								if ( defined( $json->{cape_submit} ) && defined( $json->{cape_submit}{size} ) ) {
+									$size = $json->{cape_submit}{size};
+								} elsif ( defined( $json->{fileinfo} ) && defined( $json->{fileinfo}{size} ) ) {
+									$size = $json->{fileinfo}{size};
+								}
+
+								# figure out what to use for the target
+								my $target;
+								if ( defined( $json->{cape_submit} ) && defined( $json->{cape_submit}{name} ) ) {
+									$target = $json->{cape_submit}{name};
+								} elsif ( defined( $json->{suricata_extract_submit} )
+									&& defined( $json->{suricata_extract_submit}{name} ) )
+								{
+									$target = $json->{suricata_extract_submit}{name};
 								} else {
-									$filename = $json->{row}{target};
+									$target = $json->{row}{target};
 								}
 
 								my $subbed_from_ip;
-								if ( defined( $json->{cape_submit}{remote_ip} ) ) {
+								if ( defined( $json->{cape_submit} ) && defined( $json->{cape_submit}{remote_ip} ) )
+								{
 									$subbed_from_ip = $json->{cape_submit}{remote_ip};
 								}
 
 								my $subbed_from_host;
-								if ( defined( $json->{suricata_extract_submit}{host} ) ) {
+								if (   defined( $json->{suricata_extract_submit} )
+									&& defined( $json->{suricata_extract_submit}{host} ) )
+								{
 									$subbed_from_host = $json->{suricata_extract_submit}{host};
 								}
 
 								my $md5;
-								if ( defined( $json->{cape_submit}{md5} ) ) {
+								if ( defined( $json->{cape_submit} ) && defined( $json->{cape_submit}{md5} ) ) {
 									$md5 = $json->{cape_submit}{md5};
-								} elsif ( defined( $json->{suricata_extract_submit}{md5} ) ) {
+								} elsif ( defined( $json->{suricata_extract_submit} )
+									&& defined( $json->{suricata_extract_submit}{md5} ) )
+								{
 									$md5 = $json->{suricata_extract_submit}{md5};
 								}
 
 								my $sha1;
-								if ( defined( $json->{cape_submit}{sha1} ) ) {
+								if ( defined( $json->{cape_submit} ) && defined( $json->{cape_submit}{sha1} ) ) {
 									$sha1 = $json->{cape_submit}{sha1};
-								} elsif ( defined( $json->{suricata_extract_submit}{sha1} ) ) {
+								} elsif ( defined( $json->{suricata_extract_submit} )
+									&& defined( $json->{suricata_extract_submit}{sha1} ) )
+								{
 									$sha1 = $json->{suricata_extract_submit}{sha1};
 								}
 
 								my $sha256;
-								if ( defined( $json->{cape_submit}{sha256} ) ) {
+								if ( defined( $json->{cape_submit} ) && defined( $json->{cape_submit}{sha256} ) ) {
 									$sha256 = $json->{cape_submit}{sha256};
-								} elsif ( defined( $json->{suricata_extract_submit}{sha256} ) ) {
+								} elsif ( defined( $json->{suricata_extract_submit} )
+									&& defined( $json->{suricata_extract_submit}{sha256} ) )
+								{
 									$sha256 = $json->{suricata_extract_submit}{sha256};
 								}
 
 								my $slug;
 								if ( defined( $json->{suricata_extract_submit}{slug} ) ) {
 									$slug = $json->{suricata_extract_submit}{slug};
+								} elsif ( defined( $json->{cape_submit} ) && defined( $json->{cape_submit}{slug} ) )
+								{
+									$slug = $json->{cape_submit}{slug};
 								}
 
-								$filename =~ s/^.*\///g;
+								$target =~ s/^.*\///g;
 								$sth->execute(
-									$_[HEAP]{instance},       $filename,
+									$_[HEAP]{instance},       $target,
 									$_[HEAP]{host},           $json->{row}{id},
 									$json->{row}{started_on}, $json->{row}{completed_on},
 									$json->{malscore},        $subbed_from_ip,
 									$subbed_from_host,        $json->{row}{package},
 									$md5,                     $sha1,
 									$sha256,                  $slug,
+									$url,                     $url_hostname,
+									$proto,                   $src_ip,
+									$src_port,                $dest_ip,
+									$dest_port,               $size,
 									$_[ARG0],
 								);
 							} ## end elsif ( $_[HEAP]{type} eq 'cape' )
@@ -591,7 +652,7 @@ sub create_tables {
 			. $self->{cape} . ' ('
 			. 'id bigserial NOT NULL, '
 			. 'instance varchar(255)  NOT NULL, '
-			. 'filename varchar(255)  NOT NULL, '
+			. 'target varchar(255)  NOT NULL, '
 			. 'instance_host varchar(255)  NOT NULL, '
 			. 'task bigserial NOT NULL, '
 			. 'start TIMESTAMP WITH TIME ZONE, '
@@ -604,6 +665,14 @@ sub create_tables {
 			. 'sha1 varchar(255), '
 			. 'sha256 varchar(255), '
 			. 'slug varchar(255), '
+			. 'url varchar(255), '
+			. 'url_hostname varchar(255), '
+			. 'proto varchar(255), '
+			. 'src_ip inet, '
+			. 'src_port integer, '
+			. 'dest_ip inet, '
+			. 'dest_port integer, '
+			. 'size integer, '
 			. 'raw jsonb NOT NULL, '
 			. 'PRIMARY KEY(id) );' );
 	$sth->execute();
