@@ -1087,7 +1087,7 @@ sub search {
 	my $table = $self->{suricata};
 	if ( $opts{table} eq 'sagan' ) {
 		$table = $self->{sagan};
-	}elsif ($opts{table} eq 'sagan') {
+	} elsif ( $opts{table} eq 'sagan' ) {
 		$table = $self->{cape};
 	}
 
