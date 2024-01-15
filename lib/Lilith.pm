@@ -1051,6 +1051,10 @@ Below are simple search items that if given will be matched via a basic equality
     - src_ip
     - dest_ip
     - event_id
+    - md5
+    - sha1
+    - sha256
+    - subbed_from_ip
 
     # will become "and src_ip = '192.168.1.2'"
     src_ip => '192.168.1.2',
@@ -1064,6 +1068,9 @@ prefixed '!' with add as a and not equal.
     - sid
     - rev
     - id
+    - size
+    - malscore
+    - task
 
     # will become "and src_port = '22' and src_port != ''512'"
     src_port => ['22', '!512'],
@@ -1078,6 +1085,10 @@ any of those with '_like' or '_not' will my modified respectively.
     - signature
     - app_proto
     - in_iface
+    - url
+    - url_hostname
+    - slug
+    - pkg
 
     # will become "and host = 'foo.bar'"
     host => 'foo.bar',
@@ -1183,10 +1194,16 @@ sub search {
 	#
 
 	my @order_by = (
-		'src_ip',        'src_port',      'dest_ip',   'dest_port', 'host',  'host_like',
-		'instance_host', 'instance_host', 'instance',  'instance',  'class', 'class',
-		'signature',     'signature',     'app_proto', 'app_proto', 'proto', 'gid',
-		'sid',           'rev',           'timestamp', 'id',        'in_iface'
+		'src_ip',    'src_port',  'dest_ip',          'dest_port',
+		'host',      'host_like', 'instance_host',    'instance_host',
+		'instance',  'instance',  'class',            'class',
+		'signature', 'signature', 'app_proto',        'app_proto',
+		'proto',     'gid',       'sid',              'rev',
+		'timestamp', 'id',        'in_iface',         'url_hostname',
+		'url',       'slug',      'sha256',           'sha1',
+		'md5',       'pkg',       'subbed_from_host', 'subbed_from_ip',
+		'malscore',  'task',      'target',           'proto',
+		'size',      'id'
 	);
 
 	my $valid_order_by;
@@ -1221,7 +1238,7 @@ sub search {
 	# add simple items
 	#
 
-	my @simple = ( 'src_ip', 'dest_ip', 'proto', 'event_id' );
+	my @simple = ( 'src_ip', 'dest_ip', 'proto', 'event_id', 'md5', 'sha1', 'sha256', 'subbed_from_ip' );
 
 	foreach my $item (@simple) {
 		if ( defined( $opts{$item} ) ) {
@@ -1233,7 +1250,7 @@ sub search {
 	# add numeric items
 	#
 
-	my @numeric = ( 'src_port', 'dest_port', 'gid', 'sid', 'rev', 'id' );
+	my @numeric = ( 'src_port', 'dest_port', 'gid', 'sid', 'rev', 'id', 'size', 'malscore', 'task' );
 
 	foreach my $item (@numeric) {
 		if ( defined( $opts{$item} ) ) {
@@ -1279,7 +1296,10 @@ sub search {
 	# handle string items
 	#
 
-	my @strings = ( 'host', 'instance_host', 'instance', 'class', 'signature', 'app_proto', 'in_iface' );
+	my @strings = (
+		'host',     'instance_host', 'instance',     'class', 'signature', 'app_proto',
+		'in_iface', 'url',           'url_hostname', 'slug',  'pkg',       'subbed_from_host'
+	);
 
 	foreach my $item (@strings) {
 		if ( defined( $opts{$item} ) ) {
