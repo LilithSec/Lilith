@@ -551,7 +551,7 @@ sub create_tables {
 			. 'gid int, '
 			. 'sid bigint, '
 			. 'rev bigint, '
-			. 'raw json NOT NULL, '
+			. 'raw jsonb NOT NULL, '
 			. 'PRIMARY KEY(id) );' );
 	$sth->execute();
 
@@ -582,7 +582,7 @@ sub create_tables {
 			. 'gid int, '
 			. 'sid bigint, '
 			. 'rev bigint, '
-			. 'raw json NOT NULL, '
+			. 'raw jsonb NOT NULL, '
 			. 'PRIMARY KEY(id) );' );
 	$sth->execute();
 
@@ -604,7 +604,7 @@ sub create_tables {
 			. 'sha1 varchar(255), '
 			. 'sha256 varchar(255), '
 			. 'slug varchar(255), '
-			. 'raw json NOT NULL, '
+			. 'raw jsonb NOT NULL, '
 			. 'PRIMARY KEY(id) );' );
 	$sth->execute();
 
