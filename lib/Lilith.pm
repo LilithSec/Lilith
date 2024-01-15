@@ -1042,6 +1042,7 @@ Searches the specified table and returns a array of found rows.
 
     - order_by :: Column to order by.
       Default :: timetamp
+      Cape Default :: id
 
     - order_dir :: Direction to order.
       Default :: ASC
@@ -1161,13 +1162,17 @@ sub search {
 	}
 
 	if ( !defined( $opts{order_by} ) ) {
-		$opts{order_by} = 'timestamp';
+		if ( $opts{table} ne 'cape' ) {
+			$opts{order_by} = 'timestamp';
+		} else {
+			$opts{order_by} = 'stop';
+		}
 	}
 
 	my $table = $self->{suricata};
 	if ( $opts{table} eq 'sagan' ) {
 		$table = $self->{sagan};
-	} elsif ( $opts{table} eq 'sagan' ) {
+	} elsif ( $opts{table} eq 'cape' ) {
 		$table = $self->{cape};
 	}
 
@@ -1203,7 +1208,7 @@ sub search {
 		'url',       'slug',      'sha256',           'sha1',
 		'md5',       'pkg',       'subbed_from_host', 'subbed_from_ip',
 		'malscore',  'task',      'target',           'proto',
-		'size',      'id'
+		'size',      'id',        'stop',             'start'
 	);
 
 	my $valid_order_by;
@@ -1230,9 +1235,17 @@ sub search {
 	if ( defined( $opts{no_time} ) && $opts{no_time} ) {
 		$sql = $sql . ' id >= 0';
 	} else {
-
-		$sql = $sql . " timestamp >= CURRENT_TIMESTAMP - interval '" . $opts{go_back_minutes} . " minutes'";
-	}
+		my $go_back_column = 'timestamp';
+		if ( $opts{table} eq 'cape' ) {
+			$go_back_column = 'stop';
+		}
+		$sql
+			= $sql . " "
+			. $go_back_column
+			. " >= CURRENT_TIMESTAMP - interval '"
+			. $opts{go_back_minutes}
+			. " minutes'";
+	} ## end else [ if ( defined( $opts{no_time} ) && $opts{no_time...})]
 
 	#
 	# add simple items
@@ -1297,8 +1310,9 @@ sub search {
 	#
 
 	my @strings = (
-		'host',     'instance_host', 'instance',     'class', 'signature', 'app_proto',
-		'in_iface', 'url',           'url_hostname', 'slug',  'pkg',       'subbed_from_host'
+		'host',         'instance_host', 'instance', 'class',
+		'signature',    'app_proto',     'in_iface', 'url',
+		'url_hostname', 'slug',          'pkg',      'subbed_from_host'
 	);
 
 	foreach my $item (@strings) {

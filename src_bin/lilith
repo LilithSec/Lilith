@@ -545,7 +545,7 @@ sub help {
 
 	pod2usage( -exitval => 255, -verbose => 2, -output => \*STDOUT );
 
-} ## end sub help
+}
 
 # get the commandline options
 my $help        = 0;
@@ -977,7 +977,7 @@ if ( $action eq 'search' ) {
 				} else {
 					die( '"' . $column_set . '" is not a known column set' );
 				}
-			} else {
+			} elsif ( $table eq 'sagan' ) {
 				if ( $column_set eq 'default' ) {
 					$columns
 						= 'id,instance,src_ip,host,xff,facility,level,priority,program,signature,classification,rule_id';
@@ -993,7 +993,11 @@ if ( $action eq 'search' ) {
 				} else {
 					die( '"' . $column_set . '" is not a known column set' );
 				}
-			} ## end else [ if ( $table eq 'suricata' ) ]
+			} elsif ( $table eq 'cape' ) {
+				if ( $column_set eq 'default' ) {
+					$columns = 'id,instance,slug,target,size,pkg,malscore,subbed_from_ip,subbed_from_host';
+				}
+			}
 		} ## end if ( !defined($columns) )
 
 		# friendly column names
@@ -1029,6 +1033,13 @@ if ( $action eq 'search' ) {
 			'xff'                 => 'xff',
 			'stream'              => 'stream',
 			'event_id'            => 'event',
+			'slug'                => 'slug',
+			'target'              => 'target',
+			'size'                => 'size',
+			'pkg'                 => 'pkg',
+			'malscore'            => 'malscore',
+			'subbed_from_ip'      => 'subbed_from_ip',
+			'subbed_from_host'    => 'subbed_from_host',
 		};
 
 		#
