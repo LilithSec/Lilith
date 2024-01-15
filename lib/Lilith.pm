@@ -427,7 +427,7 @@ sub run {
 									= $dbh->prepare( 'insert into '
 										. $self->{cape}
 										. ' ( instance, filename, instance_host, task, start, stop, malscore, subbed_from_ip, subbed_from_host, pkg, md5, sha1, sha256, slug, raw ) '
-										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );' );
+										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );' );
 
 								# figure out what to use for the filename
 								my $filename;
