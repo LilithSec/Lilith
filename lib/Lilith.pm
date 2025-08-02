@@ -34,7 +34,6 @@ our $VERSION = '1.0.0';
 
      my $lilith=Lilith->new(
                             dsn=>$toml->{dsn},
-                            suricata=>$toml->{suricata},
                             user=>$toml->{user},
                             pass=>$toml->{pass},
                            );
@@ -42,7 +41,6 @@ our $VERSION = '1.0.0';
 
      $lilith->create_table(
                            dsn=>$toml->{dsn},
-                           suricata=>$toml->{suricata},
                            user=>$toml->{user},
                            pass=>$toml->{pass},
                           );
@@ -73,7 +71,6 @@ Initiates it.
 
     my $lilith=Lilith->run(
                            dsn=>$toml->{dsn},
-                           suricata=>$toml->{suricata},
                            user=>$toml->{user},
                            pass=>$toml->{pass},
                           );
@@ -131,10 +128,6 @@ sub new {
 		$opts{user} = 'lilith';
 	}
 
-	if ( !defined( $opts{suricata} ) ) {
-		$opts{suricata} = 'suricata_alerts';
-	}
-
 	if ( !defined( $opts{cape} ) ) {
 		$opts{cape} = 'cape_alerts';
 	}
@@ -179,7 +172,6 @@ sub new {
 		dsn                   => $opts{dsn},
 		user                  => $opts{user},
 		pass                  => $opts{pass},
-		suricata              => $opts{suricata},
 		cape                  => $opts{cape},
 		debug                 => $opts{debug},
 		class_map             => {
@@ -367,8 +359,7 @@ sub run {
 							# handle if suricata
 							if ( $_[HEAP]{type} eq 'suricata' ) {
 								my $sth
-									= $dbh->prepare( 'insert into '
-										. $self->{suricata}
+									= $dbh->prepare( 'insert into suricata_alerts'
 										. ' ( instance, host, timestamp, flow_id, event_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, app_proto, flow_pkts_toserver, flow_bytes_toserver, flow_pkts_toclient, flow_bytes_toclient, flow_start, classification, signature, gid, sid, rev, raw ) '
 										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );'
 									);
@@ -576,8 +567,7 @@ sub create_tables {
 	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} );
 
 	my $sth
-		= $dbh->prepare( 'create table '
-			. $self->{suricata} . ' ('
+	  = $dbh->prepare( 'create table suricata_alerts ('
 			. 'id bigserial NOT NULL, '
 			. 'instance varchar(255) NOT NULL,'
 			. 'host varchar(255) NOT NULL,'
@@ -605,8 +595,7 @@ sub create_tables {
 	$sth->execute();
 
 	$sth
-		= $dbh->prepare( 'create table '
-			. $self->{suricata} . '_raw ('
+		= $dbh->prepare( 'create table suricata_alerts_raw ('
 			. 'event_id varchar(64) NOT NULL, '
 			. 'raw json NOT NULL, '
 			. 'PRIMARY KEY(event_id) );' );
@@ -728,8 +717,7 @@ sub extend {
 		#
 
 		my $sql
-			= 'select * from '
-			. $self->{suricata}
+			= 'select * from suricata_alerts'
 			. " where timestamp >= CURRENT_TIMESTAMP - interval '"
 			. $opts{go_back_minutes}
 			. " minutes' and host ='"
@@ -1169,7 +1157,7 @@ sub search {
 		}
 	}
 
-	my $table = $self->{suricata};
+	my $table = 'suricata_alerts';
 	if ( $opts{table} eq 'sagan' ) {
 		$table = 'sagan_aelrts';
 	} elsif ( $opts{table} eq 'cape' ) {
