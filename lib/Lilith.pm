@@ -34,7 +34,6 @@ our $VERSION = '1.0.0';
 
      my $lilith=Lilith->new(
                             dsn=>$toml->{dsn},
-                            sagan=>$toml->{sagan},
                             suricata=>$toml->{suricata},
                             user=>$toml->{user},
                             pass=>$toml->{pass},
@@ -43,7 +42,6 @@ our $VERSION = '1.0.0';
 
      $lilith->create_table(
                            dsn=>$toml->{dsn},
-                           sagan=>$toml->{sagan},
                            suricata=>$toml->{suricata},
                            user=>$toml->{user},
                            pass=>$toml->{pass},
@@ -75,7 +73,6 @@ Initiates it.
 
     my $lilith=Lilith->run(
                            dsn=>$toml->{dsn},
-                           sagan=>$toml->{sagan},
                            suricata=>$toml->{suricata},
                            user=>$toml->{user},
                            pass=>$toml->{pass},
@@ -84,9 +81,6 @@ Initiates it.
 The args taken by this are as below.
 
     - dsn :: The DSN to use for with DBI.
-
-    - sagan :: Name of the table for Sagan alerts.
-      Default :: sagan_alerts
 
     - suricata :: Name of the table for Suricata alerts.
       Default :: suricata_alerts
@@ -137,10 +131,6 @@ sub new {
 		$opts{user} = 'lilith';
 	}
 
-	if ( !defined( $opts{sagan} ) ) {
-		$opts{sagan} = 'sagan_alerts';
-	}
-
 	if ( !defined( $opts{suricata} ) ) {
 		$opts{suricata} = 'suricata_alerts';
 	}
@@ -189,7 +179,6 @@ sub new {
 		dsn                   => $opts{dsn},
 		user                  => $opts{user},
 		pass                  => $opts{pass},
-		sagan                 => $opts{sagan},
 		suricata              => $opts{suricata},
 		cape                  => $opts{cape},
 		debug                 => $opts{debug},
@@ -402,8 +391,7 @@ sub run {
 							#handle if sagan
 							elsif ( $_[HEAP]{type} eq 'sagan' ) {
 								my $sth
-									= $dbh->prepare( 'insert into '
-										. $self->{sagan}
+									= $dbh->prepare( 'insert into sagan_alerts'
 										. ' ( instance, instance_host, timestamp, event_id, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, facility, host, level, priority, program, proto, xff, stream, classification, signature, gid, sid, rev, raw) '
 										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );'
 									);
@@ -613,13 +601,19 @@ sub create_tables {
 			. 'gid int, '
 			. 'sid bigint, '
 			. 'rev bigint, '
-			. 'raw json NOT NULL, '
 			. 'PRIMARY KEY(id) );' );
 	$sth->execute();
 
 	$sth
 		= $dbh->prepare( 'create table '
-			. $self->{sagan} . ' ('
+			. $self->{suricata} . '_raw ('
+			. 'event_id varchar(64) NOT NULL, '
+			. 'raw json NOT NULL, '
+			. 'PRIMARY KEY(event_id) );' );
+	$sth->execute();
+
+	$sth
+		= $dbh->prepare( 'create table sagan_alerts ('
 			. 'id bigserial NOT NULL, '
 			. 'instance varchar(255)  NOT NULL, '
 			. 'instance_host varchar(255)  NOT NULL, '
@@ -757,8 +751,7 @@ sub extend {
 		#
 
 		$sql
-			= 'select * from '
-			. $self->{sagan}
+			= 'select * from sagan_alerts'
 			. " where timestamp >= CURRENT_TIMESTAMP - interval '"
 			. $opts{go_back_minutes}
 			. " minutes' and instance_host = '"
@@ -1178,7 +1171,7 @@ sub search {
 
 	my $table = $self->{suricata};
 	if ( $opts{table} eq 'sagan' ) {
-		$table = $self->{sagan};
+		$table = 'sagan_aelrts';
 	} elsif ( $opts{table} eq 'cape' ) {
 		$table = $self->{cape};
 	}
