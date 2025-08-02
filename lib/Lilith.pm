@@ -4,14 +4,13 @@ use 5.006;
 use strict;
 use warnings;
 use POE qw(Wheel::FollowTail);
-use JSON;
-use Sys::Hostname;
-use DBI;
+use JSON qw( decode_json );
+use Sys::Hostname qw( hostname );
+use DBI ();
 use Digest::SHA qw(sha256_base64);
-use File::ReadBackwards;
-use Sys::Syslog;
-use YAML::PP;
-use File::Slurp;
+use Sys::Syslog qw( closelog openlog syslog );
+use YAML::PP ();
+use File::Slurp qw( write_file );
 
 =head1 NAME
 
@@ -19,11 +18,11 @@ Lilith - Work with Suricata/Sagan EVE logs and PostgreSQL.
 
 =head1 VERSION
 
-Version 0.6.0
+Version 1.0.0
 
 =cut
 
-our $VERSION = '0.6.0';
+our $VERSION = '1.0.0';
 
 =head1 SYNOPSIS
 
@@ -70,7 +69,7 @@ our $VERSION = '0.6.0';
 
 =head1 FUNCTIONS
 
-=head1 new
+=head2 new
 
 Initiates it.
 
@@ -273,6 +272,7 @@ sub new {
 
 	return $self;
 } ## end sub new
+
 
 =head2 run
 
@@ -573,6 +573,7 @@ sub run {
 	POE::Kernel->run;
 } ## end sub run
 
+
 =head2 create_tables
 
 Just creates the required tables in the DB.
@@ -678,6 +679,7 @@ sub create_tables {
 	$sth->execute();
 
 } ## end sub create_tables
+
 
 =head2 extend
 
@@ -832,6 +834,7 @@ sub extend {
 	return $to_return;
 } ## end sub extend
 
+
 =head2 generate_baphomet_yamls
 
 Geneartes fastlog parsing YAMLs for baphomet.
@@ -952,6 +955,7 @@ sub generate_baphomet_yamls {
 	return 1;
 } ## end sub generate_baphomet_yamls
 
+
 =head2 get_short_class
 
 Get SNMP short class name for a class.
@@ -973,6 +977,7 @@ sub get_short_class {
 
 	return ('unknownC');
 } ## end sub get_short_class
+
 
 =head2 get_short_class_snmp
 
@@ -998,6 +1003,7 @@ sub get_short_class_snmp {
 	return ('unknownC');
 } ## end sub get_short_class_snmp
 
+
 =head2 get_short_class_snmp_list
 
 Gets a list of short SNMP class names.
@@ -1020,6 +1026,7 @@ sub get_short_class_snmp_list {
 
 	return $snmp_classes;
 } ## end sub get_short_class_snmp_list
+
 
 =head2 search
 
@@ -1381,6 +1388,7 @@ sub search {
 
 	return $found;
 } ## end sub search
+
 
 =head1 AUTHOR
 
