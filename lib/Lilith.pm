@@ -82,9 +82,6 @@ The args taken by this are as below.
     - suricata :: Name of the table for Suricata alerts.
       Default :: suricata_alerts
 
-    - cape :: Name of the table for CAPEv2 alerts.
-      Default :: cape_alerts
-
     - user :: Name for use with DBI for the DB connection.
       Default :: lilith
 
@@ -128,10 +125,6 @@ sub new {
 		$opts{user} = 'lilith';
 	}
 
-	if ( !defined( $opts{cape} ) ) {
-		$opts{cape} = 'cape_alerts';
-	}
-
 	if ( !defined( $opts{sid_ignore} ) ) {
 		my @empty_array;
 		$opts{sid_ignore} = \@empty_array;
@@ -172,7 +165,6 @@ sub new {
 		dsn                   => $opts{dsn},
 		user                  => $opts{user},
 		pass                  => $opts{pass},
-		cape                  => $opts{cape},
 		debug                 => $opts{debug},
 		class_map             => {
 			'Not Suspicious Traffic'                                      => '!SusT',
@@ -403,8 +395,7 @@ sub run {
 								);
 							} elsif ( $_[HEAP]{type} eq 'cape' ) {
 								my $sth
-									= $dbh->prepare( 'insert into '
-										. $self->{cape}
+									= $dbh->prepare( 'insert into cape_alerts'
 										. ' ( instance, target, instance_host, task, start, stop, malscore, subbed_from_ip, subbed_from_host, pkg, md5, sha1, sha256, slug, url, url_hostname, proto, src_ip, src_port, dest_ip, dest_port, size, raw ) '
 										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );'
 									);
@@ -632,8 +623,7 @@ sub create_tables {
 	$sth->execute();
 
 	$sth
-		= $dbh->prepare( 'create table '
-			. $self->{cape} . ' ('
+		= $dbh->prepare( 'create table cape_alerts ('
 			. 'id bigserial NOT NULL, '
 			. 'instance varchar(255)  NOT NULL, '
 			. 'target varchar(255)  NOT NULL, '
@@ -1159,9 +1149,9 @@ sub search {
 
 	my $table = 'suricata_alerts';
 	if ( $opts{table} eq 'sagan' ) {
-		$table = 'sagan_aelrts';
+		$table = 'sagan_alerts';
 	} elsif ( $opts{table} eq 'cape' ) {
-		$table = $self->{cape};
+		$table = 'cape_alerts';
 	}
 
 	#
