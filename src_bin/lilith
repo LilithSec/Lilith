@@ -22,8 +22,6 @@ lilith [B<-c> <config>] B<-a> event [B<-t> <table>] B<--event> <event_id> [B<--r
 
 lilith [B<-c> <config>] B<-a> extend [B<-Z>] [B<-m> <minutes>]
 
-lilith [B<-c> <config>] B<-a> generate_baphomet_yamls B<--dir> <dir>
-
 lilith [B<-c> <config>] B<-a> get_short_class_snmp_list
 
 lilith [B<-c> <config>] B<-a> search [B<--output> <return>] [B<-t> <table>]
@@ -591,20 +589,20 @@ Example...
 
 use strict;
 use warnings;
-use Getopt::Long;
-use Lilith;
+use Getopt::Long qw( GetOptions );
+use Lilith ();
 use TOML        qw(from_toml to_toml);
 use File::Slurp qw(read_file);
-use JSON;
-use Text::ANSITable;
-use Term::ANSIColor;
+use JSON qw( decode_json );
+use Text::ANSITable ();
+use Term::ANSIColor qw( color );
 use Net::Server::Daemonize qw(daemonize);
-use MIME::Base64;
-use Gzip::Faster;
-use Data::Dumper;
-use Sys::Syslog;
-use Time::Piece::Guess;
-use Pod::Usage;
+use MIME::Base64 qw( encode_base64 );
+use Gzip::Faster qw( gzip );
+use Data::Dumper qw( Dumper );
+use Sys::Syslog qw( openlog syslog );
+use Time::Piece::Guess ();
+use Pod::Usage qw( pod2usage );
 
 sub version {
 	print 'lilith v. ' . $Lilith::VERSION . "\n";
@@ -842,8 +840,6 @@ unless ($toml) {
 
 my $lilith = Lilith->new(
 	dsn                   => $toml->{dsn},
-	sagan                 => $toml->{sagan},
-	suricata              => $toml->{suricata},
 	user                  => $toml->{user},
 	pass                  => $toml->{pass},
 	debug                 => $debug,
@@ -891,24 +887,6 @@ if ( $action eq 'run' ) {
 	$message = "dsn: ";
 	if ( defined( $toml->{dsn} ) ) {
 		$message = $message . $toml->{dsn} . "\n";
-	} else {
-		$message = $message . "***undefined***\n";
-	}
-	syslog( 'info', $message );
-	print $message. "\n";
-
-	$message = "sagan: ";
-	if ( defined( $toml->{sagan} ) ) {
-		$message = $message . $toml->{sagan} . "\n";
-	} else {
-		$message = $message . "***undefined***\n";
-	}
-	syslog( 'info', $message );
-	print $message. "\n";
-
-	$message = "suricata: ";
-	if ( defined( $toml->{suricata} ) ) {
-		$message = $message . $toml->{suricata} . "\n";
 	} else {
 		$message = $message . "***undefined***\n";
 	}
