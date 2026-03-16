@@ -9,8 +9,6 @@ use Sys::Hostname qw( hostname );
 use DBI ();
 use Digest::SHA qw(sha256_base64);
 use Sys::Syslog qw( closelog openlog syslog );
-use YAML::PP ();
-use File::Slurp qw( write_file );
 
 =head1 NAME
 

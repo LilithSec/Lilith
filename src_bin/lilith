@@ -125,10 +125,6 @@ Enable Gzip+Base64 LibreNMS style extend compression.
 How far back to search. For the extend action, 5 minutes
 is the default.
 
-=head2 -a generate_baphomet_yamls
-
-Generate the YAMLs for Baphomet.
-
 =head3 -d <dir>
 
 The directory to write it out too.
@@ -473,6 +469,12 @@ The host the sample was submitted from.
 
 =head1 ENVIROMENTAL VARIABLES
 
+=head2 Lilith_color_enable
+
+Set to enable colorized output.
+
+    - Default :: 0
+
 =head2 Lilith_table_color
 
 The L<Text::ANSITable> table color to use.
@@ -589,20 +591,20 @@ Example...
 
 use strict;
 use warnings;
-use Getopt::Long qw( GetOptions );
-use Lilith ();
-use TOML        qw(from_toml to_toml);
-use File::Slurp qw(read_file);
-use JSON qw( decode_json );
-use Text::ANSITable ();
-use Term::ANSIColor qw( color );
+use Getopt::Long           qw( GetOptions );
+use Lilith                 ();
+use TOML                   qw(from_toml to_toml);
+use File::Slurp            qw(read_file);
+use JSON                   qw( decode_json );
+use Text::ANSITable        ();
+use Term::ANSIColor        qw( color );
 use Net::Server::Daemonize qw(daemonize);
-use MIME::Base64 qw( encode_base64 );
-use Gzip::Faster qw( gzip );
-use Data::Dumper qw( Dumper );
-use Sys::Syslog qw( openlog syslog );
-use Time::Piece::Guess ();
-use Pod::Usage qw( pod2usage );
+use MIME::Base64           qw( encode_base64 );
+use Gzip::Faster           qw( gzip );
+use Data::Dumper           qw( Dumper );
+use Sys::Syslog            qw( openlog syslog );
+use Time::Piece::Guess     ();
+use Pod::Usage             qw( pod2usage );
 
 sub version {
 	print 'lilith v. ' . $Lilith::VERSION . "\n";
@@ -766,6 +768,10 @@ if ($help) {
 if ($version) {
 	&version;
 	exit 42;
+}
+
+if ( !$ENV{Lilith_color_enable} ) {
+	$ENV{NO_COLOR} = 1;
 }
 
 if ( !defined( $ENV{Lilith_table_color} ) ) {
@@ -1380,16 +1386,6 @@ if ( $action eq 'get_short_class_snmp_list' ) {
 	foreach my $item ( @{$class_list} ) {
 		print $item. "\n";
 	}
-
-	exit 0;
-}
-
-#
-# generate Baphomet YAMLs
-#
-
-if ( $action eq 'generate_baphomet_yamls' ) {
-	$lilith->generate_baphomet_yamls($dir);
 
 	exit 0;
 }
