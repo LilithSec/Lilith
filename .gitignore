@@ -36,3 +36,6 @@ inc/
 /*.zip
 bin/.exists
 bin/*
+
+.#*
+\#*
