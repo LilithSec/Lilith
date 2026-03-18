@@ -969,21 +969,21 @@ Below are complex items.
 sub search {
 	my ( $self, %opts ) = @_;
 
-	if (defined($opts{table})){
+	if ( defined( $opts{table} ) ) {
 		if ( $opts{table} ne 'suricata' && $opts{table} ne 'sagan' && $opts{table} ne 'cape' ) {
 			die( '"' . $opts{table} . '" is not a known table type' );
 		}
 	}
-	my $table='SuricataAlert';
-	my $default_order_by='timestamp';
-	if ( $opts{table} eq 'sagan' ){
-		$table='SaganAlert';
-	}elsif($opts{table} eq 'cape' ){
-		$table='CapeAlert';
-		$default_order_by='id';
+	my $table            = 'SuricataAlert';
+	my $default_order_by = 'timestamp';
+	if ( $opts{table} eq 'sagan' ) {
+		$table = 'SaganAlert';
+	} elsif ( $opts{table} eq 'cape' ) {
+		$table            = 'CapeAlert';
+		$default_order_by = 'id';
 	}
 
-	if (!defined($opts{order_by})){
+	if ( !defined( $opts{order_by} ) ) {
 		$opts{order_by} = $default_order_by;
 	}
 
@@ -1001,7 +1001,7 @@ sub search {
 	} elsif ( !defined( $opts{order_dir} ) ) {
 		$opts{order_dir} = 'ASC';
 	}
-	
+
 	my $go_back_column = 'timestamp';
 	if ( $opts{table} eq 'cape' ) {
 		$go_back_column = 'stop';
@@ -1033,35 +1033,35 @@ sub search {
 		if ( defined( $opts{$item} ) ) {
 			# process each item
 			my @found;
-			foreach my $arg (@{ $opts{$item} }) {
+			foreach my $arg ( @{ $opts{$item} } ) {
 				$arg =~ s/[\ \t]//g;
 
 				my $equality = '=';
 				my $number;
-					
+
 				# match the start of the item
 				if ( $arg =~ /^[0-9]+$/ ) {
 					$number = $arg;
 				} elsif ( $arg =~ /^\<\=[0-9]+$/ ) {
 					$arg =~ s/^\<\=//;
 					$equality = '<=';
-					$number = $arg;
+					$number   = $arg;
 				} elsif ( $arg =~ /^\<[0-9]+$/ ) {
 					$arg =~ s/^\<//;
 					$equality = '<';
-					$number = $arg;
+					$number   = $arg;
 				} elsif ( $arg =~ /^\>\=[0-9]+$/ ) {
 					$arg =~ s/^\>\=//;
 					$equality = '>=';
-					$number = $arg;
+					$number   = $arg;
 				} elsif ( $arg =~ /^\>[0-9]+$/ ) {
 					$arg =~ s/^\>\=//;
 					$equality = '>';
-					$number = $arg;
+					$number   = $arg;
 				} elsif ( $arg =~ /^\![0-9]+$/ ) {
 					$arg =~ s/^\!//;
 					$equality = '!=';
-					$number = $arg;
+					$number   = $arg;
 				} elsif ( $arg =~ /^$/ ) {
 
 					# only exists for skipping when some one has passes something starting
@@ -1070,39 +1070,38 @@ sub search {
 					# if we get here, it means we don't have a valid use case for what ever was passed and should error
 					die( '"' . $arg . '" does not appear to be a valid item for a numeric search for the ' . $item );
 				}
-				if (defined($number)){
+				if ( defined($number) ) {
 					print "test\n";
-					push(@found, {$equality, $number});
+					push( @found, { $equality, $number } );
 				}
-			} ## end foreach my $arg (@arg_split)
-			if (defined($found[0]) && !defined($found[1])){
+			} ## end foreach my $arg ( @{ $opts{$item} } )
+			if ( defined( $found[0] ) && !defined( $found[1] ) ) {
 				$search->{$item} = $found[0];
-			}elsif(defined($found[0]) && defined($found[1])){
+			} elsif ( defined( $found[0] ) && defined( $found[1] ) ) {
 				$search->{$item} = [ '-and' => \@found ];
-			};
+			}
 		} ## end if ( defined( $opts{$item} ) )
 	} ## end foreach my $item (@numeric)
-	
+
 	#
 	# more complex items
 	#
 
 	if ( defined( $opts{ip} ) ) {
-		if (!defined($search->{'-and'})){
+		if ( !defined( $search->{'-and'} ) ) {
 			$search->{'-and'} = [];
 		}
-		$search->{'-and'} = [
-			{ '-or' => { src_ip=>{'=', $opts{ip}},dest_ip=>{'=', $opts{ip}}}}
-			];
+		$search->{'-and'} = [ { '-or' => { src_ip => { '=', $opts{ip} }, dest_ip => { '=', $opts{ip} } } } ];
 	}
 
 	if ( defined( $opts{port} ) ) {
-		if (!defined($search->{'-and'})){
+		if ( !defined( $search->{'-and'} ) ) {
 			$search->{'-and'} = [];
 		}
-		push(@{ $search->{'-and'}}, [
-					{ '-or' => { src_port=>{'=', $opts{port}},dest_port=>{'=', $opts{port}}}}
-					] );
+		push(
+			@{ $search->{'-and'} },
+			[ { '-or' => { src_port => { '=', $opts{port} }, dest_port => { '=', $opts{port} } } } ]
+		);
 	}
 
 	#
@@ -1114,35 +1113,35 @@ sub search {
 		'signature',    'app_proto',     'in_iface', 'url',
 		'url_hostname', 'slug',          'pkg',      'subbed_from_host'
 	);
-
 	foreach my $item (@strings) {
 		if ( defined( $opts{$item} ) ) {
-			if ($opts{$item} =~ /\%/) {
-				if ($opts{$item} =~ /^\!/) {
+			if ( $opts{$item} =~ /\%/ ) {
+				if ( $opts{$item} =~ /^\!/ ) {
 					$opts{$item} =~ s/^\!//;
 					$search->{$item} = { '-not_like', $opts{$item} };
-				}else{
+				} else {
 					$search->{$item} = { 'like', $opts{$item} };
 				}
-			}else{
-				if ($opts{$item} =~ /^\!/) {
+			} else {
+				if ( $opts{$item} =~ /^\!/ ) {
 					$opts{$item} =~ s/^\!//;
 					$search->{$item} = { '!=', $opts{$item} };
-				}else{
+				} else {
 					$search->{$item} = { '=', $opts{$item} };
-				}				
+				}
 			}
 		} ## end if ( defined( $opts{$item} ) )
 	} ## end foreach my $item (@strings)
-	
-	use Data::Dumper qw (Dumper);
 
-	print Dumper($search);
-	
-	my @fetch_results = $schema->resultset($table)->search($search, {order_by => $opts{order_by}.' '.$opts{order_dir}})->all;
+	my @fetch_results = $schema->resultset($table)->search(
+		$search,
+		{
+			order_by     => $opts{order_by} . ' ' . $opts{order_dir},
+			result_class => 'DBIx::Class::ResultClass::HashRefInflator',
+		}
+	)->all;
 
-
-	return @fetch_results;
+	return \@fetch_results;
 } ## end sub search
 
 =head1 AUTHOR
