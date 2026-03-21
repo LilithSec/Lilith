@@ -10,18 +10,19 @@ events fetched.
 ### Debian
 
 ```
-apt-get install zlib1g-dev cpanminus libjson-perl libtoml-perl \
- libdbi-perl libfile-readbackwards-perl libdigest-sha-perl libpoe-perl \
- libfile-slurp-perl libdbd-pg-perl
+apt-get install zlib1g-dev cpanminus libdbi-perl libdbix-class-perl \
+ libdata-dumper-perl libdigest-sha-perl libfile-slurp-perl libjson-perl \
+ libnet-server-perl libpoe-perl libtoml-perl
 cpanm Lilith
 ```
 
 ### FreeBSD
 
 ```
-pkg install p5-App-cpanminus p5-JSON p5-TOML p5-DBI \
- p5-File-ReadBackwards p5-Digest-SHA p5-POE \
- p5-MIME-Base64 p5-Gzip-Faster p5-DBD-Pg p5-File-Slurp
+pkg install p5-App-cpanminus p5-DBI p5-DBIx-Class p5-DBD-Pg \
+ p5-Data-Dumper p5-Digest-SHA p5-File-Slurp p5-JSON p5-MIME-Base64 \
+ p5-Net-Server p5-POE p5-Sys-Syslog p5-Term-ANSIColor \
+ p5-Text-ANSITable p5-Time-Piece p5-TOML
 cpanm Lilith
 ```
 
