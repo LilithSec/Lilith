@@ -28,12 +28,11 @@ lilith [B<-c> <config>] B<-a> search [B<--output> <return>] [B<-t> <table>]
 [B<-m> <minutes>] [B<--order> <clm>] [B<--limit> <int>] [B<--offset> <int>]
 [B<--orderdir> <dir>] [B<--si> <src_ip>] [B<--di> <<dst_ip>] [B<--ip> <ip>]
 [B<--sp> <<src_port>] [B<--dp> <<dst_port>] [B<--port> <<port>] [B<--host> <host>]
-[B<--hostl>] [B<--hosN>] [B<--ih> <host>] [B<--ihl>] [B<--ihN>] [B<-i> <instance>]
-[B<-il>] [B<-iN>] [B<-c> <class>] [B<--cl>] [B<--cN>] [B<-s> <sig>] [B<--sl>]
-[B<--sN>] [B<--if> <if>] [B<--ifl>] [B<--ifN>] [B<--ap> <proto>] [B<--apl>] [B<--apN>]
-[B<--gid> <gid>] [B<--sid> <sid>] [B<--rev> <rev>] [B<--subip> <subip>]
-[B<--subhost> <subhost>] [B<--slug> <slug>] [B<--pkg> <pkg>] [B<--malscore> <malscore>]
-[B<--size> <size>] [B<--target> <target>] [B<--task> <task>]
+[B<--ih> <host>] [B<-i> <instance>] [B<-c> <class>] [B<-s> <sig>] [B<--if> <if>]
+[B<--ap> <proto>] [B<--gid> <gid>] [B<--sid> <sid>] [B<--rev> <rev>]
+[B<--subip> <subip>] [B<--subhost> <subhost>] [B<--slug> <slug>] [B<--pkg> <pkg>]
+[B<--malscore> <malscore>] [B<--size> <size>] [B<--target> <target>]
+[B<--task> <task>]
 
 =head1 DESCRIPTION
 
@@ -239,20 +238,6 @@ Host.
     - Default :: undef
     - Type :: string
 
-=head4 --hostl
-
-Use like for matching host.
-
-    - Default :: undef
-    - Type :: string
-
-=head4 --hostN
-
-Invert host matching.
-
-    - Default :: undef
-    - Type :: string
-
 =head3 Instance Options
 
 =head4 --ih <host>
@@ -262,37 +247,11 @@ Instance host.
     - Default :: undef
     - Type :: string
 
-=head4 --ihl
-
-Use like for matching instance host.
-
-    - Default :: undef
-
-=head4 --ihN
-
-Invert instance host matching.
-
-    - Default :: undef
-
 =head3 Instance Options
 
 =head4 -i  <instance>
 
 Instance.
-
-    - Default :: undef
-    - Type :: string
-
-=head4 --il
-
-Use like for matching instance.
-
-    - Default :: undef
-    - Type :: string
-
-=head4 --iN
-
-Invert instance matching.
 
     - Default :: undef
     - Type :: string
@@ -306,39 +265,11 @@ Classification.
     - Default :: undef
     - Type :: string
 
-=head4 --cl
-
-Use like for matching classification.
-
-    - Default :: undef
-    - Type :: string
-
-=head4 --cN
-
-Invert class matching.
-
-    - Default :: undef
-    - Type :: string
-
 =head3 Signature Options
 
 =head4 -s <sig>
 
 Signature.
-
-    - Default :: undef
-    - Type :: string
-
-=head4 --sl
-
-Use like for matching signature.
-
-    - Default :: undef
-    - Type :: string
-
-=head4 --sN
-
-Invert signature matching.
 
     - Default :: undef
     - Type :: string
@@ -352,18 +283,6 @@ Interface.
     - Default :: undef
     - Type :: string
 
-=head4 --ifl
-
-Use like for matching interface.
-
-    - Default :: undef
-
-=head4 --ifN
-
-Invert interface matching.
-
-    - Default :: undef
-
 =head3 App Proto Options
 
 =head4 --ap <proto>
@@ -372,18 +291,6 @@ App proto.
 
     - Default :: undef
     - Type :: string
-
-=head4 --apl
-
-Use like for matching app proto.
-
-    - Default :: undef
-
-=head4 --apN
-
-Invert app proto matching.
-
-    - Default :: undef
 
 =head3 Rule Options
 
