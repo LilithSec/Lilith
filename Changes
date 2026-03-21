@@ -1,6 +1,6 @@
 Revision history for Lilith
 
-2.0.0	2026-03-20/22:45
+2.0.0	2026-03-20/23:00
 		 - use DBIx::Class::Schema
 		 - rework search stuff to use that and update some of the opts for src_bin/lilith
 
