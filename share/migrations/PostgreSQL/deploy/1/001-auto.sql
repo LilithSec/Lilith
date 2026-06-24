@@ -89,3 +89,12 @@ CREATE TABLE cape_alerts (
     raw jsonb NOT NULL,
     PRIMARY KEY(id)
 );
+
+CREATE TABLE dbix_class_deploymenthandler_versions (
+  id bigserial NOT NULL,
+  version varchar(50) NOT NULL UNIQUE,
+  ddl text NULL,
+  upgrade_sql text NULL,
+  PRIMARY KEY (id)
+);
+
