@@ -10,7 +10,7 @@ lilith [B<-c> <config>] B<-a> run
 
 lilith [B<-c> <config>] B<-a> class_map
 
-lilith [B<-c> <config>] B<-a> create_tables
+lilith [B<-c> <config>] B<-a> migrate [B<--subaction> <action>] [B<--migrations-dir> <dir>]
 
 lilith [B<-c> <config>] B<-a> dump_self
 
@@ -28,7 +28,7 @@ lilith [B<-c> <config>] B<-a> search [B<--output> <return>] [B<-t> <table>]
 [B<-m> <minutes>] [B<--order> <clm>] [B<--limit> <int>] [B<--offset> <int>]
 [B<--orderdir> <dir>] [B<--si> <src_ip>] [B<--di> <<dst_ip>] [B<--ip> <ip>]
 [B<--sp> <<src_port>] [B<--dp> <<dst_port>] [B<--port> <<port>] [B<--host> <host>]
-[B<--ih> <host>] [B<-i> <instance>] [B<-c> <class>] [B<-s> <sig>] [B<--if> <if>]
+[B<--ih> <host>] [B<-i> <instance>] [B<-c> <class>] [B<-s> <sig>] [B<--if> <if>]subaction
 [B<--ap> <proto>] [B<--gid> <gid>] [B<--sid> <sid>] [B<--rev> <rev>]
 [B<--subip> <subip>] [B<--subhost> <subhost>] [B<--slug> <slug>] [B<--pkg> <pkg>]
 [B<--malscore> <malscore>] [B<--size> <size>] [B<--target> <target>]
@@ -127,6 +127,26 @@ is the default.
 =head3 -d <dir>
 
 The directory to write it out too.
+
+=head2 migrate
+
+Run database schema migrations using DBIx::Class::Migration.
+
+=head3 --migrate-action <action>
+
+The migration operation to perform.
+
+    - Values :: install, upgrade, status
+    - Default :: upgrade
+
+Use C<install> for a fresh database with no existing schema. Use C<upgrade>
+to apply any pending migrations to an existing database.
+
+=head3 --migrations-dir <dir>
+
+Path to the directory containing the C<migrations/> subdirectory. Defaults
+to the installed share directory (found via L<File::ShareDir>). During
+development, pass the C<share/> directory of the source tree.
 
 =head2 get_short_class_snmp_list
 
@@ -585,6 +605,8 @@ my @malscore;
 my @size;
 my $target;
 my @task;
+my $migrations_dir;
+my $migrate_subaction = 'upgrade';
 Getopt::Long::Configure('no_ignore_case');
 Getopt::Long::Configure('bundling');
 GetOptions(
@@ -635,14 +657,16 @@ GetOptions(
 	'pcap=s'      => \$pcap,
 	'virani=s'    => \$virani,
 	'buffer=s'    => \$buffer,
-	'subip=s',    => \$subip,
-	'subhost=s',  => \$subhost,
-	'slug=s'      => \$slug,
-	'pkg=s'       => \$pkg,
-	'malscore=s'  => \@malscore,
-	'size=s'      => \@size,
-	'target=s'    => \$target,
-	'task=s'      => \@task,
+	'subip=s',         => \$subip,
+	'subhost=s',       => \$subhost,
+	'slug=s'           => \$slug,
+	'pkg=s'            => \$pkg,
+	'malscore=s'       => \@malscore,
+	'size=s'           => \@size,
+	'target=s'         => \$target,
+	'task=s'           => \@task,
+	'migrations-dir=s' => \$migrations_dir,
+	'migrate-action=s'      => \$migrate_subaction,
 );
 
 # print version or help if requested
@@ -742,11 +766,40 @@ my $lilith = Lilith->new(
 	sagan_sid_ignore      => $toml->{sagan_sid_ignore},
 );
 
-# create the tables if requested
-if ( $action eq 'create_tables' ) {
-	$lilith->create_tables();
-	exit;
-}
+# run database migrations
+if ( $action eq 'migrate' ) {
+	require DBIx::Class::Migration;
+	require File::ShareDir;
+
+	my $target_dir;
+	if ( defined($migrations_dir) ) {
+		$target_dir = $migrations_dir;
+	} else {
+		$target_dir = eval { File::ShareDir::dist_dir('Lilith') };
+		if ($@) {
+			die 'Could not find migrations directory. '
+				. 'Use --migrations-dir to specify the share/ directory.';
+		}
+	}
+
+	my $migration = DBIx::Class::Migration->new(
+		schema_class => 'Lilith::Schema',
+		schema_args  => [ $toml->{dsn}, $toml->{user}, $toml->{pass} ],
+		target_dir   => $target_dir,
+	);
+
+	if ( $migrate_subaction eq 'install' ) {
+		$migration->install;
+	} elsif ( $migrate_subaction eq 'upgrade' ) {
+		$migration->upgrade;
+	} elsif ( $migrate_subaction eq 'status' ) {
+		$migration->status;
+	} else {
+		die( 'Unknown --subaction "' . $migrate_subaction . '". Valid values: install, upgrade, status' );
+	}
+
+	exit 0;
+} ## end if ( $action eq 'migrate' )
 
 # dump self if asked
 if ( $action eq 'dump_self' ) {
