@@ -10,8 +10,6 @@ lilith [B<-c> <config>] B<-a> run
 
 lilith [B<-c> <config>] B<-a> class_map
 
-lilith [B<-c> <config>] B<-a> migrate [B<--subaction> <action>] [B<--migrations-dir> <dir>]
-
 lilith [B<-c> <config>] B<-a> dump_self
 
 lilith [B<-c> <config>] B<-a> event [B<-t> <table>] B<--id> <row_id> [B<--raw>]
@@ -68,9 +66,6 @@ Start processing the EVE logs and daemonize.
 
 Print a table of class mapping from long name to the short name used for display in the search results.
 
-=head2 create_tables
-
-Create the tables in the DB.
 
 =head2 dump_self
 
@@ -127,26 +122,6 @@ is the default.
 =head3 -d <dir>
 
 The directory to write it out too.
-
-=head2 migrate
-
-Run database schema migrations using DBIx::Class::Migration.
-
-=head3 --migrate-action <action>
-
-The migration operation to perform.
-
-    - Values :: install, upgrade, status
-    - Default :: upgrade
-
-Use C<install> for a fresh database with no existing schema. Use C<upgrade>
-to apply any pending migrations to an existing database.
-
-=head3 --migrations-dir <dir>
-
-Path to the directory containing the C<migrations/> subdirectory. Defaults
-to the installed share directory (found via L<File::ShareDir>). During
-development, pass the C<share/> directory of the source tree.
 
 =head2 get_short_class_snmp_list
 
@@ -605,8 +580,6 @@ my @malscore;
 my @size;
 my $target;
 my @task;
-my $migrations_dir;
-my $migrate_subaction = 'upgrade';
 Getopt::Long::Configure('no_ignore_case');
 Getopt::Long::Configure('bundling');
 GetOptions(
@@ -665,8 +638,6 @@ GetOptions(
 	'size=s'           => \@size,
 	'target=s'         => \$target,
 	'task=s'           => \@task,
-	'migrations-dir=s' => \$migrations_dir,
-	'migrate-action=s'      => \$migrate_subaction,
 );
 
 # print version or help if requested
