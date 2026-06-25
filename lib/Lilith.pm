@@ -17,11 +17,11 @@ Lilith - Work with Suricata/Sagan EVE logs and PostgreSQL.
 
 =head1 VERSION
 
-Version 2.0.0
+Version 3.0.0
 
 =cut
 
-our $VERSION = '2.0.0';
+our $VERSION = '3.0.0';
 
 =head1 SYNOPSIS
 
