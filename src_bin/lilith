@@ -737,41 +737,6 @@ my $lilith = Lilith->new(
 	sagan_sid_ignore      => $toml->{sagan_sid_ignore},
 );
 
-# run database migrations
-if ( $action eq 'migrate' ) {
-	require DBIx::Class::Migration;
-	require File::ShareDir;
-
-	my $target_dir;
-	if ( defined($migrations_dir) ) {
-		$target_dir = $migrations_dir;
-	} else {
-		$target_dir = eval { File::ShareDir::dist_dir('Lilith') };
-		if ($@) {
-			die 'Could not find migrations directory. '
-				. 'Use --migrations-dir to specify the share/ directory.';
-		}
-	}
-
-	my $migration = DBIx::Class::Migration->new(
-		schema_class => 'Lilith::Schema',
-		schema_args  => [ $toml->{dsn}, $toml->{user}, $toml->{pass} ],
-		target_dir   => $target_dir,
-	);
-
-	if ( $migrate_subaction eq 'install' ) {
-		$migration->install;
-	} elsif ( $migrate_subaction eq 'upgrade' ) {
-		$migration->upgrade;
-	} elsif ( $migrate_subaction eq 'status' ) {
-		$migration->status;
-	} else {
-		die( 'Unknown --migrate-action "' . $migrate_subaction . '". Valid values: install, upgrade, status' );
-	}
-
-	exit 0;
-} ## end if ( $action eq 'migrate' )
-
 # dump self if asked
 if ( $action eq 'dump_self' ) {
 	print Dumper($lilith);
