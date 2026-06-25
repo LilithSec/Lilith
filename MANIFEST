@@ -9,6 +9,8 @@ MANIFEST			This list of files
 README.md
 share/migrations/PostgreSQL/deploy/1/001-auto.sql
 t/00-load.t
+t/lilith-class-methods.t
+t/lilith-new.t
 t/manifest.t
 t/pod-coverage.t
 t/pod.t
