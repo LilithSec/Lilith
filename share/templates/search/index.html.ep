@@ -17,7 +17,7 @@
 
         <div class="col-auto">
           <label class="form-label">Table</label>
-          <select name="table" class="form-select form-select-sm" style="width:110px" id="table-sel" onchange="syncOrderBy()">
+          <select name="table" class="form-select form-select-sm" style="width:110px" id="table-sel" onchange="syncOrderBy(false)">
             <option value="suricata" <%= $table eq 'suricata' ? 'selected' : '' %>>Suricata</option>
             <option value="sagan"    <%= $table eq 'sagan'    ? 'selected' : '' %>>Sagan</option>
             <option value="cape"     <%= $table eq 'cape'     ? 'selected' : '' %>>CAPE</option>
@@ -44,8 +44,7 @@
 
         <div class="col-auto">
           <label class="form-label">Order by</label>
-          <input type="text" name="order_by" id="order-by" class="form-control form-control-sm"
-                 value="<%= $order_by %>" style="width:120px">
+          <select name="order_by" id="order-by" class="form-select form-select-sm" style="width:145px"></select>
         </div>
 
         <div class="col-auto">
@@ -484,13 +483,35 @@
 % }
 
 <script>
-function syncOrderBy() {
-  var sel = document.getElementById('table-sel').value;
-  var ob  = document.getElementById('order-by');
-  var defaults = { suricata: 'timestamp', sagan: 'timestamp', cape: 'stop' };
-  // Only auto-update if it's still at a default value
-  if (ob.value === 'timestamp' || ob.value === 'stop') {
-    ob.value = defaults[sel] || 'timestamp';
+var _orderByCols = {
+  suricata: ['timestamp','id','src_ip','dest_ip','src_port','dest_port','proto','app_proto',
+             'signature','classification','gid','sid','rev','in_iface','host','instance',
+             'flow_id','flow_start','flow_pkts_toserver','flow_bytes_toserver',
+             'flow_pkts_toclient','flow_bytes_toclient','event_id'],
+  sagan:    ['timestamp','id','src_ip','src_port','dest_ip','dest_port','proto','host',
+             'program','facility','level','priority','signature','classification',
+             'gid','sid','rev','instance','instance_host','stream','event_id'],
+  cape:     ['stop','start','id','malscore','task','target','instance','instance_host',
+             'pkg','size','proto','src_ip','src_port','dest_ip','dest_port',
+             'subbed_from_ip','subbed_from_host','slug','url','url_hostname',
+             'md5','sha1','sha256']
+};
+function syncOrderBy(keepVal) {
+  var sel  = document.getElementById('table-sel').value;
+  var ob   = document.getElementById('order-by');
+  var prev = keepVal ? ob.value : null;
+  var cols = _orderByCols[sel] || _orderByCols.suricata;
+  ob.innerHTML = '';
+  cols.forEach(function(c) {
+    var opt = document.createElement('option');
+    opt.value = c; opt.textContent = c;
+    ob.appendChild(opt);
+  });
+  // Restore previous value if still valid, otherwise use table default
+  if (prev && cols.indexOf(prev) !== -1) {
+    ob.value = prev;
+  } else {
+    ob.value = cols[0];
   }
   var ihField = document.getElementById('instance-host-field');
   ihField.style.display = (sel === 'sagan' || sel === 'cape') ? '' : 'none';
@@ -505,7 +526,8 @@ function applyHostCol(show) {
   });
 }
 document.addEventListener('DOMContentLoaded', function() {
-  syncOrderBy();
+  syncOrderBy(false);
+  document.getElementById('order-by').value = '<%= $order_by %>' || document.getElementById('order-by').value;
   var hostCb = document.getElementById('show-host-col');
   var stored = localStorage.getItem('showHostCol') === 'true';
   hostCb.checked = stored;
