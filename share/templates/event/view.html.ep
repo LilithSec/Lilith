@@ -60,7 +60,11 @@
           % next unless defined $h->{$field};
         <tr>
           <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $h->{$field} %></td>
+          <td class="font-monospace"><%= $h->{$field} %>
+            % if ($field eq 'hostname') {
+            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 domain-info-btn ms-1" data-domain="<%= $h->{$field} %>" style="font-size:0.65rem;line-height:1.2">?</button>
+            % }
+          </td>
         </tr>
         % }
       </tbody>
@@ -96,11 +100,29 @@
   <div class="p-0">
     <table class="table table-dark table-sm table-bordered mb-0">
       <tbody>
-        % for my $field (qw(type id tx_id rrname rrtype rcode ttl rdata version flags)) {
+        % for my $field (qw(type id tx_id opcode rcode ttl rdata version flags rd rrname rrtype)) {
           % next unless defined $d->{$field};
         <tr>
           <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= ref $d->{$field} eq 'ARRAY' ? join(', ', @{$d->{$field}}) : $d->{$field} %></td>
+          <td class="font-monospace"><%= ref $d->{$field} eq 'ARRAY' ? join(', ', @{$d->{$field}}) : $d->{$field} %>
+            % if ($field eq 'rrname' && !ref $d->{$field}) {
+            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 domain-info-btn ms-1" data-domain="<%= $d->{$field} %>" style="font-size:0.65rem;line-height:1.2">?</button>
+            % }
+          </td>
+        </tr>
+        % }
+        % if (ref $d->{queries} eq 'ARRAY' && @{$d->{queries}}) {
+        <tr>
+          <th style="width:180px" class="text-muted ps-3">queries</th>
+          <td class="font-monospace">
+            % for my $q (@{$d->{queries}}) {
+              <%= $q->{rrname} // '' %> <%= $q->{rrtype} // '' %>
+              % if ($q->{rrname}) {
+              <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 domain-info-btn ms-1" data-domain="<%= $q->{rrname} %>" style="font-size:0.65rem;line-height:1.2">?</button>
+              % }
+              <br>
+            % }
+          </td>
         </tr>
         % }
         % if (ref $d->{answers} eq 'ARRAY' && @{$d->{answers}}) {
@@ -130,7 +152,11 @@
           % next unless defined $t->{$field};
         <tr>
           <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $t->{$field} %></td>
+          <td class="font-monospace"><%= $t->{$field} %>
+            % if ($field eq 'sni') {
+            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 domain-info-btn ms-1" data-domain="<%= $t->{$field} %>" style="font-size:0.65rem;line-height:1.2">?</button>
+            % }
+          </td>
         </tr>
         % }
         % if (ref $t->{ja3} eq 'HASH') {
@@ -167,15 +193,29 @@
       <tbody>
         % for my $field (qw(helo mail_from)) {
           % next unless defined $s->{$field};
+          % (my $_smtp_domain = $s->{$field}) =~ s/^[^@]*@//;
         <tr>
           <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $s->{$field} %></td>
+          <td class="font-monospace"><%= $s->{$field} %>
+            % if ($field eq 'mail_from' && $_smtp_domain) {
+            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 domain-info-btn ms-1" data-domain="<%= $_smtp_domain %>" style="font-size:0.65rem;line-height:1.2">?</button>
+            % }
+          </td>
         </tr>
         % }
         % if (ref $s->{rcpt_to} eq 'ARRAY' && @{$s->{rcpt_to}}) {
         <tr>
           <th style="width:180px" class="text-muted ps-3">rcpt_to</th>
-          <td class="font-monospace"><%= join(', ', @{$s->{rcpt_to}}) %></td>
+          <td class="font-monospace">
+            % for my $addr (@{$s->{rcpt_to}}) {
+              % (my $_rcpt_domain = $addr) =~ s/^[^@]*@//;
+              <%= $addr %>
+              % if ($_rcpt_domain) {
+              <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 domain-info-btn ms-1" data-domain="<%= $_rcpt_domain %>" style="font-size:0.65rem;line-height:1.2">?</button>
+              % }
+              <br>
+            % }
+          </td>
         </tr>
         % }
         % for my $field (qw(from to subject attachment)) {
@@ -486,7 +526,11 @@
           % next unless defined $d->{$field};
         <tr>
           <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $d->{$field} %></td>
+          <td class="font-monospace"><%= $d->{$field} %>
+            % if ($field eq 'hostname') {
+            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 domain-info-btn ms-1" data-domain="<%= $d->{$field} %>" style="font-size:0.65rem;line-height:1.2">?</button>
+            % }
+          </td>
         </tr>
         % }
         % for my $field (qw(routers dns_servers params)) {
@@ -698,7 +742,11 @@
           % next unless defined $q->{$field};
         <tr>
           <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $q->{$field} %></td>
+          <td class="font-monospace"><%= $q->{$field} %>
+            % if ($field eq 'sni') {
+            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 domain-info-btn ms-1" data-domain="<%= $q->{$field} %>" style="font-size:0.65rem;line-height:1.2">?</button>
+            % }
+          </td>
         </tr>
         % }
         % if (ref $q->{cyu} eq 'ARRAY' && @{$q->{cyu}}) {
@@ -1297,6 +1345,32 @@
 
 % }
 
+<!-- Domain Info Modal -->
+<div class="modal fade" id="domaininfo-modal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content bg-dark text-light border-secondary">
+      <div class="modal-header py-2 border-secondary">
+        <h6 class="modal-title" id="domaininfo-modal-title">Domain Info</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="domaininfo-loading" class="text-center text-muted py-3">Loading…</div>
+        <div id="domaininfo-content" style="display:none">
+          <div class="mb-2">
+            <span class="text-muted small fw-semibold">DNS Records</span>
+            <div id="domaininfo-dns" class="font-monospace small mt-1"></div>
+            <div id="domaininfo-dns-error" class="text-warning small mt-1" style="display:none"></div>
+          </div>
+          <div>
+            <span class="text-muted small fw-semibold">WHOIS</span>
+            <pre id="domaininfo-whois" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- IP Info Modal -->
 <div class="modal fade" id="ipinfo-modal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
@@ -1341,6 +1415,41 @@ document.addEventListener('DOMContentLoaded', function() {
       a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
+    });
+  });
+
+  var domainModal = new bootstrap.Modal(document.getElementById('domaininfo-modal'));
+  document.querySelectorAll('.domain-info-btn').forEach(function(el) {
+    el.addEventListener('click', function() {
+      var domain = this.dataset.domain;
+      document.getElementById('domaininfo-modal-title').textContent = domain;
+      document.getElementById('domaininfo-loading').style.display = '';
+      document.getElementById('domaininfo-content').style.display = 'none';
+      domainModal.show();
+      fetch('/api/domaininfo/' + encodeURIComponent(domain))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var dnsEl = document.getElementById('domaininfo-dns');
+          if (data.dns && Object.keys(data.dns).length) {
+            dnsEl.innerHTML = Object.entries(data.dns).map(function(kv) {
+              return '<strong>' + kv[0] + '</strong>: ' + kv[1].join(', ');
+            }).join('<br>');
+          } else {
+            dnsEl.textContent = '(none)';
+          }
+          var errEl = document.getElementById('domaininfo-dns-error');
+          if (data.dns_error) { errEl.textContent = data.dns_error; errEl.style.display = ''; }
+          else { errEl.style.display = 'none'; }
+          document.getElementById('domaininfo-whois').textContent = data.whois || '(none)';
+          document.getElementById('domaininfo-loading').style.display = 'none';
+          document.getElementById('domaininfo-content').style.display = '';
+        })
+        .catch(function() {
+          document.getElementById('domaininfo-dns').textContent = 'Error fetching data';
+          document.getElementById('domaininfo-whois').textContent = '';
+          document.getElementById('domaininfo-loading').style.display = 'none';
+          document.getElementById('domaininfo-content').style.display = '';
+        });
     });
   });
 

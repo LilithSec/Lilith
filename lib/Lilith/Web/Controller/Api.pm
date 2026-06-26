@@ -68,4 +68,59 @@ sub ipinfo {
 	);
 }
 
+sub domaininfo {
+	my $self   = shift;
+	my $domain = $self->param('domain');
+
+	# Basic domain validation
+	unless ( defined $domain && $domain =~ /^[A-Za-z0-9._-]+$/ ) {
+		return $self->render( json => { error => 'Invalid domain' }, status => 400 );
+	}
+
+	# DNS lookups
+	my %dns;
+	my $dns_error = '';
+	eval {
+		my $resolver = Net::DNS::Resolver->new;
+		for my $type (qw(A AAAA CNAME MX NS TXT)) {
+			my $reply = $resolver->query( $domain, $type );
+			next unless $reply;
+			my @recs;
+			for my $rr ( $reply->answer ) {
+				next unless $rr->type eq $type;
+				if    ( $type eq 'MX' )  { push @recs, $rr->preference . ' ' . $rr->exchange; }
+				elsif ( $type eq 'TXT' ) { push @recs, join( '', $rr->txtdata ); }
+				elsif ( $type eq 'NS' )  { push @recs, $rr->nsdname; }
+				elsif ( $type eq 'CNAME' ) { push @recs, $rr->cname; }
+				else                     { push @recs, $rr->address; }
+			}
+			$dns{$type} = \@recs if @recs;
+		}
+	};
+	$dns_error = $@ if $@;
+
+	# WHOIS
+	my $whois = '';
+	eval {
+		local $SIG{ALRM} = sub { die "timeout\n" };
+		alarm(10);
+		if ( open( my $fh, '-|', 'whois', $domain ) ) {
+			local $/;
+			$whois = <$fh>;
+			close($fh);
+		}
+		alarm(0);
+	};
+	alarm(0);
+
+	$self->render(
+		json => {
+			domain    => $domain,
+			dns       => \%dns,
+			dns_error => $dns_error,
+			whois     => $whois,
+		}
+	);
+}
+
 1;

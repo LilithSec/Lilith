@@ -72,6 +72,7 @@ sub startup {
 	$r->get('/search')->to('search#index');
 	$r->get('/event/:table/:id')->to('event#view');
 	$r->get('/api/ipinfo/*ip')->to('api#ipinfo');
+	$r->get('/api/domaininfo/*domain')->to('api#domaininfo');
 }
 
 1;
