@@ -962,7 +962,6 @@ sub search {
 					die( '"' . $arg . '" does not appear to be a valid item for a numeric search for the ' . $item );
 				}
 				if ( defined($number) ) {
-					print "test\n";
 					push( @found, { $equality, $number } );
 				}
 			} ## end foreach my $arg ( @{ $opts{$item} } )
@@ -1024,13 +1023,14 @@ sub search {
 		} ## end if ( defined( $opts{$item} ) )
 	} ## end foreach my $item (@strings)
 
-	my @fetch_results = $schema->resultset($table)->search(
-		$search,
-		{
-			order_by     => $opts{order_by} . ' ' . $opts{order_dir},
-			result_class => 'DBIx::Class::ResultClass::HashRefInflator',
-		}
-	)->all;
+	my %result_attrs = (
+		order_by     => $opts{order_by} . ' ' . $opts{order_dir},
+		result_class => 'DBIx::Class::ResultClass::HashRefInflator',
+	);
+	$result_attrs{rows}   = $opts{limit}  if defined $opts{limit};
+	$result_attrs{offset} = $opts{offset} if defined $opts{offset};
+
+	my @fetch_results = $schema->resultset($table)->search( $search, \%result_attrs )->all;
 
 	return \@fetch_results;
 } ## end sub search
