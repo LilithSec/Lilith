@@ -132,12 +132,46 @@ sub domaininfo {
 	};
 	$dns_error = $@ if $@;
 
+	# Determine the registrable/base domain for WHOIS
+	my $whois_domain = $domain;
+	{
+		my @labels = split /\./, $domain;
+		if ( @labels > 2 ) {
+			my $found = 0;
+			eval {
+				require Mozilla::PublicSuffix;
+				my $suffix = Mozilla::PublicSuffix::public_suffix($domain);
+				if ( defined $suffix && length $suffix ) {
+					my $suffix_count = scalar( split /\./, $suffix );
+					if ( @labels > $suffix_count ) {
+						$whois_domain = join( '.', @labels[ -( $suffix_count + 1 ) .. -1 ] );
+					}
+					$found = 1;
+				}
+			};
+			unless ($found) {
+				# Fallback heuristic: known two-level TLDs get 3 labels, rest get 2
+				my $two_level = join( '.', @labels[ -2 .. -1 ] );
+				my %tld2 = map { $_ => 1 } qw(
+					co.uk co.au co.nz co.za co.in co.jp co.kr co.id co.il
+					com.au com.br com.cn com.mx com.ar com.sg com.hk com.tw
+					org.uk net.uk me.uk org.au net.au
+				);
+				if ( $tld2{$two_level} && @labels > 3 ) {
+					$whois_domain = join( '.', @labels[ -3 .. -1 ] );
+				} elsif ( !$tld2{$two_level} ) {
+					$whois_domain = join( '.', @labels[ -2 .. -1 ] );
+				}
+			}
+		}
+	}
+
 	# WHOIS
 	my $whois = '';
 	eval {
 		local $SIG{ALRM} = sub { die "timeout\n" };
 		alarm(10);
-		if ( open( my $fh, '-|', 'whois', $domain ) ) {
+		if ( open( my $fh, '-|', 'whois', $whois_domain ) ) {
 			local $/;
 			$whois = <$fh>;
 			close($fh);
@@ -168,6 +202,7 @@ sub domaininfo {
 	$self->render(
 		json => {
 			domain          => $domain,
+			whois_domain    => $whois_domain,
 			dns             => \%dns,
 			dns_error       => $dns_error,
 			whois           => $whois,

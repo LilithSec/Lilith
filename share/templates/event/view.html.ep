@@ -1362,7 +1362,7 @@
             <div id="domaininfo-dns-error" class="text-warning small mt-1" style="display:none"></div>
           </div>
           <div class="mb-2">
-            <span class="text-muted small fw-semibold">WHOIS</span>
+            <span class="text-muted small fw-semibold" id="domaininfo-whois-label">WHOIS</span>
             <pre id="domaininfo-whois" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
           </div>
           <div id="domaininfo-dnstracer-section" style="display:none">
@@ -1454,6 +1454,9 @@ document.addEventListener('DOMContentLoaded', function() {
           var errEl = document.getElementById('domaininfo-dns-error');
           if (data.dns_error) { errEl.textContent = data.dns_error; errEl.style.display = ''; }
           else { errEl.style.display = 'none'; }
+          document.getElementById('domaininfo-whois-label').textContent =
+            (data.whois_domain && data.whois_domain !== domain)
+              ? 'WHOIS (' + data.whois_domain + ')' : 'WHOIS';
           document.getElementById('domaininfo-whois').textContent = data.whois || '(none)';
           var dtSection = document.getElementById('domaininfo-dnstracer-section');
           var dtErrEl   = document.getElementById('domaininfo-dnstracer-error');
