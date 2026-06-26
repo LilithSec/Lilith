@@ -106,27 +106,27 @@
           </div>
           <div class="col-md-2">
             <label class="form-label">IP (src <em>or</em> dst)</label>
-            <input type="text" name="ip" class="form-control form-control-sm"
+            <input type="text" name="ip" id="ip-input" class="form-control form-control-sm"
                    value="<%= param('ip') // '' %>">
           </div>
           <div class="col-md-2">
             <label class="form-label">Port (src <em>or</em> dst)</label>
-            <input type="text" name="port" class="form-control form-control-sm"
+            <input type="text" name="port" id="port-input" class="form-control form-control-sm"
                    value="<%= param('port') // '' %>">
           </div>
           <div class="col-md-2">
             <label class="form-label">Proto</label>
-            <input type="text" name="proto" class="form-control form-control-sm"
+            <input type="text" name="proto" id="proto-input" class="form-control form-control-sm"
                    value="<%= param('proto') // '' %>">
           </div>
           <div class="col-md-2">
             <label class="form-label">App Proto</label>
-            <input type="text" name="app_proto" class="form-control form-control-sm"
+            <input type="text" name="app_proto" id="app-proto-input" class="form-control form-control-sm"
                    value="<%= param('app_proto') // '' %>">
           </div>
           <div class="col-md-2">
             <label class="form-label">Interface</label>
-            <input type="text" name="in_iface" class="form-control form-control-sm"
+            <input type="text" name="in_iface" id="in-iface-input" class="form-control form-control-sm"
                    value="<%= param('in_iface') // '' %>">
           </div>
         </div><!-- /network row -->
@@ -136,7 +136,7 @@
 
           <div class="col-md-2">
             <label class="form-label">Instance</label>
-            <input type="text" name="instance" class="form-control form-control-sm"
+            <input type="text" name="instance" id="instance-input" class="form-control form-control-sm"
                    value="<%= param('instance') // '' %>" placeholder="">
           </div>
           <div class="col-md-2" id="instance-host-field">
@@ -156,7 +156,7 @@
 
           <div class="col-md-3">
             <label class="form-label">Signature</label>
-            <input type="text" name="signature" class="form-control form-control-sm"
+            <input type="text" name="signature" id="signature-input" class="form-control form-control-sm"
                    value="<%= param('signature') // '' %>">
           </div>
           <div class="col-md-4">
@@ -228,17 +228,17 @@
           </div>
           <div class="col-md-2">
             <label class="form-label">GID</label>
-            <input type="text" name="gid" class="form-control form-control-sm"
+            <input type="text" name="gid" id="gid-input" class="form-control form-control-sm"
                    value="<%= param('gid') // '' %>">
           </div>
           <div class="col-md-2">
             <label class="form-label">SID</label>
-            <input type="text" name="sid" class="form-control form-control-sm"
+            <input type="text" name="sid" id="sid-input" class="form-control form-control-sm"
                    value="<%= param('sid') // '' %>">
           </div>
           <div class="col-md-2">
             <label class="form-label">Rev</label>
-            <input type="text" name="rev" class="form-control form-control-sm"
+            <input type="text" name="rev" id="rev-input" class="form-control form-control-sm"
                    value="<%= param('rev') // '' %>">
           </div>
           <div class="col-md-3">
@@ -355,20 +355,20 @@
         <tr>
           <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
           <td><%= $row->{timestamp} // '' %></td>
-          <td><%= $row->{instance}  // '' %></td>
-          <td><%= $row->{in_iface}  // '' %></td>
-          <td><%= $row->{src_ip}    // '' %></td>
-          <td><%= $row->{src_port}  // '' %></td>
-          <td><%= $row->{dest_ip}   // '' %></td>
-          <td><%= $row->{dest_port} // '' %></td>
-          <td><%= $row->{proto}     // '' %></td>
-          <td><%= $row->{app_proto} // '' %></td>
+          <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{in_iface}) { %><a href="#" class="iface-filter" data-iface="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{dest_ip}) { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{dest_port}) { %><a href="#" class="port-filter" data-port="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{proto}) { %><a href="#" class="proto-filter" data-proto="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{app_proto}) { %><a href="#" class="aproto-filter" data-aproto="<%= $i %>"><%= $i %></a><% } %></td>
           <td title="<%= $row->{classification} // '' %>">
             <%= $self->lilith->get_short_class($row->{classification}) %>
           </td>
-          <td><%= $row->{signature} // '' %></td>
+          <td><% if (my $i = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $i %>"><%= $i %></a><% } %></td>
           <td class="text-muted">
-            <%= ($row->{gid}//'') . ':' . ($row->{sid}//'') . ':' . ($row->{rev}//'') %>
+            <% if (my $g = $row->{gid}) { %><a href="#" class="gid-filter" data-gid="<%= $g %>"><%= $g %></a><% } else { '' %><% } %>:<% if (my $s = $row->{sid}) { %><a href="#" class="sid-filter" data-sid="<%= $s %>"><%= $s %></a><% } else { '' %><% } %>:<% if (my $r = $row->{rev}) { %><a href="#" class="rev-filter" data-rev="<%= $r %>"><%= $r %></a><% } else { '' %><% } %>
           </td>
         </tr>
         % }
@@ -388,9 +388,9 @@
         <tr>
           <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
           <td><%= $row->{timestamp} // '' %></td>
-          <td><%= $row->{instance}  // '' %></td>
-          <td><%= $row->{src_ip}    // '' %></td>
-          <td><%= $row->{src_port}  // '' %></td>
+          <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $i %>"><%= $i %></a><% } %></td>
           <td><%= $row->{host}      // '' %></td>
           <td><%= $row->{program}   // '' %></td>
           <td><%= $row->{facility}  // '' %></td>
@@ -399,9 +399,9 @@
           <td title="<%= $row->{classification} // '' %>">
             <%= $self->lilith->get_short_class($row->{classification}) %>
           </td>
-          <td><%= $row->{signature} // '' %></td>
+          <td><% if (my $i = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $i %>"><%= $i %></a><% } %></td>
           <td class="text-muted">
-            <%= ($row->{gid}//'') . ':' . ($row->{sid}//'') . ':' . ($row->{rev}//'') %>
+            <% if (my $g = $row->{gid}) { %><a href="#" class="gid-filter" data-gid="<%= $g %>"><%= $g %></a><% } else { '' %><% } %>:<% if (my $s = $row->{sid}) { %><a href="#" class="sid-filter" data-sid="<%= $s %>"><%= $s %></a><% } else { '' %><% } %>:<% if (my $r = $row->{rev}) { %><a href="#" class="rev-filter" data-rev="<%= $r %>"><%= $r %></a><% } else { '' %><% } %>
           </td>
         </tr>
         % }
@@ -419,7 +419,7 @@
         % for my $row (@$results) {
         <tr>
           <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
-          <td><%= $row->{instance}  // '' %></td>
+          <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
           <td><%= $row->{target}    // '' %></td>
           <td><%= $row->{malscore}  // '' %></td>
           <td><%= $row->{pkg}       // '' %></td>
@@ -461,5 +461,77 @@ function syncOrderBy() {
   var ruleFilters = document.getElementById('rule-filters');
   ruleFilters.style.display = (sel === 'cape') ? 'none' : '';
 }
-document.addEventListener('DOMContentLoaded', syncOrderBy);
+document.addEventListener('DOMContentLoaded', function() {
+  syncOrderBy();
+  document.querySelectorAll('.instance-filter').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.preventDefault();
+      document.getElementById('instance-input').value = this.dataset.instance;
+      document.getElementById('search-form').submit();
+    });
+  });
+  document.querySelectorAll('.iface-filter').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.preventDefault();
+      document.getElementById('in-iface-input').value = this.dataset.iface;
+      document.getElementById('search-form').submit();
+    });
+  });
+  document.querySelectorAll('.ip-filter').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.preventDefault();
+      document.getElementById('ip-input').value = this.dataset.ip;
+      document.getElementById('search-form').submit();
+    });
+  });
+  document.querySelectorAll('.sig-filter').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.preventDefault();
+      document.getElementById('signature-input').value = this.dataset.sig;
+      document.getElementById('search-form').submit();
+    });
+  });
+  document.querySelectorAll('.gid-filter').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.preventDefault();
+      document.getElementById('gid-input').value = this.dataset.gid;
+      document.getElementById('search-form').submit();
+    });
+  });
+  document.querySelectorAll('.sid-filter').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.preventDefault();
+      document.getElementById('sid-input').value = this.dataset.sid;
+      document.getElementById('search-form').submit();
+    });
+  });
+  document.querySelectorAll('.rev-filter').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.preventDefault();
+      document.getElementById('rev-input').value = this.dataset.rev;
+      document.getElementById('search-form').submit();
+    });
+  });
+  document.querySelectorAll('.port-filter').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.preventDefault();
+      document.getElementById('port-input').value = this.dataset.port;
+      document.getElementById('search-form').submit();
+    });
+  });
+  document.querySelectorAll('.proto-filter').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.preventDefault();
+      document.getElementById('proto-input').value = this.dataset.proto;
+      document.getElementById('search-form').submit();
+    });
+  });
+  document.querySelectorAll('.aproto-filter').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.preventDefault();
+      document.getElementById('app-proto-input').value = this.dataset.aproto;
+      document.getElementById('search-form').submit();
+    });
+  });
+});
 </script>
