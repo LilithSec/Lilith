@@ -998,8 +998,30 @@ sub search {
 	# handle string items
 	#
 
+	if ( defined( $opts{class} ) ) {
+		if ( ref $opts{class} eq 'ARRAY' ) {
+			$search->{classification} = { '-in' => $opts{class} } if @{ $opts{class} };
+		} else {
+			if ( $opts{class} =~ /\%/ ) {
+				if ( $opts{class} =~ /^\!/ ) {
+					( my $val = $opts{class} ) =~ s/^\!//;
+					$search->{classification} = { '-not_like' => $val };
+				} else {
+					$search->{classification} = { 'like' => $opts{class} };
+				}
+			} else {
+				if ( $opts{class} =~ /^\!/ ) {
+					( my $val = $opts{class} ) =~ s/^\!//;
+					$search->{classification} = { '!=' => $val };
+				} else {
+					$search->{classification} = { '=' => $opts{class} };
+				}
+			}
+		}
+	}
+
 	my @strings = (
-		'host',         'instance_host', 'instance', 'class',
+		'host',         'instance_host', 'instance',
 		'signature',    'app_proto',     'in_iface', 'url',
 		'url_hostname', 'slug',          'pkg',      'subbed_from_host'
 	);
