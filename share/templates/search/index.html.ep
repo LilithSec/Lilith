@@ -139,7 +139,7 @@
             <input type="text" name="instance" class="form-control form-control-sm"
                    value="<%= param('instance') // '' %>" placeholder="">
           </div>
-          <div class="col-md-2">
+          <div class="col-md-2" id="instance-host-field">
             <label class="form-label">Instance Host</label>
             <input type="text" name="instance_host" class="form-control form-control-sm"
                    value="<%= param('instance_host') // '' %>">
@@ -207,7 +207,7 @@
           <div class="col-md-2">
             <label class="form-label">Malscore</label>
             <input type="text" name="malscore" class="form-control form-control-sm"
-                   value="<%= param('malscore') // '' %>" placeholder=">=5">
+                   value="<%= param('malscore') // '' %>" placeholder="">
           </div>
           <div class="col-md-2">
             <label class="form-label">Size</label>
@@ -392,5 +392,8 @@ function syncOrderBy() {
   if (ob.value === 'timestamp' || ob.value === 'stop') {
     ob.value = defaults[sel] || 'timestamp';
   }
+  var ihField = document.getElementById('instance-host-field');
+  ihField.style.display = (sel === 'sagan' || sel === 'cape') ? '' : 'none';
 }
+document.addEventListener('DOMContentLoaded', syncOrderBy);
 </script>
