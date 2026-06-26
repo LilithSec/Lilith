@@ -20,41 +20,149 @@
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top border-bottom border-danger border-opacity-25">
   <div class="container-fluid">
     <a class="navbar-brand" href="/">&#9889; LILITH</a>
-    <div class="dropdown ms-auto">
-      <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
-              id="event-lookup-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-        Go to Event
-      </button>
-      <div class="dropdown-menu dropdown-menu-end p-3 bg-dark border-secondary" style="min-width:320px"
-           aria-labelledby="event-lookup-toggle">
-        <div class="row g-2 align-items-end">
-          <div class="col-auto">
-            <label class="form-label small text-muted mb-1">Table</label>
-            <select id="lookup-table" class="form-select form-select-sm" style="width:100px">
-              <option value="suricata">Suricata</option>
-              <option value="sagan">Sagan</option>
-              <option value="cape">CAPE</option>
-            </select>
+    <div class="d-flex gap-2 ms-auto">
+
+      <!-- IP Info -->
+      <div class="dropdown">
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                id="nav-ipinfo-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+          IP Info
+        </button>
+        <div class="dropdown-menu dropdown-menu-end p-3 bg-dark border-secondary" style="min-width:280px"
+             aria-labelledby="nav-ipinfo-toggle">
+          <div class="row g-2 align-items-end">
+            <div class="col">
+              <label class="form-label small text-muted mb-1">IP Address</label>
+              <input type="text" id="nav-ip-input" class="form-control form-control-sm" placeholder="1.2.3.4 or ::1">
+            </div>
+            <div class="col-auto">
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="nav-ip-go-btn">Look up</button>
+            </div>
           </div>
-          <div class="col">
-            <label class="form-label small text-muted mb-1">ID or Event ID</label>
-            <input type="text" id="lookup-id" class="form-control form-control-sm" placeholder="…">
+          <div id="nav-ip-error" class="text-warning small mt-2" style="display:none">Please enter a valid IP.</div>
+        </div>
+      </div>
+
+      <!-- Domain Info -->
+      <div class="dropdown">
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                id="nav-domain-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+          Domain Info
+        </button>
+        <div class="dropdown-menu dropdown-menu-end p-3 bg-dark border-secondary" style="min-width:280px"
+             aria-labelledby="nav-domain-toggle">
+          <div class="row g-2 align-items-end">
+            <div class="col">
+              <label class="form-label small text-muted mb-1">Domain</label>
+              <input type="text" id="nav-domain-input" class="form-control form-control-sm" placeholder="example.com">
+            </div>
+            <div class="col-auto">
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="nav-domain-go-btn">Look up</button>
+            </div>
           </div>
-          <div class="col-auto">
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="lookup-go-btn">Go</button>
+          <div id="nav-domain-error" class="text-warning small mt-2" style="display:none">Please enter a valid domain.</div>
+        </div>
+      </div>
+
+      <!-- Go to Event -->
+      <div class="dropdown">
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                id="event-lookup-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+          Go to Event
+        </button>
+        <div class="dropdown-menu dropdown-menu-end p-3 bg-dark border-secondary" style="min-width:320px"
+             aria-labelledby="event-lookup-toggle">
+          <div class="row g-2 align-items-end">
+            <div class="col-auto">
+              <label class="form-label small text-muted mb-1">Table</label>
+              <select id="lookup-table" class="form-select form-select-sm" style="width:100px">
+                <option value="suricata">Suricata</option>
+                <option value="sagan">Sagan</option>
+                <option value="cape">CAPE</option>
+              </select>
+            </div>
+            <div class="col">
+              <label class="form-label small text-muted mb-1">ID or Event ID</label>
+              <input type="text" id="lookup-id" class="form-control form-control-sm" placeholder="…">
+            </div>
+            <div class="col-auto">
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="lookup-go-btn">Go</button>
+            </div>
+          </div>
+          <div id="lookup-error" class="text-warning small mt-2" style="display:none">Please enter a valid value.</div>
+        </div>
+      </div>
+
+    </div><!-- /d-flex -->
+  </div>
+</nav>
+
+<!-- Global IP Info Modal -->
+<div class="modal fade" id="nav-ipinfo-modal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content bg-dark text-light border-secondary">
+      <div class="modal-header py-2 border-secondary">
+        <h6 class="modal-title" id="nav-ipinfo-modal-title">IP Info</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="nav-ipinfo-loading" class="text-center text-muted py-3">Loading…</div>
+        <div id="nav-ipinfo-content" style="display:none">
+          <div class="mb-2">
+            <span class="text-muted small fw-semibold">Reverse DNS</span>
+            <div id="nav-ipinfo-rdns" class="font-monospace small mt-1"></div>
+            <div id="nav-ipinfo-ptr-name" class="text-muted small mt-1"></div>
+            <div id="nav-ipinfo-rdns-error" class="text-warning small mt-1" style="display:none"></div>
+          </div>
+          <div>
+            <span class="text-muted small fw-semibold">WHOIS</span>
+            <pre id="nav-ipinfo-whois" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
           </div>
         </div>
-        <div id="lookup-error" class="text-warning small mt-2" style="display:none">Please enter a valid value.</div>
       </div>
     </div>
   </div>
-</nav>
+</div>
+
+<!-- Global Domain Info Modal -->
+<div class="modal fade" id="nav-domaininfo-modal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content bg-dark text-light border-secondary">
+      <div class="modal-header py-2 border-secondary">
+        <h6 class="modal-title" id="nav-domaininfo-modal-title">Domain Info</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="nav-domaininfo-loading" class="text-center text-muted py-3">Loading…</div>
+        <div id="nav-domaininfo-content" style="display:none">
+          <div class="mb-2">
+            <span class="text-muted small fw-semibold">DNS Records</span>
+            <div id="nav-domaininfo-dns" class="font-monospace small mt-1"></div>
+            <div id="nav-domaininfo-dns-error" class="text-warning small mt-1" style="display:none"></div>
+          </div>
+          <div class="mb-2">
+            <span class="text-muted small fw-semibold" id="nav-domaininfo-whois-label">WHOIS</span>
+            <pre id="nav-domaininfo-whois" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
+          </div>
+          <div id="nav-domaininfo-dnstracer-section" style="display:none">
+            <span class="text-muted small fw-semibold">dnstracer</span>
+            <div id="nav-domaininfo-dnstracer-error" class="text-warning small mt-1" style="display:none"></div>
+            <pre id="nav-domaininfo-dnstracer" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="container-fluid mt-3">
   %= content
 </div>
 <script src="/vendor/bootstrap-5.3.3/js/bootstrap.bundle.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+
+  // Go to Event
   document.getElementById('lookup-go-btn').addEventListener('click', function() {
     var val   = document.getElementById('lookup-id').value.trim();
     var table = document.getElementById('lookup-table').value;
@@ -71,6 +179,108 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('lookup-id').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') { document.getElementById('lookup-go-btn').click(); }
   });
+
+  // IP Info
+  var navIpModal = new bootstrap.Modal(document.getElementById('nav-ipinfo-modal'));
+  function doNavIpLookup(ip) {
+    document.getElementById('nav-ipinfo-modal-title').textContent = ip;
+    document.getElementById('nav-ipinfo-loading').style.display = '';
+    document.getElementById('nav-ipinfo-content').style.display = 'none';
+    navIpModal.show();
+    fetch('/api/ipinfo/' + encodeURIComponent(ip))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        document.getElementById('nav-ipinfo-rdns').textContent     = data.rdns || '(none)';
+        document.getElementById('nav-ipinfo-ptr-name').textContent = data.ptr_name ? 'queried: ' + data.ptr_name : '';
+        var errEl = document.getElementById('nav-ipinfo-rdns-error');
+        if (data.rdns_error) { errEl.textContent = data.rdns_error; errEl.style.display = ''; }
+        else { errEl.style.display = 'none'; }
+        document.getElementById('nav-ipinfo-whois').textContent = data.whois || '(none)';
+        document.getElementById('nav-ipinfo-loading').style.display = 'none';
+        document.getElementById('nav-ipinfo-content').style.display = '';
+      })
+      .catch(function() {
+        document.getElementById('nav-ipinfo-rdns').textContent = 'Error fetching data';
+        document.getElementById('nav-ipinfo-whois').textContent = '';
+        document.getElementById('nav-ipinfo-loading').style.display = 'none';
+        document.getElementById('nav-ipinfo-content').style.display = '';
+      });
+  }
+  document.getElementById('nav-ip-go-btn').addEventListener('click', function() {
+    var ip    = document.getElementById('nav-ip-input').value.trim();
+    var errEl = document.getElementById('nav-ip-error');
+    if (!ip || !/^[0-9a-fA-F:.]+$/.test(ip)) { errEl.style.display = ''; return; }
+    errEl.style.display = 'none';
+    doNavIpLookup(ip);
+  });
+  document.getElementById('nav-ip-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { document.getElementById('nav-ip-go-btn').click(); }
+  });
+
+  // Domain Info
+  var navDomainModal = new bootstrap.Modal(document.getElementById('nav-domaininfo-modal'));
+  function doNavDomainLookup(domain) {
+    document.getElementById('nav-domaininfo-modal-title').textContent = domain;
+    document.getElementById('nav-domaininfo-loading').style.display = '';
+    document.getElementById('nav-domaininfo-content').style.display = 'none';
+    navDomainModal.show();
+    fetch('/api/domaininfo/' + encodeURIComponent(domain))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var dnsEl = document.getElementById('nav-domaininfo-dns');
+        if (data.dns && Object.keys(data.dns).length) {
+          var order = ['A','AAAA','CNAME','MX','NS','TXT','SOA','CAA','SRV','PTR'];
+          var keys  = Object.keys(data.dns).sort(function(a,b) {
+            var ai = order.indexOf(a), bi = order.indexOf(b);
+            if (ai === -1) ai = 999; if (bi === -1) bi = 999;
+            return ai - bi;
+          });
+          dnsEl.innerHTML = keys.map(function(type) {
+            return data.dns[type].map(function(v) {
+              return '<strong>' + type + '</strong> ' + v;
+            }).join('<br>');
+          }).join('<br>');
+        } else {
+          dnsEl.textContent = '(none)';
+        }
+        var dnsErrEl = document.getElementById('nav-domaininfo-dns-error');
+        if (data.dns_error) { dnsErrEl.textContent = data.dns_error; dnsErrEl.style.display = ''; }
+        else { dnsErrEl.style.display = 'none'; }
+        document.getElementById('nav-domaininfo-whois-label').textContent =
+          (data.whois_domain && data.whois_domain !== domain)
+            ? 'WHOIS (' + data.whois_domain + ')' : 'WHOIS';
+        document.getElementById('nav-domaininfo-whois').textContent = data.whois || '(none)';
+        var dtSection = document.getElementById('nav-domaininfo-dnstracer-section');
+        var dtErrEl   = document.getElementById('nav-domaininfo-dnstracer-error');
+        if (data.dnstracer || data.dnstracer_error) {
+          dtSection.style.display = '';
+          document.getElementById('nav-domaininfo-dnstracer').textContent = data.dnstracer || '';
+          if (data.dnstracer_error) { dtErrEl.textContent = data.dnstracer_error; dtErrEl.style.display = ''; }
+          else { dtErrEl.style.display = 'none'; }
+        } else {
+          dtSection.style.display = 'none';
+        }
+        document.getElementById('nav-domaininfo-loading').style.display = 'none';
+        document.getElementById('nav-domaininfo-content').style.display = '';
+      })
+      .catch(function() {
+        document.getElementById('nav-domaininfo-dns').textContent = 'Error fetching data';
+        document.getElementById('nav-domaininfo-whois').textContent = '';
+        document.getElementById('nav-domaininfo-loading').style.display = 'none';
+        document.getElementById('nav-domaininfo-content').style.display = '';
+      });
+  }
+  document.getElementById('nav-domain-go-btn').addEventListener('click', function() {
+    var domain = document.getElementById('nav-domain-input').value.trim();
+    var errEl  = document.getElementById('nav-domain-error');
+    if (!domain || !/^[A-Za-z0-9._-]+$/.test(domain)) { errEl.style.display = ''; return; }
+    errEl.style.display = 'none';
+    doNavDomainLookup(domain);
+  });
+  document.getElementById('nav-domain-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { document.getElementById('nav-domain-go-btn').click(); }
+  });
+
 });
 </script>
 </body>

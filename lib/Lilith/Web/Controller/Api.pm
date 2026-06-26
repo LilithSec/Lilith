@@ -91,7 +91,7 @@ sub domaininfo {
 			my $sock = $resolver->bgsend( $domain, $type );
 			if ($sock) {
 				$sel->add($sock);
-				$sock_to_type{"$sock"} = $type;
+				$sock_to_type{ fileno($sock) } = $type;
 			}
 		}
 
@@ -103,7 +103,8 @@ sub domaininfo {
 				my $reply = $resolver->bgread($sock);
 				$sel->remove($sock);
 				next unless $reply;
-				my $type = $sock_to_type{"$sock"};
+				my $type = $sock_to_type{ fileno($sock) };
+				next unless defined $type;
 				my @recs;
 				for my $rr ( $reply->answer ) {
 					next unless $rr->type eq $type;
@@ -120,7 +121,7 @@ sub domaininfo {
 							. ' expire=' . $rr->expire
 							. ' min=' . $rr->minimum;
 					}
-					elsif ( $type eq 'CAA' ) { push @recs, $rr->flag . ' ' . $rr->tag . ' ' . $rr->value; }
+					elsif ( $type eq 'CAA' ) { push @recs, $rr->flags . ' ' . $rr->tag . ' ' . $rr->value; }
 					elsif ( $type eq 'SRV' ) {
 						push @recs, $rr->priority . ' ' . $rr->weight . ' ' . $rr->port . ' ' . $rr->target;
 					}
