@@ -66,6 +66,14 @@
 
         <div class="col-auto">
           <label class="form-label d-block">&nbsp;</label>
+          <div class="form-check mt-1">
+            <input class="form-check-input" type="checkbox" id="show-host-col">
+            <label class="form-check-label small" for="show-host-col">Host</label>
+          </div>
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label d-block">&nbsp;</label>
           <button type="submit" class="btn btn-danger btn-sm px-4">Search</button>
         </div>
 
@@ -141,12 +149,12 @@
           </div>
           <div class="col-md-2" id="instance-host-field">
             <label class="form-label">Instance Host</label>
-            <input type="text" name="instance_host" class="form-control form-control-sm"
+            <input type="text" name="instance_host" id="instance-host-input" class="form-control form-control-sm"
                    value="<%= param('instance_host') // '' %>">
           </div>
           <div class="col-md-2">
             <label class="form-label">Host</label>
-            <input type="text" name="host" class="form-control form-control-sm"
+            <input type="text" name="host" id="host-input" class="form-control form-control-sm"
                    value="<%= param('host') // '' %>">
           </div>
         </div><!-- /host row -->
@@ -345,7 +353,7 @@
       % if ($table eq 'suricata') {
       <thead class="table-secondary">
         <tr>
-          <th>ID</th><th>Timestamp</th><th>Instance</th><th>If</th>
+          <th>ID</th><th>Timestamp</th><th>Instance</th><th class="col-host" style="display:none">Host</th><th>If</th>
           <th>Src IP</th><th>Sport</th><th>Dst IP</th><th>Dport</th>
           <th>Proto</th><th>AProto</th><th>Class</th><th>Signature</th><th>Rule</th>
         </tr>
@@ -356,6 +364,7 @@
           <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
           <td><%= $row->{timestamp} // '' %></td>
           <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
+          <td class="col-host" style="display:none"><% if (my $i = $row->{host}) { %><a href="#" class="host-filter" data-host="<%= $i %>"><%= $i %></a><% } %></td>
           <td><% if (my $i = $row->{in_iface}) { %><a href="#" class="iface-filter" data-iface="<%= $i %>"><%= $i %></a><% } %></td>
           <td><% if (my $i = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a><% } %></td>
           <td><% if (my $i = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $i %>"><%= $i %></a><% } %></td>
@@ -368,7 +377,7 @@
           </td>
           <td><% if (my $i = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $i %>"><%= $i %></a><% } %></td>
           <td class="text-muted">
-            <% if (my $g = $row->{gid}) { %><a href="#" class="gid-filter" data-gid="<%= $g %>"><%= $g %></a><% } else { '' %><% } %>:<% if (my $s = $row->{sid}) { %><a href="#" class="sid-filter" data-sid="<%= $s %>"><%= $s %></a><% } else { '' %><% } %>:<% if (my $r = $row->{rev}) { %><a href="#" class="rev-filter" data-rev="<%= $r %>"><%= $r %></a><% } else { '' %><% } %>
+            <% if (my $g = $row->{gid}) { %><a href="#" class="gid-filter" data-gid="<%= $g %>"><%= $g %></a><% } %>:<% if (my $s = $row->{sid}) { %><a href="#" class="sid-filter" data-sid="<%= $s %>"><%= $s %></a><% } %>:<% if (my $r = $row->{rev}) { %><a href="#" class="rev-filter" data-rev="<%= $r %>"><%= $r %></a><% } %>
           </td>
         </tr>
         % }
@@ -377,7 +386,7 @@
       % } elsif ($table eq 'sagan') {
       <thead class="table-secondary">
         <tr>
-          <th>ID</th><th>Timestamp</th><th>Instance</th>
+          <th>ID</th><th>Timestamp</th><th>Instance</th><th class="col-host" style="display:none">Instance Host</th>
           <th>Src IP</th><th>Sport</th><th>Host</th><th>Program</th>
           <th>Facility</th><th>Level</th><th>Priority</th>
           <th>Class</th><th>Signature</th><th>Rule</th>
@@ -389,6 +398,7 @@
           <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
           <td><%= $row->{timestamp} // '' %></td>
           <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
+          <td class="col-host" style="display:none"><% if (my $i = $row->{instance_host}) { %><a href="#" class="instance-host-filter" data-instance-host="<%= $i %>"><%= $i %></a><% } %></td>
           <td><% if (my $i = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a><% } %></td>
           <td><% if (my $i = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $i %>"><%= $i %></a><% } %></td>
           <td><%= $row->{host}      // '' %></td>
@@ -401,7 +411,7 @@
           </td>
           <td><% if (my $i = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $i %>"><%= $i %></a><% } %></td>
           <td class="text-muted">
-            <% if (my $g = $row->{gid}) { %><a href="#" class="gid-filter" data-gid="<%= $g %>"><%= $g %></a><% } else { '' %><% } %>:<% if (my $s = $row->{sid}) { %><a href="#" class="sid-filter" data-sid="<%= $s %>"><%= $s %></a><% } else { '' %><% } %>:<% if (my $r = $row->{rev}) { %><a href="#" class="rev-filter" data-rev="<%= $r %>"><%= $r %></a><% } else { '' %><% } %>
+            <% if (my $g = $row->{gid}) { %><a href="#" class="gid-filter" data-gid="<%= $g %>"><%= $g %></a><% } %>:<% if (my $s = $row->{sid}) { %><a href="#" class="sid-filter" data-sid="<%= $s %>"><%= $s %></a><% } %>:<% if (my $r = $row->{rev}) { %><a href="#" class="rev-filter" data-rev="<%= $r %>"><%= $r %></a><% } %>
           </td>
         </tr>
         % }
@@ -410,7 +420,7 @@
       % } else { # cape
       <thead class="table-secondary">
         <tr>
-          <th>ID</th><th>Instance</th><th>Target</th><th>Malscore</th>
+          <th>ID</th><th>Instance</th><th class="col-host" style="display:none">Instance Host</th><th>Target</th><th>Malscore</th>
           <th>Package</th><th>Size</th><th>MD5</th><th>SHA256</th>
           <th>Subbed From</th>
         </tr>
@@ -420,6 +430,7 @@
         <tr>
           <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
           <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
+          <td class="col-host" style="display:none"><% if (my $i = $row->{instance_host}) { %><a href="#" class="instance-host-filter" data-instance-host="<%= $i %>"><%= $i %></a><% } %></td>
           <td><%= $row->{target}    // '' %></td>
           <td><%= $row->{malscore}  // '' %></td>
           <td><%= $row->{pkg}       // '' %></td>
@@ -461,8 +472,35 @@ function syncOrderBy() {
   var ruleFilters = document.getElementById('rule-filters');
   ruleFilters.style.display = (sel === 'cape') ? 'none' : '';
 }
+function applyHostCol(show) {
+  document.querySelectorAll('.col-host').forEach(function(el) {
+    el.style.display = show ? '' : 'none';
+  });
+}
 document.addEventListener('DOMContentLoaded', function() {
   syncOrderBy();
+  var hostCb = document.getElementById('show-host-col');
+  var stored = localStorage.getItem('showHostCol') === 'true';
+  hostCb.checked = stored;
+  applyHostCol(stored);
+  hostCb.addEventListener('change', function() {
+    localStorage.setItem('showHostCol', this.checked);
+    applyHostCol(this.checked);
+  });
+  document.querySelectorAll('.host-filter').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.preventDefault();
+      document.getElementById('host-input').value = this.dataset.host;
+      document.getElementById('search-form').submit();
+    });
+  });
+  document.querySelectorAll('.instance-host-filter').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.preventDefault();
+      document.getElementById('instance-host-input').value = this.dataset.instanceHost;
+      document.getElementById('search-form').submit();
+    });
+  });
   document.querySelectorAll('.instance-filter').forEach(function(el) {
     el.addEventListener('click', function(e) {
       e.preventDefault();
