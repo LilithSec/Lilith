@@ -39,6 +39,7 @@ sub index {
 		my @malscore  = _split_list( $self->param('malscore') );
 		my @size      = _split_list( $self->param('size') );
 		my @task      = _split_list( $self->param('task') );
+		my @class     = grep { $_ ne '' } @{ $self->every_param('class') // [] };
 
 		eval {
 			$results = $self->lilith->search(
@@ -55,7 +56,7 @@ sub index {
 				host             => $self->param('host')             || undef,
 				instance_host    => $self->param('instance_host')    || undef,
 				instance         => $self->param('instance')         || undef,
-				class            => $self->param('class')            || undef,
+				class            => @class ? \@class : undef,
 				signature        => $self->param('signature')        || undef,
 				app_proto        => $self->param('app_proto')        || undef,
 				proto            => $self->param('proto')            || undef,

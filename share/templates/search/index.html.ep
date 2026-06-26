@@ -159,10 +159,72 @@
             <input type="text" name="signature" class="form-control form-control-sm"
                    value="<%= param('signature') // '' %>">
           </div>
-          <div class="col-md-3">
+          <div class="col-md-4">
             <label class="form-label">Classification</label>
-            <input type="text" name="class" class="form-control form-control-sm"
-                   value="<%= param('class') // '' %>">
+            % my $_cur_class = param('class') // '';
+            % my @_classes = sort { lc($a) cmp lc($b) } (
+            %   'A Network Trojan was detected',
+            %   'A TCP connection was detected',
+            %   'A client was using an unusual port',
+            %   'A suspicious filename was detected',
+            %   'A suspicious string was detected',
+            %   'A system call was detected',
+            %   'An attempted login using a suspicious username was detected',
+            %   'Attempt to login by a default username and password',
+            %   'Attempted Access To File or Directory',
+            %   'Attempted Administrator Privilege Gain',
+            %   'Attempted Denial of Service',
+            %   'Attempted Information Leak',
+            %   'Attempted User Privilege Gain',
+            %   'Configuration Change',
+            %   'Configuration Error',
+            %   'Crypto Currency Mining Activity Detected',
+            %   'Decode of an RPC Query',
+            %   'Denial of Service',
+            %   'Detection of a Denial of Service Attack',
+            %   'Detection of a Network Scan',
+            %   'Detection of a non-standard protocol or event',
+            %   'Device Retrieving External IP Address Detected',
+            %   'Domain Observed Used for C2 Detected',
+            %   'Executable code was detected',
+            %   'Exploit Attempt',
+            %   'Exploit Kit Activity Detected',
+            %   'Generic ICMP event',
+            %   'Generic Protocol Command Decode',
+            %   'Hardware Event',
+            %   'Inappropriate Content was Detected',
+            %   'Information Leak',
+            %   'Large Scale Information Leak',
+            %   'Malware Command and Control Activity Detected',
+            %   'Misc Attack',
+            %   'Misc activity',
+            %   'Network event',
+            %   'Not Suspicious Traffic',
+            %   'Possible Social Engineering Attempted',
+            %   'Possibly Unwanted Program Detected',
+            %   'Potential Corporate Privacy Violation',
+            %   'Potentially Bad Traffic',
+            %   'Program Error',
+            %   'Spam',
+            %   'Successful Administrator Privilege Gain',
+            %   'Successful Credential Theft Detected',
+            %   'Successful User Privilege Gain',
+            %   'Suspicious Command Execution',
+            %   'Suspicious Traffic',
+            %   'System event',
+            %   'Targeted Malicious Activity was Detected',
+            %   'Unknown Traffic',
+            %   'Unsuccessful Admin Privilege',
+            %   'Unsuccessful User Privilege Gain',
+            %   'Web Application Attack',
+            %   'access to a potentially vulnerable web application',
+            % );
+            <select name="class" class="form-select form-select-sm">
+              <option value="">— any —</option>
+              % for my $_c (@_classes) {
+                <option value="<%= $_c %>" <%= $_cur_class eq $_c ? 'selected' : '' %>><%= $_c %></option>
+              % }
+            </select>
           </div>
           <div class="col-md-2">
             <label class="form-label">GID</label>
