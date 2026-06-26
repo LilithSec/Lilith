@@ -599,6 +599,48 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 
+  // Table column sorting
+  (function() {
+    var table = document.querySelector('table.table');
+    if (!table) return;
+    var thead = table.querySelector('thead');
+    var tbody = table.querySelector('tbody');
+    if (!thead || !tbody) return;
+    var ths = Array.from(thead.querySelectorAll('th'));
+    var sortCol = -1, sortAsc = true;
+
+    ths.forEach(function(th) {
+      th.dataset.origText = th.textContent;
+      th.style.cursor = 'pointer';
+      th.style.userSelect = 'none';
+    });
+
+    ths.forEach(function(th, idx) {
+      th.addEventListener('click', function() {
+        if (sortCol === idx) {
+          sortAsc = !sortAsc;
+        } else {
+          sortCol = idx;
+          sortAsc = true;
+        }
+        ths.forEach(function(h) {
+          h.textContent = h.dataset.origText;
+        });
+        th.textContent = th.dataset.origText + (sortAsc ? ' \u25b2' : ' \u25bc');
+
+        var rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.sort(function(a, b) {
+          var ac = a.cells[idx] ? a.cells[idx].textContent.trim() : '';
+          var bc = b.cells[idx] ? b.cells[idx].textContent.trim() : '';
+          var an = parseFloat(ac), bn = parseFloat(bc);
+          var cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : ac.localeCompare(bc);
+          return sortAsc ? cmp : -cmp;
+        });
+        rows.forEach(function(r) { tbody.appendChild(r); });
+      });
+    });
+  })();
+
   var ipinfoModal = new bootstrap.Modal(document.getElementById('ipinfo-modal'));
   document.querySelectorAll('.ip-info-btn').forEach(function(el) {
     el.addEventListener('click', function() {
