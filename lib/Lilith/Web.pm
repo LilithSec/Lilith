@@ -62,6 +62,12 @@ sub startup {
 
 	$self->helper( lilith => sub {$lilith} );
 
+	my $dnstracer_flags = [];
+	if ( ref $toml->{dnstracer_flags} eq 'ARRAY' ) {
+		$dnstracer_flags = $toml->{dnstracer_flags};
+	}
+	$self->helper( dnstracer_flags => sub {$dnstracer_flags} );
+
 	# Point Mojolicious at share/templates and share/public so the app works
 	# both when installed (File::ShareDir path) and when run from the repo.
 	unshift @{ $self->renderer->paths }, "$SHARE_DIR/templates";

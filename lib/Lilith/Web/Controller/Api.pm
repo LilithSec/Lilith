@@ -113,12 +113,31 @@ sub domaininfo {
 	};
 	alarm(0);
 
+	# dnstracer
+	my $dnstracer_out   = '';
+	my $dnstracer_error = '';
+	my @dt_flags        = @{ $self->dnstracer_flags };
+	eval {
+		local $SIG{ALRM} = sub { die "timeout\n" };
+		alarm(30);
+		if ( open( my $fh, '-|', 'dnstracer', @dt_flags, $domain ) ) {
+			local $/;
+			$dnstracer_out = <$fh>;
+			close($fh);
+		}
+		alarm(0);
+	};
+	alarm(0);
+	$dnstracer_error = $@ if $@;
+
 	$self->render(
 		json => {
-			domain    => $domain,
-			dns       => \%dns,
-			dns_error => $dns_error,
-			whois     => $whois,
+			domain          => $domain,
+			dns             => \%dns,
+			dns_error       => $dns_error,
+			whois           => $whois,
+			dnstracer       => $dnstracer_out,
+			dnstracer_error => $dnstracer_error,
 		}
 	);
 }

@@ -1361,9 +1361,14 @@
             <div id="domaininfo-dns" class="font-monospace small mt-1"></div>
             <div id="domaininfo-dns-error" class="text-warning small mt-1" style="display:none"></div>
           </div>
-          <div>
+          <div class="mb-2">
             <span class="text-muted small fw-semibold">WHOIS</span>
             <pre id="domaininfo-whois" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
+          </div>
+          <div id="domaininfo-dnstracer-section" style="display:none">
+            <span class="text-muted small fw-semibold">dnstracer</span>
+            <div id="domaininfo-dnstracer-error" class="text-warning small mt-1" style="display:none"></div>
+            <pre id="domaininfo-dnstracer" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
           </div>
         </div>
       </div>
@@ -1441,6 +1446,16 @@ document.addEventListener('DOMContentLoaded', function() {
           if (data.dns_error) { errEl.textContent = data.dns_error; errEl.style.display = ''; }
           else { errEl.style.display = 'none'; }
           document.getElementById('domaininfo-whois').textContent = data.whois || '(none)';
+          var dtSection = document.getElementById('domaininfo-dnstracer-section');
+          var dtErrEl   = document.getElementById('domaininfo-dnstracer-error');
+          if (data.dnstracer || data.dnstracer_error) {
+            dtSection.style.display = '';
+            document.getElementById('domaininfo-dnstracer').textContent = data.dnstracer || '';
+            if (data.dnstracer_error) { dtErrEl.textContent = data.dnstracer_error; dtErrEl.style.display = ''; }
+            else { dtErrEl.style.display = 'none'; }
+          } else {
+            dtSection.style.display = 'none';
+          }
           document.getElementById('domaininfo-loading').style.display = 'none';
           document.getElementById('domaininfo-content').style.display = '';
         })
