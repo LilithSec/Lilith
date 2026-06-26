@@ -151,7 +151,7 @@
           </div>
         </div><!-- /host row -->
 
-        <div class="row g-2 mb-1">
+        <div class="row g-2 mb-1" id="rule-filters">
           <div class="col-12"><span class="text-muted small fw-semibold">Rule / Signature (Suricata / Sagan)</span></div>
 
           <div class="col-md-3">
@@ -248,7 +248,7 @@
           </div>
         </div><!-- /rule row -->
 
-        <div class="row g-2">
+        <div class="row g-2" id="cape-filters">
           <div class="col-12"><span class="text-muted small fw-semibold">CAPE</span></div>
 
           <div class="col-md-2">
@@ -456,6 +456,10 @@ function syncOrderBy() {
   }
   var ihField = document.getElementById('instance-host-field');
   ihField.style.display = (sel === 'sagan' || sel === 'cape') ? '' : 'none';
+  var capeFilters = document.getElementById('cape-filters');
+  capeFilters.style.display = (sel === 'cape') ? '' : 'none';
+  var ruleFilters = document.getElementById('rule-filters');
+  ruleFilters.style.display = (sel === 'cape') ? 'none' : '';
 }
 document.addEventListener('DOMContentLoaded', syncOrderBy);
 </script>
