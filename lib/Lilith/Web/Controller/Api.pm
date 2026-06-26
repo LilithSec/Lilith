@@ -116,19 +116,21 @@ sub domaininfo {
 	# dnstracer
 	my $dnstracer_out   = '';
 	my $dnstracer_error = '';
-	my @dt_flags        = @{ $self->dnstracer_flags };
-	eval {
-		local $SIG{ALRM} = sub { die "timeout\n" };
-		alarm(30);
-		if ( open( my $fh, '-|', 'dnstracer', @dt_flags, $domain ) ) {
-			local $/;
-			$dnstracer_out = <$fh>;
-			close($fh);
-		}
+	if ( $self->dnstracer_enable ) {
+		my @dt_flags = @{ $self->dnstracer_flags };
+		eval {
+			local $SIG{ALRM} = sub { die "timeout\n" };
+			alarm(30);
+			if ( open( my $fh, '-|', 'dnstracer', @dt_flags, $domain ) ) {
+				local $/;
+				$dnstracer_out = <$fh>;
+				close($fh);
+			}
+			alarm(0);
+		};
 		alarm(0);
-	};
-	alarm(0);
-	$dnstracer_error = $@ if $@;
+		$dnstracer_error = $@ if $@;
+	}
 
 	$self->render(
 		json => {

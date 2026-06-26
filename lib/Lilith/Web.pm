@@ -66,7 +66,8 @@ sub startup {
 	if ( ref $toml->{dnstracer_flags} eq 'ARRAY' ) {
 		$dnstracer_flags = $toml->{dnstracer_flags};
 	}
-	$self->helper( dnstracer_flags => sub {$dnstracer_flags} );
+	$self->helper( dnstracer_flags  => sub {$dnstracer_flags} );
+	$self->helper( dnstracer_enable => sub { $toml->{dnstracer_enable} ? 1 : 0 } );
 
 	# Point Mojolicious at share/templates and share/public so the app works
 	# both when installed (File::ShareDir path) and when run from the repo.
