@@ -1,0 +1,63 @@
+% my $cap_table = ucfirst($table);
+% layout 'default';
+% title "Event #$id ($cap_table)";
+
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item">
+      <a href="/search?table=<%= $table %>&search=1" class="text-danger">Search (<%= $cap_table %>)</a>
+    </li>
+    <li class="breadcrumb-item active">Event #<%= $id %></li>
+  </ol>
+</nav>
+
+% if ($error) {
+<div class="alert alert-danger py-2">
+  <strong>Error:</strong> <%= $error %>
+</div>
+% }
+
+% if (!$event) {
+<div class="alert alert-warning py-2">Event #<%= $id %> not found in the <em><%= $table %></em> table.</div>
+% } else {
+
+<div class="card border-secondary mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>
+      Event <span class="text-danger fw-bold">#<%= $id %></span>
+      <span class="badge bg-secondary ms-2"><%= $cap_table %></span>
+    </span>
+    <a href="/search?table=<%= $table %>&search=1" class="btn btn-sm btn-outline-secondary">&larr; Back</a>
+  </div>
+  <div class="p-0">
+    <table class="table table-dark table-sm table-bordered mb-0">
+      <tbody>
+        % for my $key (sort grep { $_ ne 'raw' } keys %$event) {
+        <tr>
+          <th style="width:180px" class="text-muted ps-3"><%= $key %></th>
+          <td class="font-monospace"><%= $event->{$key} // '' %></td>
+        </tr>
+        % }
+      </tbody>
+    </table>
+  </div>
+</div>
+
+% if ($pretty_raw) {
+<div class="card border-secondary">
+  <div class="card-header py-2 d-flex align-items-center gap-2">
+    <button class="btn btn-sm btn-outline-secondary" type="button"
+            data-bs-toggle="collapse" data-bs-target="#raw-json-panel">
+      Raw JSON
+    </button>
+    <span class="text-muted small">click to expand</span>
+  </div>
+  <div class="collapse" id="raw-json-panel">
+    <div class="card-body p-2">
+      <pre class="raw-json mb-0"><%= $pretty_raw %></pre>
+    </div>
+  </div>
+</div>
+% }
+
+% }

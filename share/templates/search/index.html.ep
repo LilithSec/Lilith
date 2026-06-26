@@ -1,0 +1,396 @@
+% layout 'default';
+% title 'Search';
+
+% # Determine whether to show the filter panel open by default
+% my @_filter_keys = qw(src_ip dest_ip ip port src_port dest_port host instance_host
+%                        instance class signature proto app_proto in_iface gid sid rev
+%                        event_id target slug pkg malscore size task
+%                        subbed_from_ip subbed_from_host md5 sha1 sha256);
+% my $show_filters = grep { defined(param($_)) && param($_) ne '' } @_filter_keys;
+
+<form method="GET" action="/search" id="search-form">
+  <input type="hidden" name="search" value="1">
+
+  <div class="card mb-2 border-secondary">
+    <div class="card-body py-2">
+      <div class="row g-2 align-items-end">
+
+        <div class="col-auto">
+          <label class="form-label">Table</label>
+          <select name="table" class="form-select form-select-sm" style="width:110px" id="table-sel" onchange="syncOrderBy()">
+            <option value="suricata" <%= $table eq 'suricata' ? 'selected' : '' %>>Suricata</option>
+            <option value="sagan"    <%= $table eq 'sagan'    ? 'selected' : '' %>>Sagan</option>
+            <option value="cape"     <%= $table eq 'cape'     ? 'selected' : '' %>>CAPE</option>
+          </select>
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label">Minutes back</label>
+          <input type="number" name="go_back_minutes" class="form-control form-control-sm"
+                 value="<%= $go_back_minutes %>" style="width:100px" min="1">
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label">Limit</label>
+          <input type="number" name="limit" class="form-control form-control-sm"
+                 value="<%= $limit %>" style="width:80px" min="1" max="10000">
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label">Offset</label>
+          <input type="number" name="offset" class="form-control form-control-sm"
+                 value="<%= $offset %>" style="width:80px" min="0">
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label">Order by</label>
+          <input type="text" name="order_by" id="order-by" class="form-control form-control-sm"
+                 value="<%= $order_by %>" style="width:120px">
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label">Dir</label>
+          <select name="order_dir" class="form-select form-select-sm" style="width:88px">
+            <option value="DESC" <%= $order_dir eq 'DESC' ? 'selected' : '' %>>DESC</option>
+            <option value="ASC"  <%= $order_dir eq 'ASC'  ? 'selected' : '' %>>ASC</option>
+          </select>
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label d-block">&nbsp;</label>
+          <button type="button" class="btn btn-outline-secondary btn-sm"
+                  data-bs-toggle="collapse" data-bs-target="#filter-panel">
+            Filters
+          </button>
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label d-block">&nbsp;</label>
+          <button type="submit" class="btn btn-danger btn-sm px-4">Search</button>
+        </div>
+
+      </div><!-- /row -->
+    </div><!-- /card-body -->
+  </div><!-- /card -->
+
+  <!-- Filter panel -->
+  <div class="collapse <%= $show_filters ? 'show' : '' %>" id="filter-panel">
+    <div class="card mb-2 border-secondary">
+      <div class="card-header py-1 small text-muted">
+        Filters — prefix <code>!</code> to negate, <code>%</code> for LIKE. Numeric fields accept comma-separated values e.g. <code>22,!80,&lt;1024</code>
+      </div>
+      <div class="card-body py-2">
+
+        <div class="row g-2 mb-1">
+          <div class="col-12"><span class="text-muted small fw-semibold">Network</span></div>
+
+          <div class="col-md-2">
+            <label class="form-label">Src IP</label>
+            <input type="text" name="src_ip" class="form-control form-control-sm"
+                   value="<%= param('src_ip') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Src Port(s)</label>
+            <input type="text" name="src_port" class="form-control form-control-sm"
+                   value="<%= param('src_port') // '' %>" placeholder="">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Dst IP</label>
+            <input type="text" name="dest_ip" class="form-control form-control-sm"
+                   value="<%= param('dest_ip') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Dst Port(s)</label>
+            <input type="text" name="dest_port" class="form-control form-control-sm"
+                   value="<%= param('dest_port') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">IP (src <em>or</em> dst)</label>
+            <input type="text" name="ip" class="form-control form-control-sm"
+                   value="<%= param('ip') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Port (src <em>or</em> dst)</label>
+            <input type="text" name="port" class="form-control form-control-sm"
+                   value="<%= param('port') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Proto</label>
+            <input type="text" name="proto" class="form-control form-control-sm"
+                   value="<%= param('proto') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">App Proto</label>
+            <input type="text" name="app_proto" class="form-control form-control-sm"
+                   value="<%= param('app_proto') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Interface</label>
+            <input type="text" name="in_iface" class="form-control form-control-sm"
+                   value="<%= param('in_iface') // '' %>">
+          </div>
+        </div><!-- /network row -->
+
+        <div class="row g-2 mb-1">
+          <div class="col-12"><span class="text-muted small fw-semibold">Instance / Host</span></div>
+
+          <div class="col-md-2">
+            <label class="form-label">Instance</label>
+            <input type="text" name="instance" class="form-control form-control-sm"
+                   value="<%= param('instance') // '' %>" placeholder="">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Instance Host</label>
+            <input type="text" name="instance_host" class="form-control form-control-sm"
+                   value="<%= param('instance_host') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Host</label>
+            <input type="text" name="host" class="form-control form-control-sm"
+                   value="<%= param('host') // '' %>">
+          </div>
+        </div><!-- /host row -->
+
+        <div class="row g-2 mb-1">
+          <div class="col-12"><span class="text-muted small fw-semibold">Rule / Signature (Suricata / Sagan)</span></div>
+
+          <div class="col-md-3">
+            <label class="form-label">Signature</label>
+            <input type="text" name="signature" class="form-control form-control-sm"
+                   value="<%= param('signature') // '' %>">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Classification</label>
+            <input type="text" name="class" class="form-control form-control-sm"
+                   value="<%= param('class') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">GID</label>
+            <input type="text" name="gid" class="form-control form-control-sm"
+                   value="<%= param('gid') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">SID</label>
+            <input type="text" name="sid" class="form-control form-control-sm"
+                   value="<%= param('sid') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Rev</label>
+            <input type="text" name="rev" class="form-control form-control-sm"
+                   value="<%= param('rev') // '' %>">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Event ID</label>
+            <input type="text" name="event_id" class="form-control form-control-sm"
+                   value="<%= param('event_id') // '' %>">
+          </div>
+        </div><!-- /rule row -->
+
+        <div class="row g-2">
+          <div class="col-12"><span class="text-muted small fw-semibold">CAPE</span></div>
+
+          <div class="col-md-2">
+            <label class="form-label">Target</label>
+            <input type="text" name="target" class="form-control form-control-sm"
+                   value="<%= param('target') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Slug</label>
+            <input type="text" name="slug" class="form-control form-control-sm"
+                   value="<%= param('slug') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Package</label>
+            <input type="text" name="pkg" class="form-control form-control-sm"
+                   value="<%= param('pkg') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Malscore</label>
+            <input type="text" name="malscore" class="form-control form-control-sm"
+                   value="<%= param('malscore') // '' %>" placeholder=">=5">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Size</label>
+            <input type="text" name="size" class="form-control form-control-sm"
+                   value="<%= param('size') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Task ID</label>
+            <input type="text" name="task" class="form-control form-control-sm"
+                   value="<%= param('task') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Subbed From IP</label>
+            <input type="text" name="subbed_from_ip" class="form-control form-control-sm"
+                   value="<%= param('subbed_from_ip') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Subbed From Host</label>
+            <input type="text" name="subbed_from_host" class="form-control form-control-sm"
+                   value="<%= param('subbed_from_host') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">MD5</label>
+            <input type="text" name="md5" class="form-control form-control-sm"
+                   value="<%= param('md5') // '' %>">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">SHA1</label>
+            <input type="text" name="sha1" class="form-control form-control-sm"
+                   value="<%= param('sha1') // '' %>">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">SHA256</label>
+            <input type="text" name="sha256" class="form-control form-control-sm"
+                   value="<%= param('sha256') // '' %>">
+          </div>
+        </div><!-- /cape row -->
+
+      </div><!-- /card-body -->
+    </div><!-- /card -->
+  </div><!-- /collapse -->
+
+</form>
+
+% if ($error) {
+<div class="alert alert-danger py-2">
+  <strong>Error:</strong> <%= $error %>
+</div>
+% }
+
+% if (defined $results) {
+  % my $count = scalar @$results;
+  <div class="d-flex align-items-center mb-2 gap-3">
+    <span class="text-muted small"><%= $count %> result<%= $count == 1 ? '' : 's' %></span>
+    % if ($offset > 0 || $count >= $limit) {
+    <div class="d-flex gap-1">
+      % if ($offset > 0) {
+        % my $prev = $offset - $limit;
+        % $prev = 0 if $prev < 0;
+      <a href="<%= url_with->query([offset => $prev]) %>" class="btn btn-sm btn-outline-secondary">&larr; Prev</a>
+      % }
+      % if ($count >= $limit) {
+      <a href="<%= url_with->query([offset => $offset + $limit]) %>" class="btn btn-sm btn-outline-secondary">Next &rarr;</a>
+      % }
+    </div>
+    % }
+  </div>
+
+  % if ($count > 0) {
+  <div class="table-responsive">
+    <table class="table table-dark table-sm table-hover table-bordered mb-0">
+
+      % if ($table eq 'suricata') {
+      <thead class="table-secondary">
+        <tr>
+          <th>ID</th><th>Timestamp</th><th>Instance</th><th>If</th>
+          <th>Src IP</th><th>Sport</th><th>Dst IP</th><th>Dport</th>
+          <th>Proto</th><th>AProto</th><th>Class</th><th>Signature</th><th>Rule</th>
+        </tr>
+      </thead>
+      <tbody>
+        % for my $row (@$results) {
+        <tr>
+          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
+          <td><%= $row->{timestamp} // '' %></td>
+          <td><%= $row->{instance}  // '' %></td>
+          <td><%= $row->{in_iface}  // '' %></td>
+          <td><%= $row->{src_ip}    // '' %></td>
+          <td><%= $row->{src_port}  // '' %></td>
+          <td><%= $row->{dest_ip}   // '' %></td>
+          <td><%= $row->{dest_port} // '' %></td>
+          <td><%= $row->{proto}     // '' %></td>
+          <td><%= $row->{app_proto} // '' %></td>
+          <td title="<%= $row->{classification} // '' %>">
+            <%= $self->lilith->get_short_class($row->{classification}) %>
+          </td>
+          <td><%= $row->{signature} // '' %></td>
+          <td class="text-muted">
+            <%= ($row->{gid}//'') . ':' . ($row->{sid}//'') . ':' . ($row->{rev}//'') %>
+          </td>
+        </tr>
+        % }
+      </tbody>
+
+      % } elsif ($table eq 'sagan') {
+      <thead class="table-secondary">
+        <tr>
+          <th>ID</th><th>Timestamp</th><th>Instance</th>
+          <th>Src IP</th><th>Sport</th><th>Host</th><th>Program</th>
+          <th>Facility</th><th>Level</th><th>Priority</th>
+          <th>Class</th><th>Signature</th><th>Rule</th>
+        </tr>
+      </thead>
+      <tbody>
+        % for my $row (@$results) {
+        <tr>
+          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
+          <td><%= $row->{timestamp} // '' %></td>
+          <td><%= $row->{instance}  // '' %></td>
+          <td><%= $row->{src_ip}    // '' %></td>
+          <td><%= $row->{src_port}  // '' %></td>
+          <td><%= $row->{host}      // '' %></td>
+          <td><%= $row->{program}   // '' %></td>
+          <td><%= $row->{facility}  // '' %></td>
+          <td><%= $row->{level}     // '' %></td>
+          <td><%= $row->{priority}  // '' %></td>
+          <td title="<%= $row->{classification} // '' %>">
+            <%= $self->lilith->get_short_class($row->{classification}) %>
+          </td>
+          <td><%= $row->{signature} // '' %></td>
+          <td class="text-muted">
+            <%= ($row->{gid}//'') . ':' . ($row->{sid}//'') . ':' . ($row->{rev}//'') %>
+          </td>
+        </tr>
+        % }
+      </tbody>
+
+      % } else { # cape
+      <thead class="table-secondary">
+        <tr>
+          <th>ID</th><th>Instance</th><th>Target</th><th>Malscore</th>
+          <th>Package</th><th>Size</th><th>MD5</th><th>SHA256</th>
+          <th>Subbed From</th>
+        </tr>
+      </thead>
+      <tbody>
+        % for my $row (@$results) {
+        <tr>
+          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
+          <td><%= $row->{instance}  // '' %></td>
+          <td><%= $row->{target}    // '' %></td>
+          <td><%= $row->{malscore}  // '' %></td>
+          <td><%= $row->{pkg}       // '' %></td>
+          <td><%= $row->{size}      // '' %></td>
+          <td><small class="text-muted"><%= $row->{md5}    // '' %></small></td>
+          <td><small class="text-muted"><%= defined $row->{sha256} ? substr($row->{sha256}, 0, 16) . '…' : '' %></small></td>
+          <td>
+            <%= $row->{subbed_from_ip} // '' %>
+            % if ($row->{subbed_from_host}) {
+            <small class="text-muted">(<%= $row->{subbed_from_host} %>)</small>
+            % }
+          </td>
+        </tr>
+        % }
+      </tbody>
+      % }
+
+    </table>
+  </div><!-- /table-responsive -->
+
+  % } else {
+  <div class="alert alert-secondary py-2">No results found.</div>
+  % }
+% }
+
+<script>
+function syncOrderBy() {
+  var sel = document.getElementById('table-sel').value;
+  var ob  = document.getElementById('order-by');
+  var defaults = { suricata: 'timestamp', sagan: 'timestamp', cape: 'stop' };
+  // Only auto-update if it's still at a default value
+  if (ob.value === 'timestamp' || ob.value === 'stop') {
+    ob.value = defaults[sel] || 'timestamp';
+  }
+}
+</script>

@@ -13,7 +13,7 @@ my %WriteMakefileArgs = (
 	LICENSE            => 'artistic_2',
 	MIN_PERL_VERSION   => '5.006',
 	INST_SCRIPT        => 'bin',
-	EXE_FILES          => ['src_bin/lilith'],
+	EXE_FILES          => [ 'src_bin/lilith', 'src_bin/lilith-web' ],
 	CONFIGURE_REQUIRES => {
 		'ExtUtils::MakeMaker'     => '0',
 		'File::ShareDir::Install' => '0',
@@ -41,6 +41,7 @@ my %WriteMakefileArgs = (
 		'Text::ANSITable'        => '0.608',
 		'Time::Piece::Guess'     => '0',
 		'TOML'                   => '0',
+		'Mojolicious'            => '9.0',
 	},
 	dist       => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
 	clean      => { FILES    => 'Lilith-*' },

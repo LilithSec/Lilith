@@ -15,6 +15,15 @@ t/manifest.t
 t/pod-coverage.t
 t/pod.t
 src_bin/lilith
+src_bin/lilith-web
+lib/Lilith/Web.pm
+lib/Lilith/Web/Controller/Search.pm
+lib/Lilith/Web/Controller/Event.pm
+share/templates/layouts/default.html.ep
+share/templates/search/index.html.ep
+share/templates/event/view.html.ep
+share/public/vendor/bootstrap-5.3.3/css/bootstrap.min.css
+share/public/vendor/bootstrap-5.3.3/js/bootstrap.bundle.min.js
 init/freebsd
 share/migrations/PostgreSQL/deploy/1/001-auto.sql
 share/migrations/PostgreSQL/deploy/2/001-auto.sql
