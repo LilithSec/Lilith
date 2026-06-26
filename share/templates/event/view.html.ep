@@ -1436,8 +1436,17 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(function(data) {
           var dnsEl = document.getElementById('domaininfo-dns');
           if (data.dns && Object.keys(data.dns).length) {
-            dnsEl.innerHTML = Object.entries(data.dns).map(function(kv) {
-              return '<strong>' + kv[0] + '</strong>: ' + kv[1].join(', ');
+            var order = ['A','AAAA','CNAME','MX','NS','TXT','SOA','CAA','SRV','PTR'];
+            var keys  = Object.keys(data.dns).sort(function(a,b) {
+              var ai = order.indexOf(a), bi = order.indexOf(b);
+              if (ai === -1) ai = 999;
+              if (bi === -1) bi = 999;
+              return ai - bi;
+            });
+            dnsEl.innerHTML = keys.map(function(type) {
+              return data.dns[type].map(function(v) {
+                return '<strong>' + type + '</strong> ' + v;
+              }).join('<br>');
             }).join('<br>');
           } else {
             dnsEl.textContent = '(none)';

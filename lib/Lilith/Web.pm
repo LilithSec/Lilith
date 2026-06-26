@@ -68,6 +68,7 @@ sub startup {
 	}
 	$self->helper( dnstracer_flags  => sub {$dnstracer_flags} );
 	$self->helper( dnstracer_enable => sub { $toml->{dnstracer_enable} ? 1 : 0 } );
+	$self->helper( dns_bg_timeout   => sub { defined $toml->{dns_bg_timeout} ? $toml->{dns_bg_timeout} + 0 : 3 } );
 
 	# Point Mojolicious at share/templates and share/public so the app works
 	# both when installed (File::ShareDir path) and when run from the repo.

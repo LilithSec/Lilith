@@ -1,7 +1,8 @@
 package Lilith::Web::Controller::Api;
 
 use Mojo::Base 'Mojolicious::Controller';
-use Net::DNS ();
+use Net::DNS   ();
+use IO::Select ();
 
 sub ipinfo {
 	my $self = shift;
@@ -81,20 +82,52 @@ sub domaininfo {
 	my %dns;
 	my $dns_error = '';
 	eval {
-		my $resolver = Net::DNS::Resolver->new;
-		for my $type (qw(A AAAA CNAME MX NS TXT)) {
-			my $reply = $resolver->query( $domain, $type );
-			next unless $reply;
-			my @recs;
-			for my $rr ( $reply->answer ) {
-				next unless $rr->type eq $type;
-				if    ( $type eq 'MX' )  { push @recs, $rr->preference . ' ' . $rr->exchange; }
-				elsif ( $type eq 'TXT' ) { push @recs, join( '', $rr->txtdata ); }
-				elsif ( $type eq 'NS' )  { push @recs, $rr->nsdname; }
-				elsif ( $type eq 'CNAME' ) { push @recs, $rr->cname; }
-				else                     { push @recs, $rr->address; }
+		my $resolver     = Net::DNS::Resolver->new;
+		my $sel          = IO::Select->new;
+		my %sock_to_type;
+
+		# Send all queries simultaneously
+		for my $type (qw(A AAAA CNAME MX NS TXT SOA CAA SRV PTR)) {
+			my $sock = $resolver->bgsend( $domain, $type );
+			if ($sock) {
+				$sel->add($sock);
+				$sock_to_type{"$sock"} = $type;
 			}
-			$dns{$type} = \@recs if @recs;
+		}
+
+		# Collect responses as they arrive, up to dns_bg_timeout seconds total
+		my $deadline = time() + $self->dns_bg_timeout;
+		while ( $sel->count && time() < $deadline ) {
+			my @ready = $sel->can_read( $deadline - time() );
+			for my $sock (@ready) {
+				my $reply = $resolver->bgread($sock);
+				$sel->remove($sock);
+				next unless $reply;
+				my $type = $sock_to_type{"$sock"};
+				my @recs;
+				for my $rr ( $reply->answer ) {
+					next unless $rr->type eq $type;
+					if    ( $type eq 'MX' )    { push @recs, $rr->preference . ' ' . $rr->exchange; }
+					elsif ( $type eq 'TXT' )   { push @recs, join( '', $rr->txtdata ); }
+					elsif ( $type eq 'NS' )    { push @recs, $rr->nsdname; }
+					elsif ( $type eq 'CNAME' ) { push @recs, $rr->cname; }
+					elsif ( $type eq 'PTR' )   { push @recs, $rr->ptrdname; }
+					elsif ( $type eq 'SOA' )   {
+						push @recs, $rr->mname . ' ' . $rr->rname
+							. ' serial=' . $rr->serial
+							. ' refresh=' . $rr->refresh
+							. ' retry=' . $rr->retry
+							. ' expire=' . $rr->expire
+							. ' min=' . $rr->minimum;
+					}
+					elsif ( $type eq 'CAA' ) { push @recs, $rr->flag . ' ' . $rr->tag . ' ' . $rr->value; }
+					elsif ( $type eq 'SRV' ) {
+						push @recs, $rr->priority . ' ' . $rr->weight . ' ' . $rr->port . ' ' . $rr->target;
+					}
+					else { push @recs, $rr->address; }
+				}
+				$dns{$type} = \@recs if @recs;
+			}
 		}
 	};
 	$dns_error = $@ if $@;
