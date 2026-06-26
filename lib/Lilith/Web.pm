@@ -71,6 +71,7 @@ sub startup {
 	$r->get('/')->to( cb => sub { $_[0]->redirect_to('/search') } );
 	$r->get('/search')->to('search#index');
 	$r->get('/event/:table/:id')->to('event#view');
+	$r->get('/api/ipinfo/*ip')->to('api#ipinfo');
 }
 
 1;

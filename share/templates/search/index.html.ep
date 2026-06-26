@@ -322,6 +322,33 @@
 
 </form>
 
+<!-- IP Info Modal -->
+<div class="modal fade" id="ipinfo-modal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content bg-dark text-light border-secondary">
+      <div class="modal-header py-2 border-secondary">
+        <h6 class="modal-title" id="ipinfo-modal-title">IP Info</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="ipinfo-loading" class="text-center text-muted py-3">Loading…</div>
+        <div id="ipinfo-content" style="display:none">
+          <div class="mb-2">
+            <span class="text-muted small fw-semibold">Reverse DNS</span>
+            <div id="ipinfo-rdns" class="font-monospace small mt-1"></div>
+            <div id="ipinfo-ptr-name" class="text-muted small mt-1"></div>
+            <div id="ipinfo-rdns-error" class="text-warning small mt-1" style="display:none"></div>
+          </div>
+          <div>
+            <span class="text-muted small fw-semibold">WHOIS</span>
+            <pre id="ipinfo-whois" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 % if ($error) {
 <div class="alert alert-danger py-2">
   <strong>Error:</strong> <%= $error %>
@@ -366,9 +393,9 @@
           <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
           <td class="col-host" style="display:none"><% if (my $i = $row->{host}) { %><a href="#" class="host-filter" data-host="<%= $i %>"><%= $i %></a><% } %></td>
           <td><% if (my $i = $row->{in_iface}) { %><a href="#" class="iface-filter" data-iface="<%= $i %>"><%= $i %></a><% } %></td>
-          <td><% if (my $i = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $i %>" style="font-size:0.65rem;line-height:1.2">?</button><% } %></td>
           <td><% if (my $i = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $i %>"><%= $i %></a><% } %></td>
-          <td><% if (my $i = $row->{dest_ip}) { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{dest_ip}) { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $i %>" style="font-size:0.65rem;line-height:1.2">?</button><% } %></td>
           <td><% if (my $i = $row->{dest_port}) { %><a href="#" class="port-filter" data-port="<%= $i %>"><%= $i %></a><% } %></td>
           <td><% if (my $i = $row->{proto}) { %><a href="#" class="proto-filter" data-proto="<%= $i %>"><%= $i %></a><% } %></td>
           <td><% if (my $i = $row->{app_proto}) { %><a href="#" class="aproto-filter" data-aproto="<%= $i %>"><%= $i %></a><% } %></td>
@@ -399,7 +426,7 @@
           <td><%= $row->{timestamp} // '' %></td>
           <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
           <td class="col-host" style="display:none"><% if (my $i = $row->{instance_host}) { %><a href="#" class="instance-host-filter" data-instance-host="<%= $i %>"><%= $i %></a><% } %></td>
-          <td><% if (my $i = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $i %>" style="font-size:0.65rem;line-height:1.2">?</button><% } %></td>
           <td><% if (my $i = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $i %>"><%= $i %></a><% } %></td>
           <td><%= $row->{host}      // '' %></td>
           <td><%= $row->{program}   // '' %></td>
@@ -569,6 +596,35 @@ document.addEventListener('DOMContentLoaded', function() {
       e.preventDefault();
       document.getElementById('app-proto-input').value = this.dataset.aproto;
       document.getElementById('search-form').submit();
+    });
+  });
+
+  var ipinfoModal = new bootstrap.Modal(document.getElementById('ipinfo-modal'));
+  document.querySelectorAll('.ip-info-btn').forEach(function(el) {
+    el.addEventListener('click', function() {
+      var ip = this.dataset.ip;
+      document.getElementById('ipinfo-modal-title').textContent = ip;
+      document.getElementById('ipinfo-loading').style.display = '';
+      document.getElementById('ipinfo-content').style.display = 'none';
+      ipinfoModal.show();
+      fetch('/api/ipinfo/' + encodeURIComponent(ip))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          document.getElementById('ipinfo-rdns').textContent     = data.rdns || '(none)';
+          document.getElementById('ipinfo-ptr-name').textContent = data.ptr_name ? 'queried: ' + data.ptr_name : '';
+          var errEl = document.getElementById('ipinfo-rdns-error');
+          if (data.rdns_error) { errEl.textContent = data.rdns_error; errEl.style.display = ''; }
+          else { errEl.style.display = 'none'; }
+          document.getElementById('ipinfo-whois').textContent = data.whois || '(none)';
+          document.getElementById('ipinfo-loading').style.display  = 'none';
+          document.getElementById('ipinfo-content').style.display  = '';
+        })
+        .catch(function() {
+          document.getElementById('ipinfo-rdns').textContent  = 'Error fetching data';
+          document.getElementById('ipinfo-whois').textContent = '';
+          document.getElementById('ipinfo-loading').style.display  = 'none';
+          document.getElementById('ipinfo-content').style.display  = '';
+        });
     });
   });
 });
