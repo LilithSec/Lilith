@@ -70,6 +70,29 @@ sub startup {
 	$self->helper( dnstracer_enable => sub { $toml->{dnstracer_enable} ? 1 : 0 } );
 	$self->helper( dns_bg_timeout   => sub { defined $toml->{dns_bg_timeout} ? $toml->{dns_bg_timeout} + 0 : 3 } );
 
+	# Referer checking — enforced only when allowed_referers is non-empty in the
+	# config.  Each entry is treated as a URL prefix; a request is allowed if its
+	# Referer header starts with any of the configured prefixes.
+	my @allowed_referers;
+	if ( ref $toml->{allowed_referers} eq 'ARRAY' ) {
+		@allowed_referers = @{ $toml->{allowed_referers} };
+	}
+	if (@allowed_referers) {
+		$self->hook(
+			before_dispatch => sub {
+				my $c       = shift;
+				my $referer = $c->req->headers->referrer // '';
+				for my $allowed (@allowed_referers) {
+					return if index( $referer, $allowed ) == 0;
+				}
+				$c->render(
+					json   => { error => 'Forbidden: invalid or missing Referer' },
+					status => 403,
+				);
+			}
+		);
+	}
+
 	# Point Mojolicious at share/templates and share/public so the app works
 	# both when installed (File::ShareDir path) and when run from the repo.
 	unshift @{ $self->renderer->paths }, "$SHARE_DIR/templates";

@@ -101,12 +101,13 @@ dbic-migration --schema_class Lilith::Schema -P $password -U $user --dsn $dsn up
 
 The default config file is `/usr/local/etc/lilith.toml`.
 
-| Variable     | Description                                                                                                            |
-|--------------|------------------------------------------------------------------------------------------------------------------------|
-| dsn          | A DSN connection string to be used by [DBI][https://metacpan.org/pod/DBI]. [DBD::Pg][https://metacpan.org/pod/DBD::Pg] |
-| pass         | Password to use for the connection.                                                                                    |
-| user         | User to use for the connetion.                                                                                         |
-| class_ignore | Array of classes to ignore.                                                                                            |
+| Variable           | Description                                                                                                                                                                                                                         |
+|--------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `dsn`              | A DSN connection string to be used by [DBI][https://metacpan.org/pod/DBI]. [DBD::Pg][https://metacpan.org/pod/DBD::Pg]                                                                                                              |
+| `pass`             | Password to use for the connection.                                                                                                                                                                                                 |
+| `user`             | User to use for the connetion.                                                                                                                                                                                                      |
+| `class_ignore`     | Array of classes to ignore.                                                                                                                                                                                                         |
+| `allowed_referers` | Optional array of URL prefixes permitted as the `Referer` header on web UI requests. When set, any request whose `Referer` does not start with one of the listed prefixes is rejected with a 403. Omit to disable referer checking. |
 
 Sub hashes are then treated as a instance. The following values are
 available for that.
