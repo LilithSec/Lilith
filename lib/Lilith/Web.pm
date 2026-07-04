@@ -6,17 +6,18 @@ use TOML        qw(from_toml);
 use File::Slurp qw(read_file);
 use Lilith      ();
 
-# File::ShareDir is optional — only available once the dist is installed.
-my $SHARE_DIR;
-eval {
-	require File::ShareDir;
-	$SHARE_DIR = File::ShareDir::dist_dir('Lilith');
-};
-# Development fallback: share/ lives three directories up from lib/Lilith/Web.pm
-unless ( $SHARE_DIR && -d $SHARE_DIR ) {
-	$SHARE_DIR = curfile->dirname->dirname->dirname->child('share')->to_string;
+# When run from a checkout, share/ lives three directories up from
+# lib/Lilith/Web.pm and takes priority so an installed copy of the dist
+# does not shadow the local templates.
+my $SHARE_DIR = curfile->dirname->dirname->dirname->child('share')->to_string;
+unless ( -d $SHARE_DIR ) {
+	# File::ShareDir is optional — only available once the dist is installed.
+	eval {
+		require File::ShareDir;
+		$SHARE_DIR = File::ShareDir::dist_dir('Lilith');
+	};
 }
-die "Cannot locate Lilith share directory\n" unless -d $SHARE_DIR;
+die "Cannot locate Lilith share directory\n" unless defined($SHARE_DIR) && -d $SHARE_DIR;
 
 =head1 NAME
 

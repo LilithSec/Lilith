@@ -71,6 +71,18 @@ sub _make_app {
 
     # POST is not routed — only GET /search is defined
     $t->post_ok('/search')->status_is( 404, 'POST /search is not routed (404)' );
+
+    # the classification select allows multiple selections
+    $t->get_ok('/search')
+        ->element_exists( 'select[name="class"][multiple]', 'class select is a multi-select' );
+
+    # multiple class params render and are marked selected on the way back out
+    $t->get_ok('/search?search=1&class=Misc+activity&class=Not+Suspicious+Traffic')
+        ->status_is( 200, 'multiple class params render 200' )
+        ->element_exists( 'option[value="Misc activity"][selected]',
+        'first class param is selected in the form' )
+        ->element_exists( 'option[value="Not Suspicious Traffic"][selected]',
+        'second class param is selected in the form' );
 }
 
 # ---------------------------------------------------------------------------

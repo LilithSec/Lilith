@@ -87,88 +87,175 @@
         Filters — prefix <code>!</code> to negate, <code>%</code> for LIKE. Numeric fields accept comma-separated values e.g. <code>22,!80,&lt;1024</code>
       </div>
       <div class="card-body py-2">
+        <div class="row g-2">
 
-        <div class="row g-2 mb-1">
-          <div class="col-12"><span class="text-muted small fw-semibold">Network</span></div>
+          <div class="col-md-9">
 
-          <div class="col-md-2">
-            <label class="form-label">Src IP</label>
-            <input type="text" name="src_ip" class="form-control form-control-sm"
-                   value="<%= param('src_ip') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Src Port(s)</label>
-            <input type="text" name="src_port" class="form-control form-control-sm"
-                   value="<%= param('src_port') // '' %>" placeholder="">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Dst IP</label>
-            <input type="text" name="dest_ip" class="form-control form-control-sm"
-                   value="<%= param('dest_ip') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Dst Port(s)</label>
-            <input type="text" name="dest_port" class="form-control form-control-sm"
-                   value="<%= param('dest_port') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">IP (src <em>or</em> dst)</label>
-            <input type="text" name="ip" id="ip-input" class="form-control form-control-sm"
-                   value="<%= param('ip') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Port (src <em>or</em> dst)</label>
-            <input type="text" name="port" id="port-input" class="form-control form-control-sm"
-                   value="<%= param('port') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Proto</label>
-            <input type="text" name="proto" id="proto-input" class="form-control form-control-sm"
-                   value="<%= param('proto') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">App Proto</label>
-            <input type="text" name="app_proto" id="app-proto-input" class="form-control form-control-sm"
-                   value="<%= param('app_proto') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Interface</label>
-            <input type="text" name="in_iface" id="in-iface-input" class="form-control form-control-sm"
-                   value="<%= param('in_iface') // '' %>">
-          </div>
-        </div><!-- /network row -->
+            <div class="row g-2 mb-1">
+              <div class="col-12"><span class="text-muted small fw-semibold">Network</span></div>
 
-        <div class="row g-2 mb-1">
-          <div class="col-12"><span class="text-muted small fw-semibold">Instance / Host</span></div>
+              <div class="col-md-2">
+                <label class="form-label">Src IP</label>
+                <input type="text" name="src_ip" class="form-control form-control-sm"
+                       value="<%= param('src_ip') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Src Port(s)</label>
+                <input type="text" name="src_port" class="form-control form-control-sm"
+                       value="<%= param('src_port') // '' %>" placeholder="">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Dst IP</label>
+                <input type="text" name="dest_ip" class="form-control form-control-sm"
+                       value="<%= param('dest_ip') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Dst Port(s)</label>
+                <input type="text" name="dest_port" class="form-control form-control-sm"
+                       value="<%= param('dest_port') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">IP (src <em>or</em> dst)</label>
+                <input type="text" name="ip" id="ip-input" class="form-control form-control-sm"
+                       value="<%= param('ip') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Port (src <em>or</em> dst)</label>
+                <input type="text" name="port" id="port-input" class="form-control form-control-sm"
+                       value="<%= param('port') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Proto</label>
+                <input type="text" name="proto" id="proto-input" class="form-control form-control-sm"
+                       value="<%= param('proto') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">App Proto</label>
+                <input type="text" name="app_proto" id="app-proto-input" class="form-control form-control-sm"
+                       value="<%= param('app_proto') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Interface</label>
+                <input type="text" name="in_iface" id="in-iface-input" class="form-control form-control-sm"
+                       value="<%= param('in_iface') // '' %>">
+              </div>
+            </div><!-- /network row -->
 
-          <div class="col-md-2">
-            <label class="form-label">Instance</label>
-            <input type="text" name="instance" id="instance-input" class="form-control form-control-sm"
-                   value="<%= param('instance') // '' %>" placeholder="">
-          </div>
-          <div class="col-md-2" id="instance-host-field">
-            <label class="form-label">Instance Host</label>
-            <input type="text" name="instance_host" id="instance-host-input" class="form-control form-control-sm"
-                   value="<%= param('instance_host') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Host</label>
-            <input type="text" name="host" id="host-input" class="form-control form-control-sm"
-                   value="<%= param('host') // '' %>">
-          </div>
-        </div><!-- /host row -->
+            <div class="row g-2 mb-1">
+              <div class="col-12"><span class="text-muted small fw-semibold">Instance / Host</span></div>
 
-        <div class="row g-2 mb-1" id="rule-filters">
-          <div class="col-12"><span class="text-muted small fw-semibold">Rule / Signature (Suricata / Sagan)</span></div>
+              <div class="col-md-2">
+                <label class="form-label">Instance</label>
+                <input type="text" name="instance" id="instance-input" class="form-control form-control-sm"
+                       value="<%= param('instance') // '' %>" placeholder="">
+              </div>
+              <div class="col-md-2" id="instance-host-field">
+                <label class="form-label">Instance Host</label>
+                <input type="text" name="instance_host" id="instance-host-input" class="form-control form-control-sm"
+                       value="<%= param('instance_host') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Host</label>
+                <input type="text" name="host" id="host-input" class="form-control form-control-sm"
+                       value="<%= param('host') // '' %>">
+              </div>
+            </div><!-- /host row -->
 
-          <div class="col-md-3">
-            <label class="form-label">Signature</label>
-            <input type="text" name="signature" id="signature-input" class="form-control form-control-sm"
-                   value="<%= param('signature') // '' %>">
-          </div>
-          <div class="col-md-4">
-            <label class="form-label">Classification</label>
-            % my $_cur_class = param('class') // '';
+            <div class="row g-2 mb-1" id="rule-filters">
+              <div class="col-12"><span class="text-muted small fw-semibold">Rule / Signature (Suricata / Sagan)</span></div>
+
+              <div class="col-md-3">
+                <label class="form-label">Signature</label>
+                <input type="text" name="signature" id="signature-input" class="form-control form-control-sm"
+                       value="<%= param('signature') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">GID</label>
+                <input type="text" name="gid" id="gid-input" class="form-control form-control-sm"
+                       value="<%= param('gid') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">SID</label>
+                <input type="text" name="sid" id="sid-input" class="form-control form-control-sm"
+                       value="<%= param('sid') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Rev</label>
+                <input type="text" name="rev" id="rev-input" class="form-control form-control-sm"
+                       value="<%= param('rev') // '' %>">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Event ID</label>
+                <input type="text" name="event_id" class="form-control form-control-sm"
+                       value="<%= param('event_id') // '' %>">
+              </div>
+            </div><!-- /rule row -->
+
+            <div class="row g-2" id="cape-filters">
+              <div class="col-12"><span class="text-muted small fw-semibold">CAPE</span></div>
+
+              <div class="col-md-2">
+                <label class="form-label">Target</label>
+                <input type="text" name="target" class="form-control form-control-sm"
+                       value="<%= param('target') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Slug</label>
+                <input type="text" name="slug" class="form-control form-control-sm"
+                       value="<%= param('slug') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Package</label>
+                <input type="text" name="pkg" class="form-control form-control-sm"
+                       value="<%= param('pkg') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Malscore</label>
+                <input type="text" name="malscore" class="form-control form-control-sm"
+                       value="<%= param('malscore') // '' %>" placeholder="">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Size</label>
+                <input type="text" name="size" class="form-control form-control-sm"
+                       value="<%= param('size') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Task ID</label>
+                <input type="text" name="task" class="form-control form-control-sm"
+                       value="<%= param('task') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Subbed From IP</label>
+                <input type="text" name="subbed_from_ip" class="form-control form-control-sm"
+                       value="<%= param('subbed_from_ip') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Subbed From Host</label>
+                <input type="text" name="subbed_from_host" class="form-control form-control-sm"
+                       value="<%= param('subbed_from_host') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">MD5</label>
+                <input type="text" name="md5" class="form-control form-control-sm"
+                       value="<%= param('md5') // '' %>">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">SHA1</label>
+                <input type="text" name="sha1" class="form-control form-control-sm"
+                       value="<%= param('sha1') // '' %>">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">SHA256</label>
+                <input type="text" name="sha256" class="form-control form-control-sm"
+                       value="<%= param('sha256') // '' %>">
+              </div>
+            </div><!-- /cape row -->
+
+          </div><!-- /filter rows col -->
+
+          <div class="col-md-3 flex-column" id="class-filter" style="display:flex">
+            <label class="form-label">Classification <span class="text-muted small">(ctrl/cmd-click for multiple)</span></label>
+            % my %_sel_class = map { $_ => 1 } grep { defined($_) && $_ ne '' } @{ $self->every_param('class') };
             % my @_classes = sort { lc($a) cmp lc($b) } (
             %   'A Network Trojan was detected',
             %   'A TCP connection was detected',
@@ -226,95 +313,13 @@
             %   'Web Application Attack',
             %   'access to a potentially vulnerable web application',
             % );
-            <select name="class" class="form-select form-select-sm">
-              <option value="">— any —</option>
+            <select name="class" class="form-select form-select-sm flex-grow-1" multiple>
               % for my $_c (@_classes) {
-                <option value="<%= $_c %>" <%= $_cur_class eq $_c ? 'selected' : '' %>><%= $_c %></option>
+                <option value="<%= $_c %>" <%= $_sel_class{$_c} ? 'selected' : '' %>><%= $_c %></option>
               % }
             </select>
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">GID</label>
-            <input type="text" name="gid" id="gid-input" class="form-control form-control-sm"
-                   value="<%= param('gid') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">SID</label>
-            <input type="text" name="sid" id="sid-input" class="form-control form-control-sm"
-                   value="<%= param('sid') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Rev</label>
-            <input type="text" name="rev" id="rev-input" class="form-control form-control-sm"
-                   value="<%= param('rev') // '' %>">
-          </div>
-          <div class="col-md-3">
-            <label class="form-label">Event ID</label>
-            <input type="text" name="event_id" class="form-control form-control-sm"
-                   value="<%= param('event_id') // '' %>">
-          </div>
-        </div><!-- /rule row -->
-
-        <div class="row g-2" id="cape-filters">
-          <div class="col-12"><span class="text-muted small fw-semibold">CAPE</span></div>
-
-          <div class="col-md-2">
-            <label class="form-label">Target</label>
-            <input type="text" name="target" class="form-control form-control-sm"
-                   value="<%= param('target') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Slug</label>
-            <input type="text" name="slug" class="form-control form-control-sm"
-                   value="<%= param('slug') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Package</label>
-            <input type="text" name="pkg" class="form-control form-control-sm"
-                   value="<%= param('pkg') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Malscore</label>
-            <input type="text" name="malscore" class="form-control form-control-sm"
-                   value="<%= param('malscore') // '' %>" placeholder="">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Size</label>
-            <input type="text" name="size" class="form-control form-control-sm"
-                   value="<%= param('size') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Task ID</label>
-            <input type="text" name="task" class="form-control form-control-sm"
-                   value="<%= param('task') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Subbed From IP</label>
-            <input type="text" name="subbed_from_ip" class="form-control form-control-sm"
-                   value="<%= param('subbed_from_ip') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">Subbed From Host</label>
-            <input type="text" name="subbed_from_host" class="form-control form-control-sm"
-                   value="<%= param('subbed_from_host') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">MD5</label>
-            <input type="text" name="md5" class="form-control form-control-sm"
-                   value="<%= param('md5') // '' %>">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label">SHA1</label>
-            <input type="text" name="sha1" class="form-control form-control-sm"
-                   value="<%= param('sha1') // '' %>">
-          </div>
-          <div class="col-md-3">
-            <label class="form-label">SHA256</label>
-            <input type="text" name="sha256" class="form-control form-control-sm"
-                   value="<%= param('sha256') // '' %>">
-          </div>
-        </div><!-- /cape row -->
-
+          </div><!-- /class filter col -->
+        </div><!-- /row -->
       </div><!-- /card-body -->
     </div><!-- /card -->
   </div><!-- /collapse -->
@@ -519,6 +524,8 @@ function syncOrderBy(keepVal) {
   capeFilters.style.display = (sel === 'cape') ? '' : 'none';
   var ruleFilters = document.getElementById('rule-filters');
   ruleFilters.style.display = (sel === 'cape') ? 'none' : '';
+  var classFilter = document.getElementById('class-filter');
+  classFilter.style.display = (sel === 'cape') ? 'none' : 'flex';
 }
 function applyHostCol(show) {
   document.querySelectorAll('.col-host').forEach(function(el) {

@@ -11,9 +11,14 @@ share/migrations/PostgreSQL/deploy/1/001-auto.sql
 t/00-load.t
 t/lilith-class-methods.t
 t/lilith-new.t
+t/lilith-search-class.t
 t/manifest.t
 t/pod-coverage.t
 t/pod.t
+t/web-api.t
+t/web-helpers.t
+t/web-referer.t
+t/web-routes.t
 src_bin/lilith
 src_bin/lilith-web
 lib/Lilith/Web.pm

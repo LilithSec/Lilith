@@ -255,7 +255,19 @@ Instance.
 
 =head4 -c <class>
 
-Classification.
+Classification. May be specified multiple times or as a comma
+separated list to search for more than one. Positive items are
+ORed together while items negated via a leading '!' are ANDed.
+
+    # class = 'Misc Attack'
+    -c 'Misc Attack'
+
+    # class in ( 'Misc Attack', 'Exploit Attempt' )
+    -c 'Misc Attack' -c 'Exploit Attempt'
+    -c 'Misc Attack,Exploit Attempt'
+
+    # class != 'Misc activity' and class not like 'Generic%'
+    -c '!Misc activity' -c '!Generic%'
 
     - Default :: undef
     - Type :: string
@@ -537,7 +549,7 @@ my $host_not;
 my $host_like;
 my $instance_host;
 my $instance;
-my $class;
+my @class;
 my $class_not;
 my $class_like;
 my $signature;
@@ -598,7 +610,7 @@ GetOptions(
 	'host=s'      => \$host,
 	'ih=s'        => \$instance_host,
 	'i=s'         => \$instance,
-	'c=s'         => \$class,
+	'c=s'         => \@class,
 	'cN=s'        => \$class_not,
 	'cl'          => \$class_like,
 	's=s'         => \$signature,
@@ -639,6 +651,8 @@ GetOptions(
 	'target=s'         => \$target,
 	'task=s'           => \@task,
 );
+
+@class = split( /\s*,\s*/, join( ',', @class ) );
 
 # print version or help if requested
 if ($help) {
@@ -861,7 +875,7 @@ if ( $action eq 'search' ) {
 		host_like        => $host_like,
 		instance_host    => $instance_host,
 		instance         => $instance,
-		class            => $class,
+		class            => \@class,
 		class_not        => $class_not,
 		class_like       => $class_like,
 		signature        => $signature,

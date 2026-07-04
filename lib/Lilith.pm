@@ -841,6 +841,18 @@ Below are a list of string items.
     # will become "and instance like '%foo'"
     instance => '%foo',
 
+class may also be a array. Positive items are ORed together while
+negated items are ANDed.
+
+    # will become "and class in ( 'foo', 'bar' )"
+    class => ['foo', 'bar'],
+
+    # will become "and ( class in ( 'foo', 'bar' ) or class like 'derp%' )"
+    class => ['foo', 'bar', 'derp%'],
+
+    # will become "and class != 'foo' and class not like 'derp%'"
+    class => ['!foo', '!derp%'],
+
     # will become "and instance not like '%foo'"
     instance => '!%foo',
 
@@ -999,26 +1011,48 @@ sub search {
 	#
 
 	if ( defined( $opts{class} ) ) {
-		if ( ref $opts{class} eq 'ARRAY' ) {
-			$search->{classification} = { '-in' => $opts{class} } if @{ $opts{class} };
-		} else {
-			if ( $opts{class} =~ /\%/ ) {
-				if ( $opts{class} =~ /^\!/ ) {
-					( my $val = $opts{class} ) =~ s/^\!//;
-					$search->{classification} = { '-not_like' => $val };
-				} else {
-					$search->{classification} = { 'like' => $opts{class} };
-				}
+		my @class_args = ref $opts{class} eq 'ARRAY' ? @{ $opts{class} } : ( $opts{class} );
+
+		# positive items are ORed together, negated items are ANDed
+		my @in;
+		my @positive;
+		my @negative;
+		foreach my $val (@class_args) {
+			if ( !defined($val) || $val eq '' ) {
+				next;
+			}
+			if ( $val =~ /^\!/ ) {
+				$val =~ s/^\!//;
+				push( @negative, { ( $val =~ /\%/ ? '-not_like' : '!=' ) => $val } );
+			} elsif ( $val =~ /\%/ ) {
+				push( @positive, { 'like' => $val } );
 			} else {
-				if ( $opts{class} =~ /^\!/ ) {
-					( my $val = $opts{class} ) =~ s/^\!//;
-					$search->{classification} = { '!=' => $val };
-				} else {
-					$search->{classification} = { '=' => $opts{class} };
-				}
+				push( @in, $val );
 			}
 		}
-	}
+		if ( defined( $in[0] ) && !defined( $in[1] ) ) {
+			unshift( @positive, { '=' => $in[0] } );
+		} elsif ( defined( $in[1] ) ) {
+			unshift( @positive, { '-in' => \@in } );
+		}
+
+		my @clauses;
+		if ( defined( $positive[0] ) && !defined( $positive[1] ) ) {
+			push( @clauses, { classification => $positive[0] } );
+		} elsif ( defined( $positive[1] ) ) {
+			push( @clauses, { '-or' => [ map { { classification => $_ } } @positive ] } );
+		}
+		foreach my $item (@negative) {
+			push( @clauses, { classification => $item } );
+		}
+
+		if ( defined( $clauses[0] ) ) {
+			if ( !defined( $search->{'-and'} ) ) {
+				$search->{'-and'} = [];
+			}
+			push( @{ $search->{'-and'} }, @clauses );
+		}
+	} ## end if ( defined( $opts{class} ) )
 
 	my @strings = (
 		'host',         'instance_host', 'instance',
