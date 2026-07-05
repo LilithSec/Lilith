@@ -292,14 +292,23 @@ sub run {
 			$item->{instance} = $item_key;
 		}
 
+		# Skip malformed instances with a warning rather than dying, so one bad
+		# entry does not take down monitoring of the valid ones.
 		if ( !defined( $item->{type} ) ) {
-			die( 'No type specified for ' . $item->{instance} );
+			warn( 'No type specified for ' . $item->{instance} . '; skipping this instance' );
+			next;
 		} elsif ( $item->{type} ne 'suricata' && $item->{type} ne 'sagan' && $item->{type} ne 'cape' ) {
-			die( 'Type, ' . $item->{type} . ', for instance ' . $item->{instance} . ' is not a known type' );
+			warn(     'Type, '
+					. $item->{type}
+					. ', for instance '
+					. $item->{instance}
+					. ' is not a known type; skipping this instance' );
+			next;
 		}
 
 		if ( !defined( $item->{eve} ) ) {
-			die( 'No file specified for ' . $item->{instance} );
+			warn( 'No file specified for ' . $item->{instance} . '; skipping this instance' );
+			next;
 		}
 
 		# create each POE session out for each EVE file we are following
