@@ -44,18 +44,13 @@ our $VERSION = '3.0.0';
                            pass=>$toml->{pass},
                           );
 
+    # EVE instances live under the [eves.*] table, keyed by instance name.
     my %files;
-    my @toml_keys = keys( %{$toml} );
-    my $int       = 0;
-    while ( defined( $toml_keys[$int] ) ) {
-        my $item = $toml_keys[$int];
-
-        if ( ref( $toml->{$item} ) eq "HASH" ) {
-                # add the file in question
-                $files{$item} = $toml->{$item};
+    if ( ref( $toml->{eves} ) eq "HASH" ) {
+        foreach my $name ( keys( %{ $toml->{eves} } ) ) {
+                $files{$name} = $toml->{eves}{$name}
+                    if ref( $toml->{eves}{$name} ) eq "HASH";
         }
-
-        $int++;
     }
 
     $ilith->run(

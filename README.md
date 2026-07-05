@@ -114,14 +114,35 @@ The default config file is `/usr/local/etc/lilith.toml`.
 | `domaininfo_cache` | Optional boolean. When true, results of the domain info lookup (`/api/domaininfo`) are cached in memory per worker process, so repeat lookups of the same domain are served instantly. Default false (disabled). |
 | `domaininfo_cache_ttl` | Optional. How long, in seconds, a cached domain info result is considered fresh. Default `300` (5 minutes). Only used when `domaininfo_cache` is true. |
 
-Sub hashes are then treated as a instance. The following values are
-available for that.
+EVE instances to follow are defined as sub tables under the `eves` table, i.e.
+`[eves.NAME]`. Each such sub hash is an instance with the following values.
 
-| Variable | Required | Description                                                        |
-|----------|----------|--------------------------------------------------------------------|
-| eve      | yes      | The EVE file to follow.                                            |
-| type     | yes      | `sagan` or `suricata`, depending on which it is.                   |
-| instance | no       | The name for the instance. If not specified the hash name is used. |
+| Variable | Required | Description                                                             |
+|----------|----------|-------------------------------------------------------------------------|
+| eve      | yes      | The EVE file to follow.                                                 |
+| type     | yes      | `sagan` or `suricata`, depending on which it is.                        |
+| instance | no       | The name for the instance. If not specified the sub table name is used. |
+
+```toml
+dsn="dbi:Pg:dbname=lilith;host=192.168.1.2"
+user="lilith"
+pass="WhateverYouSetAsApassword"
+
+# a suricata instance to monitor
+[eves.suricata-eve]
+instance="foo-pie"
+type="suricata"
+eve="/var/log/suricata/alert.json"
+
+# a sagan instance; instance name defaults to the sub table name, 'foo-lae'
+[eves.foo-lae]
+type="sagan"
+eve="/var/log/sagan/alert.json"
+```
+
+Note: previously instances were plain top-level tables (e.g. `[suricata-eve]`).
+Those are now ignored — nest them under `[eves.NAME]`. `lilith -a run` will warn
+about any stray top-level table it finds.
 
 ## Options
 

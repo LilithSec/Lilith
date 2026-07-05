@@ -1,5 +1,15 @@
 Revision history for Lilith
 
+4.0.0	unreleased
+		 - EVE instances are now defined under the [eves.*] table, e.g.
+		   [eves.suricata-eve], instead of as plain top-level tables. Old
+		   top-level instance tables are ignored, with a warning.
+		 - search() now accepts an array for 'class'; positive values are
+		   ORed (via an IN) and '!'-negated values are ANDed, with '%'
+		   LIKE support per item.
+		 - lilith -a search: -c may be given multiple times or as a comma
+		   separated list to match/negate several classifications.
+
 3.0.0	2026-06-25/01:00
 		 - use DBIx::Class::Migration
 		 - use dbic-migration for migration DB schema versioning and updating

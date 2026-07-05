@@ -467,13 +467,14 @@ The default config file is `/usr/local/etc/lilith.toml`.
 
     - class_ignore :: Array of classes to ignore.
 
-Sub hashes are then treated as a instance. The following values are available for that.
+EVE instances to follow are defined as sub tables under the C<eves> table, i.e.
+C<[eves.NAME]>. Each such sub hash is an instance with the following values.
 
     - eve :: The EVE file to follow.
 
     - type :: `sagan` or `suricata`, depending on which it is.
 
-    - instance :: The name for the instance. If not specified the hash name is used.
+    - instance :: The name for the instance. If not specified the sub table name is used.
 
 Example...
 
@@ -482,24 +483,28 @@ Example...
     user="lilith"
     # a handy one to ignore for the extend as it is spammy
     class_ignore=["Generic Protocol Command Decode"]
-    
+
     # add a suricata instance to monitor
-    [suricata-eve]
+    [eves.suricata-eve]
     instance="foo-pie"
     type="suricata"
     eve="/var/log/suricata/alert.json"
-    
+
     # add a second suricata instance to monitor
-    [another-eve]
+    [eves.another-eve]
     instance="foo2-pie"
     type="suricata"
     eve="/var/log/suricata/alert2.json"
-    
+
     # add a sagan eve to monitor
     # instance name is 'foo-lae', given there is no value for instance
-    [foo-lae]
+    [eves.foo-lae]
     type="sagan"
     eve="/var/log/sagan/alert.json"
+
+Prior to this the instances were defined as plain top-level tables (e.g.
+C<[suricata-eve]>); such tables are now ignored, with a warning suggesting the
+C<[eves.NAME]> form.
 
 =cut
 
@@ -523,6 +528,32 @@ use Pod::Usage             qw( pod2usage );
 sub version {
 	print 'lilith v. ' . $Lilith::VERSION . "\n";
 }
+
+# Build the instance -> config hash for Lilith->run from the parsed TOML. EVE
+# instances live under the [eves.*] table, e.g. [eves.suricata-eve]. Any leftover
+# top-level table is warned about in case it is an old-style instance definition.
+sub eve_instances {
+	my ($toml) = @_;
+
+	my %files;
+	if ( ref( $toml->{eves} ) eq 'HASH' ) {
+		foreach my $name ( keys( %{ $toml->{eves} } ) ) {
+			next unless ref( $toml->{eves}{$name} ) eq 'HASH';
+			$files{$name} = $toml->{eves}{$name};
+		}
+	}
+
+	# Warn about stray top-level tables, which were instances prior to the move
+	# under [eves.*].
+	foreach my $key ( keys( %{$toml} ) ) {
+		next if $key eq 'eves';
+		next unless ref( $toml->{$key} ) eq 'HASH';
+		warn( 'Top-level table [' . $key . '] is no longer used as an EVE instance; '
+				. 'did you mean [eves.' . $key . ']?' . "\n" );
+	}
+
+	return %files;
+} ## end sub eve_instances
 
 sub help {
 	&version;
@@ -757,20 +788,7 @@ if ( $action eq 'dump_self' ) {
 	exit 0;
 }
 
-my %files;
-my @toml_keys = keys( %{$toml} );
-my $int       = 0;
-while ( defined( $toml_keys[$int] ) ) {
-	my $item = $toml_keys[$int];
-
-	if ( ref( $toml->{$item} ) eq "HASH" ) {
-
-		# add the file in question
-		$files{$item} = $toml->{$item};
-	}
-
-	$int++;
-} ## end while ( defined( $toml_keys[$int] ) )
+my %files = eve_instances($toml);
 
 if ( $action eq 'run' ) {
 	openlog( 'lilith', undef, 'daemon' );
