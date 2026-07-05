@@ -66,7 +66,10 @@ sub _make_app {
         ->element_exists( 'input#auto-fc[type="checkbox"]', 'Auto-FC checkbox is present' )
         ->element_exists( 'div.col-auto.ms-auto input#auto-fc',
         'Auto-FC control sits in the far-right column' )
-        ->element_exists( 'span#ar-status', 'auto-refresh status indicator is present' );
+        ->element_exists( 'span#ar-status', 'auto-refresh status indicator is present' )
+        ->element_exists( 'input#nav-https-port[value="443"]', 'HTTPS port input defaults to 443' )
+        ->element_exists( 'button#nav-https-btn',  'HTTPS button present in Domain Info' )
+        ->element_exists( 'div#httpsinfo-modal',   'HTTPS info modal present' );
 
     # search param triggers a DB query; no real DB so it stashes an error but
     # still renders 200
@@ -389,29 +392,41 @@ sub _make_app {
         return '{}';
     };
     my $md5 = 'a' x 32;
+    # list_cached without filter/final_size (older Virani); those come from meta.
     local *Virani::Client::list_cached = sub {
         return encode_json(
             [   { id => "setA-tcpdump-1000-2000-$md5", set => 'setA', type => 'tcpdump',
-                    start_s => 1000, end_s => 2000, final_size => 1234, filter => 'host 1.1.1.1', has_pcap => 1 },
+                    start_s => 1000, end_s => 2000, has_pcap => 1 },
                 { id => "setA-tcpdump-3000-4000-$md5", set => 'setA', type => 'tcpdump',
-                    start_s => 3000, end_s => 4000, final_size => 5678, filter => 'port 443', has_pcap => 1 },
+                    start_s => 3000, end_s => 4000, has_pcap => 1 },
             ]
         );
     };
     local *Virani::Client::fetch_cached = sub {
         my ( $self, %o ) = @_;
-        return encode_json( { pcap_count => 10, success_count => 7 } ) if $o{meta_only};
+        if ( $o{meta_only} ) {
+            my ($end) = $o{id} =~ /-(\d+)-[a-f0-9]{32}\z/;
+            return encode_json(
+                {   pcap_count    => 10,
+                    success_count => 7,
+                    filter        => ( $end == 4000 ? 'port 443' : 'host 1.1.1.1' ),
+                    final_size    => ( $end == 4000 ? 5678       : 1234 ),
+                }
+            );
+        }
         open( my $w, '>:raw', $o{file} ); print $w 'CACHEDPCAP'; close($w);
         return '{}';
     };
     use warnings qw(redefine once);
 
-    # cached list is newest-first and enriched with found/success counts
+    # cached list is newest-first and enriched from metadata (counts, filter, size)
     my $cached = $t->get_ok('/api/virani/cached/r1')->status_is( 200, 'cached list renders 200' )->tx->res->json;
     is( scalar( @{ $cached->{cached} } ), 2, 'two cached searches listed' );
-    is( $cached->{cached}[0]{start_s}, 3000, 'cached list is newest-first' );
-    is( $cached->{cached}[0]{found},   10,   'found count enriched from metadata' );
-    is( $cached->{cached}[0]{success}, 7,    'success count enriched from metadata' );
+    is( $cached->{cached}[0]{start_s},    3000,       'cached list is newest-first' );
+    is( $cached->{cached}[0]{found},      10,         'found count enriched from metadata' );
+    is( $cached->{cached}[0]{success},    7,          'success count enriched from metadata' );
+    is( $cached->{cached}[0]{filter},     'port 443', 'filter enriched from metadata' );
+    is( $cached->{cached}[0]{final_size}, 5678,       'final_size enriched from metadata' );
 
     # cached pcap streams
     $t->get_ok( '/api/virani/cached/r1/pcap/setA-tcpdump-3000-4000-' . $md5 )
@@ -422,6 +437,15 @@ sub _make_app {
     # cached pcap validation
     $t->get_ok('/api/virani/cached/nope/pcap/x')->status_is( 400, 'cached pcap unknown remote rejected' );
     $t->get_ok('/api/virani/cached/r1/pcap/bad%20id')->status_is( 400, 'cached pcap invalid id rejected' );
+
+    # cached metadata JSON download
+    $t->get_ok( '/api/virani/cached/r1/meta/setA-tcpdump-3000-4000-' . $md5 )
+        ->status_is( 200, 'cached metadata renders 200' )
+        ->header_is( 'Content-Type' => 'application/json', 'served as json' )
+        ->header_is( 'Content-Disposition' => 'attachment; filename="virani-cached-setA-tcpdump-3000-4000-' . $md5 . '.json"',
+        'metadata download filename' )
+        ->json_is( '/filter', 'port 443', 'metadata JSON body is the entry metadata' );
+    $t->get_ok('/api/virani/cached/r1/meta/bad%20id')->status_is( 400, 'cached meta invalid id rejected' );
 
     $t->get_ok('/api/virani/pcap?remote=r1&filter=host+1.2.3.4&start=1000&end=2000')
         ->status_is( 200, 'general pcap search streams 200' )

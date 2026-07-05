@@ -26,6 +26,12 @@ Revision history for Lilith
 		 - web: the /api/ipinfo and /api/domaininfo lookups now run their
 		   blocking work in a subprocess, so a slow whois/DNS lookup no
 		   longer stalls the web server's event loop.
+		 - web: an "HTTPS" button under Domain Info (with a port field,
+		   default 443) checks https://DOMAIN:PORT/ and shows the HTTP
+		   status (and redirect target), per-phase and total timing, whether
+		   the cert is expired, whether it validates (full chain + hostname),
+		   and as much certificate detail as possible. 5s timeout, 512KB read
+		   cap, both noted when hit.
 		 - Lilith->run() now warns and skips a malformed EVE instance
 		   instead of dying, so one bad entry no longer stops the rest.
 

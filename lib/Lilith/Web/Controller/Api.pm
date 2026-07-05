@@ -5,7 +5,13 @@ use Net::DNS     ();
 use IO::Select   ();
 use Mojo::IOLoop ();
 use Mojo::JSON qw(decode_json);
-use Time::Piece ();
+use Time::Piece   ();
+use Time::HiRes   ();
+use Time::Local   ();
+use IO::Socket::IP ();
+use IO::Socket::SSL qw(SSL_VERIFY_PEER SSL_VERIFY_NONE);
+use Net::SSLeay ();
+use Mozilla::CA ();
 
 =head2 virani_sets
 
@@ -145,8 +151,12 @@ sub virani_cached_list {
 				if ($@) {
 					warn( 'Lilith: fetching cached metadata for "' . $item->{id} . '" failed: ' . $@ );
 				} elsif ( ref $meta eq 'HASH' ) {
-					$item->{found}   = $meta->{pcap_count};
-					$item->{success} = $meta->{success_count};
+					# The metadata is authoritative; older list_cached versions do
+					# not include the filter/size, so take them from here too.
+					$item->{found}      = $meta->{pcap_count};
+					$item->{success}    = $meta->{success_count};
+					$item->{filter}     = $meta->{filter}     if defined $meta->{filter};
+					$item->{final_size} = $meta->{final_size} if defined $meta->{final_size};
 				}
 			}
 			return \@sorted;
@@ -194,6 +204,46 @@ sub virani_cached_pcap {
 		'virani-cached-' . $id . '.pcap',
 	);
 } ## end sub virani_cached_pcap
+
+=head2 virani_cached_meta
+
+Downloads the metadata JSON for a cached search by its cache ID. Gated by
+virani_search_enable. Runs in a subprocess.
+
+=cut
+
+sub virani_cached_meta {
+	my $self = shift;
+
+	unless ( $self->virani_search_enable ) {
+		return $self->render( text => 'virani search is disabled', status => 404 );
+	}
+	my $remote = $self->param('remote');
+	my $id     = $self->param('id');
+	my $client = ( defined $remote && $self->virani_remotes->{$remote} ) ? $self->virani_client_for($remote) : undef;
+	unless ($client) {
+		return $self->render( text => 'unknown virani instance', status => 400 );
+	}
+	unless ( defined $id && $id =~ /^[A-Za-z0-9._:-]+$/ ) {
+		return $self->render( text => 'invalid cache id', status => 400 );
+	}
+
+	$self->render_later;
+	Mojo::IOLoop->subprocess(
+		sub { return $client->fetch_cached( id => $id, meta_only => 1 ); },    # raw JSON, dies on failure
+		sub {
+			my ( $subprocess, $err, $raw ) = @_;
+			if ( $err || !defined $raw ) {
+				chomp( my $why = ( $err // 'no metadata' ) );
+				return $self->render( text => 'metadata fetch failed: ' . $why, status => 502 );
+			}
+			$self->res->headers->content_type('application/json');
+			$self->res->headers->content_disposition( 'attachment; filename="virani-cached-' . $id . '.json"' );
+			$self->render( data => $raw );
+		},
+	);
+	return;
+} ## end sub virani_cached_meta
 
 =head2 _run_capture
 
@@ -610,5 +660,183 @@ sub _domaininfo_gather {
 		cached          => 0,
 	};
 } ## end sub _domaininfo_gather
+
+=head2 httpsinfo
+
+Connects to https://DOMAIN:PORT/ and reports the certificate details, the HTTP
+status of GET /, per-phase and total timing, whether the cert is expired, and
+whether it validates (full chain + hostname). Runs in a subprocess.
+
+=cut
+
+sub httpsinfo {
+	my $self   = shift;
+	my $domain = $self->param('domain');
+	my $port   = $self->param('port') // 443;
+
+	unless ( defined $domain && $domain =~ /^[A-Za-z0-9._-]+$/ ) {
+		return $self->render( json => { error => 'Invalid domain' }, status => 400 );
+	}
+	unless ( $port =~ /^[0-9]+$/ && $port >= 1 && $port <= 65535 ) {
+		return $self->render( json => { error => 'Invalid port' }, status => 400 );
+	}
+
+	$self->render_later;
+	Mojo::IOLoop->subprocess(
+		sub { return _httpsinfo_gather( $domain, $port ) },
+		sub {
+			my ( $subprocess, $err, $result ) = @_;
+			if ( $err || ref $result ne 'HASH' ) {
+				chomp( my $why = ( $err // 'lookup failed' ) );
+				return $self->render( json => { domain => $domain, error => 'httpsinfo failed: ' . $why },
+					status => 500 );
+			}
+			$self->render( json => $result );
+		},
+	);
+	return;
+} ## end sub httpsinfo
+
+=head2 _ms_since
+
+Milliseconds elapsed since a Time::HiRes timestamp, to one decimal.
+
+=cut
+
+sub _ms_since { return sprintf( '%.1f', ( Time::HiRes::time() - $_[0] ) * 1000 ) + 0 }
+
+=head2 _isotime_to_epoch
+
+Parses an ISO8601 UTC time (as returned by Net::SSLeay) into an epoch, or undef.
+
+=cut
+
+sub _isotime_to_epoch {
+	my ($iso) = @_;
+	return undef unless defined $iso && $iso =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/;
+	return eval { Time::Local::timegm( $6, $5, $4, $3, $2 - 1, $1 ) };
+}
+
+=head2 _httpsinfo_gather
+
+Does the blocking TLS/HTTP work for httpsinfo and returns a result hashref.
+Intended to be run inside a subprocess.
+
+=cut
+
+sub _httpsinfo_gather {
+	my ( $domain, $port ) = @_;
+	my %r = ( domain => $domain, port => $port + 0 );
+
+	my $timeout  = 5;
+	my $cap      = 512 * 1024;
+	my $start    = Time::HiRes::time();
+	my $deadline = $start + $timeout;
+
+	my $tcp = IO::Socket::IP->new( PeerHost => $domain, PeerPort => $port, Proto => 'tcp', Timeout => $timeout );
+	unless ($tcp) {
+		$r{error} = "TCP connect to $domain:$port failed: $!";
+		return \%r;
+	}
+	$r{tcp_connect_ms} = _ms_since($start);
+
+	my $t1 = Time::HiRes::time();
+	unless ( IO::Socket::SSL->start_SSL( $tcp, SSL_verify_mode => SSL_VERIFY_NONE, SSL_hostname => $domain, Timeout => $timeout ) ) {
+		$r{error} = 'TLS handshake failed: ' . ( $IO::Socket::SSL::SSL_ERROR // $! );
+		return \%r;
+	}
+	$r{tls_handshake_ms} = _ms_since($t1);
+
+	# certificate details, best effort — skip any field that is unavailable
+	my $x = eval { $tcp->peer_certificate };
+	if ($x) {
+		my %c;
+		$c{cn}      = eval { $tcp->peer_certificate('cn') };
+		$c{subject} = eval { $tcp->peer_certificate('subject') };
+		$c{issuer}  = eval { $tcp->peer_certificate('issuer') };
+		my @sans = eval { $tcp->peer_certificate('subjectAltNames') };
+		if (@sans) {
+			my @v;
+			for ( my $i = 1; $i < @sans; $i += 2 ) { push @v, $sans[$i] if defined $sans[$i]; }
+			$c{sans} = \@v if @v;
+		}
+		$c{not_before} = eval { Net::SSLeay::P_ASN1_TIME_get_isotime( Net::SSLeay::X509_get_notBefore($x) ) };
+		$c{not_after}  = eval { Net::SSLeay::P_ASN1_TIME_get_isotime( Net::SSLeay::X509_get_notAfter($x) ) };
+		$c{serial}     = eval { Net::SSLeay::P_ASN1_INTEGER_get_hex( Net::SSLeay::X509_get_serialNumber($x) ) };
+		$c{version}    = eval { Net::SSLeay::X509_get_version($x) + 1 };
+		$c{sig_alg}    = eval { Net::SSLeay::OBJ_obj2txt( Net::SSLeay::P_X509_get_signature_alg($x) ) };
+		$c{fp_sha1}    = eval { Net::SSLeay::X509_get_fingerprint( $x, 'sha1' ) };
+		$c{fp_sha256}  = eval { Net::SSLeay::X509_get_fingerprint( $x, 'sha256' ) };
+		for my $k ( keys %c ) {
+			delete $c{$k} unless defined $c{$k} && ( ref $c{$k} || $c{$k} ne '' );
+		}
+		$r{cert} = \%c;
+
+		my $ep = _isotime_to_epoch( $c{not_after} );
+		$r{expired} = ( defined $ep && $ep < time() ) ? 1 : 0 if defined $ep;
+	} ## end if ($x)
+
+	# GET / with the overall deadline and a read cap
+	my $t2          = Time::HiRes::time();
+	my $timed_out   = 0;
+	my $read_capped = 0;
+	my $resp        = '';
+	{
+		local $SIG{PIPE} = 'IGNORE';
+		print {$tcp} "GET / HTTP/1.1\r\nHost: $domain\r\nConnection: close\r\nUser-Agent: Lilith\r\n\r\n";
+		my $sel = IO::Select->new($tcp);
+		while (1) {
+			my $rem = $deadline - Time::HiRes::time();
+			if ( $rem <= 0 ) { $timed_out = 1; last; }
+			if ( $sel->can_read($rem) ) {
+				my $n = sysread( $tcp, my $buf, 65536 );
+				last if !defined $n || $n == 0;
+				$resp .= $buf;
+				if ( length($resp) >= $cap ) { $read_capped = 1; last; }
+			} else {
+				$timed_out = 1;
+				last;
+			}
+		}
+	}
+	$r{response_ms}  = _ms_since($t2);
+	$r{total_ms}     = _ms_since($start);
+	$r{timed_out}    = $timed_out;
+	$r{read_capped}  = $read_capped;
+	close($tcp);
+
+	if ( $resp =~ m{\AHTTP/\d(?:\.\d)?\s+(\d{3})([^\r\n]*)} ) {
+		$r{http_status} = $1 + 0;
+		( my $reason = $2 ) =~ s/^\s+//;
+		$r{http_reason} = $reason if length $reason;
+	}
+	if ( defined $r{http_status} && $r{http_status} >= 300 && $r{http_status} < 400 ) {
+		if ( $resp =~ /^Location:\s*([^\r\n]+)/mi ) {
+			( $r{redirect_to} = $1 ) =~ s/\s+\z//;
+		}
+	}
+
+	# validity — full chain + hostname against the Mozilla CA bundle
+	my $v = IO::Socket::SSL->new(
+		PeerHost            => $domain,
+		PeerPort            => $port,
+		Proto               => 'tcp',
+		Timeout             => $timeout,
+		SSL_verify_mode     => SSL_VERIFY_PEER,
+		SSL_hostname        => $domain,
+		SSL_verifycn_name   => $domain,
+		SSL_verifycn_scheme => 'http',
+		SSL_ca_file         => Mozilla::CA::SSL_ca_file(),
+	);
+	if ($v) {
+		$r{valid} = 1;
+		close($v);
+	} else {
+		$r{valid} = 0;
+		( $r{valid_error} = ( $IO::Socket::SSL::SSL_ERROR // 'verification failed' ) ) =~ s/\s+\z//;
+	}
+
+	return \%r;
+} ## end sub _httpsinfo_gather
 
 1;

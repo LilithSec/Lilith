@@ -309,10 +309,12 @@ sub startup {
 	$r->get('/event/:table/:id/pcap')->to('event#pcap');
 	$r->get('/api/ipinfo/*ip')->to('api#ipinfo');
 	$r->get('/api/domaininfo/*domain')->to('api#domaininfo');
+	$r->get('/api/httpsinfo/*domain')->to('api#httpsinfo');
 	$r->get('/api/virani/sets/:remote')->to('api#virani_sets');
 	$r->get('/api/virani/pcap')->to('api#virani_pcap');
 	$r->get('/api/virani/cached/:remote')->to('api#virani_cached_list');
 	$r->get('/api/virani/cached/:remote/pcap/:id')->to('api#virani_cached_pcap');
+	$r->get('/api/virani/cached/:remote/meta/:id')->to('api#virani_cached_meta');
 }
 
 1;

@@ -62,6 +62,16 @@
               <button type="button" class="btn btn-sm btn-outline-secondary" id="nav-domain-go-btn">Look up</button>
             </div>
           </div>
+          <div class="row g-2 align-items-end mt-1">
+            <div class="col-auto">
+              <label class="form-label small text-muted mb-1">Port</label>
+              <input type="text" id="nav-https-port" class="form-control form-control-sm" value="443"
+                     inputmode="numeric" style="width:80px">
+            </div>
+            <div class="col-auto">
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="nav-https-btn">HTTPS</button>
+            </div>
+          </div>
           <div id="nav-domain-error" class="text-warning small mt-2" style="display:none">Please enter a valid domain.</div>
         </div>
       </div>
@@ -171,6 +181,34 @@
             <span class="text-muted small fw-semibold">dnstracer</span>
             <div id="nav-domaininfo-dnstracer-error" class="text-warning small mt-1" style="display:none"></div>
             <pre id="nav-domaininfo-dnstracer" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Global HTTPS Info Modal -->
+<div class="modal fade" id="httpsinfo-modal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content bg-dark text-light border-secondary">
+      <div class="modal-header py-2 border-secondary">
+        <h6 class="modal-title" id="httpsinfo-modal-title">HTTPS Info</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="httpsinfo-loading" class="text-center text-muted py-3">Loading…</div>
+        <div id="httpsinfo-content" style="display:none">
+          <div id="httpsinfo-error" class="text-warning small mb-2" style="display:none"></div>
+          <div class="mb-2" id="httpsinfo-summary"></div>
+          <table class="table table-dark table-sm table-borderless mb-2">
+            <tbody id="httpsinfo-http"></tbody>
+          </table>
+          <div id="httpsinfo-cert-wrap">
+            <span class="text-muted small fw-semibold">Certificate</span>
+            <table class="table table-dark table-sm table-borderless mb-0 mt-1">
+              <tbody id="httpsinfo-cert"></tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -455,6 +493,90 @@ document.addEventListener('DOMContentLoaded', function() {
     if (e.key === 'Enter') { document.getElementById('nav-domain-go-btn').click(); }
   });
 
+  // HTTPS Info
+  var httpsModal = new bootstrap.Modal(document.getElementById('httpsinfo-modal'));
+  function httpsRow(tbody, label, value, cls) {
+    if (value === undefined || value === null || value === '') { return; }
+    var tr = document.createElement('tr');
+    var th = document.createElement('th');
+    th.className = 'text-muted fw-normal ps-0'; th.style.width = '170px'; th.style.whiteSpace = 'nowrap';
+    th.textContent = label;
+    var td = document.createElement('td');
+    td.className = 'font-monospace small' + (cls ? (' ' + cls) : '');
+    td.style.wordBreak = 'break-all';
+    td.textContent = Array.isArray(value) ? value.join(', ') : value;   // textContent escapes
+    tr.appendChild(th); tr.appendChild(td); tbody.appendChild(tr);
+  }
+  function httpsBadge(container, text, ok) {
+    var b = document.createElement('span');
+    b.className = 'badge me-2 ' + (ok ? 'bg-success' : 'bg-danger');
+    b.textContent = text;
+    container.appendChild(b);
+  }
+  function showHttpsInfo(domain, port) {
+    document.getElementById('httpsinfo-modal-title').textContent = 'HTTPS — ' + domain + ':' + port;
+    document.getElementById('httpsinfo-loading').style.display = '';
+    document.getElementById('httpsinfo-content').style.display = 'none';
+    httpsModal.show();
+    fetch('/api/httpsinfo/' + encodeURIComponent(domain) + '?port=' + encodeURIComponent(port))
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var errEl = document.getElementById('httpsinfo-error');
+        var sum   = document.getElementById('httpsinfo-summary');
+        var http  = document.getElementById('httpsinfo-http');
+        var cert  = document.getElementById('httpsinfo-cert');
+        var certWrap = document.getElementById('httpsinfo-cert-wrap');
+        sum.innerHTML = ''; http.innerHTML = ''; cert.innerHTML = '';
+        if (d.error) { errEl.textContent = d.error; errEl.style.display = ''; } else { errEl.style.display = 'none'; }
+
+        if (d.valid !== undefined)   { httpsBadge(sum, d.valid ? 'Certificate valid' : 'Certificate INVALID', !!d.valid); }
+        if (d.expired !== undefined) { httpsBadge(sum, d.expired ? 'EXPIRED' : 'Not expired', !d.expired); }
+
+        httpsRow(http, 'HTTP status', (d.http_status !== undefined ? d.http_status : '(no response)')
+          + (d.http_reason ? ' ' + d.http_reason : ''));
+        httpsRow(http, 'Redirects to', d.redirect_to);
+        httpsRow(http, 'TCP connect',  d.tcp_connect_ms   !== undefined ? d.tcp_connect_ms + ' ms'   : undefined);
+        httpsRow(http, 'TLS handshake', d.tls_handshake_ms !== undefined ? d.tls_handshake_ms + ' ms' : undefined);
+        httpsRow(http, 'Response',     d.response_ms      !== undefined ? d.response_ms + ' ms'      : undefined);
+        httpsRow(http, 'Total',        d.total_ms         !== undefined ? d.total_ms + ' ms'         : undefined);
+        if (d.timed_out)   { httpsRow(http, 'Note', 'timed out (5s limit)', 'text-warning'); }
+        if (d.read_capped) { httpsRow(http, 'Note', 'response truncated at 512 KB', 'text-warning'); }
+
+        var c = d.cert || {};
+        certWrap.style.display = Object.keys(c).length ? '' : 'none';
+        httpsRow(cert, 'Common name', c.cn);
+        httpsRow(cert, 'Subject', c.subject);
+        httpsRow(cert, 'Issuer', c.issuer);
+        httpsRow(cert, 'SANs', c.sans);
+        httpsRow(cert, 'Not before', c.not_before);
+        httpsRow(cert, 'Not after', c.not_after);
+        httpsRow(cert, 'Serial', c.serial);
+        httpsRow(cert, 'Version', c.version ? ('v' + c.version) : undefined);
+        httpsRow(cert, 'Signature alg', c.sig_alg);
+        httpsRow(cert, 'SHA-1 fingerprint', c.fp_sha1);
+        httpsRow(cert, 'SHA-256 fingerprint', c.fp_sha256);
+        if (d.valid === 0 && d.valid_error) { httpsRow(cert, 'Validation error', d.valid_error, 'text-warning'); }
+
+        document.getElementById('httpsinfo-loading').style.display = 'none';
+        document.getElementById('httpsinfo-content').style.display = '';
+      })
+      .catch(function() {
+        var errEl = document.getElementById('httpsinfo-error');
+        errEl.textContent = 'Error fetching HTTPS info.'; errEl.style.display = '';
+        document.getElementById('httpsinfo-loading').style.display = 'none';
+        document.getElementById('httpsinfo-content').style.display = '';
+      });
+  }
+  document.getElementById('nav-https-btn').addEventListener('click', function() {
+    var domain = document.getElementById('nav-domain-input').value.trim();
+    var port   = document.getElementById('nav-https-port').value.trim() || '443';
+    var errEl  = document.getElementById('nav-domain-error');
+    if (!/^[A-Za-z0-9._-]+$/.test(domain)) { errEl.textContent = 'Please enter a valid domain.'; errEl.style.display = ''; return; }
+    if (!/^\d+$/.test(port) || +port < 1 || +port > 65535) { errEl.textContent = 'Please enter a valid port.'; errEl.style.display = ''; return; }
+    errEl.style.display = 'none';
+    showHttpsInfo(domain, port);
+  });
+
   // Virani PCAP search modal
   (function() {
     var modal = document.getElementById('virani-modal');
@@ -583,16 +705,19 @@ document.addEventListener('DOMContentLoaded', function() {
             tr.appendChild(cell(it.found));
             tr.appendChild(cell(it.success));
             var dl = document.createElement('td');
+            dl.className = 'text-nowrap';
             if (it.has_pcap) {
               var a = document.createElement('a');
-              a.className = 'btn btn-sm btn-outline-secondary py-0';
+              a.className = 'btn btn-sm btn-outline-secondary py-0 me-1';
               a.textContent = 'PCAP';
               a.href = '/api/virani/cached/' + encodeURIComponent(remote) + '/pcap/' + encodeURIComponent(it.id);
               dl.appendChild(a);
-            } else {
-              dl.className = 'text-muted small';
-              dl.textContent = '(none)';
             }
+            var j = document.createElement('a');
+            j.className = 'btn btn-sm btn-outline-secondary py-0';
+            j.textContent = 'JSON';
+            j.href = '/api/virani/cached/' + encodeURIComponent(remote) + '/meta/' + encodeURIComponent(it.id);
+            dl.appendChild(j);
             tr.appendChild(dl);
             rowsEl.appendChild(tr);
           });

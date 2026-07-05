@@ -358,4 +358,55 @@ sub _make_app {
     like( $@, qr/no source\/destination IP/, 'dies without src/dest IP' );
 }
 
+# ---------------------------------------------------------------------------
+# 14.  GET /api/httpsinfo — validation + result rendering
+# ---------------------------------------------------------------------------
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $t = Test::Mojo->new('Lilith::Web');
+
+    # input validation (before any network work)
+    $t->get_ok('/api/httpsinfo/bad domain')->status_is( 400, 'invalid domain rejected' );
+    $t->get_ok('/api/httpsinfo/example.com?port=0')->status_is( 400, 'port 0 rejected' );
+    $t->get_ok('/api/httpsinfo/example.com?port=99999')->status_is( 400, 'port > 65535 rejected' );
+    $t->get_ok('/api/httpsinfo/example.com?port=abc')->status_is( 400, 'non-numeric port rejected' );
+
+    # mock the blocking gather so the route can be tested without a network
+    require Lilith::Web::Controller::Api;
+    no warnings qw(redefine once);
+    local *Lilith::Web::Controller::Api::_httpsinfo_gather = sub {
+        my ( $domain, $port ) = @_;
+        return {
+            domain          => $domain,
+            port            => $port,
+            http_status     => 301,
+            redirect_to     => 'https://www.example.com/',
+            tcp_connect_ms  => 10.0,
+            tls_handshake_ms => 20.0,
+            response_ms     => 30.0,
+            total_ms        => 60.0,
+            timed_out       => 0,
+            read_capped      => 0,
+            expired         => 0,
+            valid           => 1,
+            cert            => { cn => 'example.com', issuer => 'Test CA', fp_sha256 => 'AB:CD' },
+        };
+    };
+    use warnings qw(redefine once);
+
+    my $j = $t->get_ok('/api/httpsinfo/example.com?port=443')
+        ->status_is( 200, 'httpsinfo renders 200' )->tx->res->json;
+    is( $j->{http_status}, 301,                        'status code passed through' );
+    is( $j->{redirect_to}, 'https://www.example.com/', 'redirect target reported' );
+    is( $j->{valid},       1,                          'validity reported' );
+    is( $j->{expired},     0,                          'expiry reported' );
+    is( $j->{cert}{cn},    'example.com',              'cert details reported' );
+    is( $j->{total_ms},    60.0,                       'total timing reported' );
+}
+
 done_testing();
