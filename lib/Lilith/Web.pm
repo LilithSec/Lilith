@@ -179,6 +179,39 @@ sub startup {
 		}
 	);
 
+	# Remote Virani instances for PCAP retrieval. Each is a [virani.NAME] table
+	# with at least a 'url' pointing at a mojo-virani server. The PCAP download
+	# feature in the event view is enabled whenever one or more are configured.
+	my %virani;
+	if ( ref $toml->{virani} eq 'HASH' ) {
+		foreach my $name ( keys %{ $toml->{virani} } ) {
+			my $cfg = $toml->{virani}{$name};
+			next unless ref $cfg eq 'HASH' && defined $cfg->{url} && $cfg->{url} ne '';
+			$virani{$name} = $cfg;
+		}
+	}
+	$self->helper( virani_remotes => sub { \%virani } );
+	$self->helper( virani_enabled => sub { scalar( keys %virani ) ? 1 : 0 } );
+
+	# A ready Virani::Client for the named remote, or undef if unknown/unusable.
+	$self->helper(
+		virani_client_for => sub {
+			my ( $c, $name ) = @_;
+			my $cfg = ( defined $name && $virani{$name} ) ? $virani{$name} : undef;
+			return undef unless $cfg;
+			my $client = eval {
+				require Virani::Client;
+				Virani::Client->new(
+					url             => $cfg->{url},
+					apikey          => $cfg->{apikey},
+					timeout         => ( defined $cfg->{timeout} ? $cfg->{timeout} + 0 : 60 ),
+					verify_hostname => ( defined $cfg->{verify_hostname} ? ( $cfg->{verify_hostname} ? 1 : 0 ) : 1 ),
+				);
+			};
+			return $client;
+		}
+	);
+
 	# Referer checking — enforced only when allowed_referers is non-empty in the
 	# config.  Each entry is treated as a URL prefix; a request is allowed if its
 	# Referer header starts with any of the configured prefixes.
@@ -212,8 +245,10 @@ sub startup {
 	$r->get('/search')->to('search#index');
 	$r->get('/event/:table/:id')->to('event#view');
 	$r->get('/event/:table/:id/body/:which/zip')->to('event#body_zip');
+	$r->get('/event/:table/:id/pcap')->to('event#pcap');
 	$r->get('/api/ipinfo/*ip')->to('api#ipinfo');
 	$r->get('/api/domaininfo/*domain')->to('api#domaininfo');
+	$r->get('/api/virani/sets/:remote')->to('api#virani_sets');
 }
 
 1;

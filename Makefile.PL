@@ -47,7 +47,19 @@ my %WriteMakefileArgs = (
 	clean      => { FILES    => 'Lilith-*' },
 	META_MERGE => {
 		"meta-spec" => { version => 2 },
-		resources   => {
+		# Optional modules. Each is loaded lazily and only powers an optional
+		# feature; Lilith runs without them (the feature simply stays inactive).
+		prereqs => {
+			runtime => {
+				suggests => {
+					'Virani'                => '0',    # web: fetch flow PCAPs from remote Virani instances
+					'IP::Geolocation::MMDB' => '0',    # web: GeoIP country/subdivision in the IP columns and modal
+					'Mozilla::PublicSuffix' => '0',    # web: accurate registrable-domain reduction for whois
+					'Net::IP'               => '0',    # web: IPv6 reverse-DNS lookups in the IP info modal
+				},
+			},
+		},
+		resources => {
 			repository => {
 				type => 'git',
 				url  => 'git@github.com:LilithSec/Lilith.git',

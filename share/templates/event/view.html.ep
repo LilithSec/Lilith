@@ -27,8 +27,51 @@
       Event <span class="text-danger fw-bold">#<%= $id %></span>
       <span class="badge bg-secondary ms-2"><%= $cap_table %></span>
     </span>
-    <a href="/search?table=<%= $table %>&search=1" class="btn btn-sm btn-outline-secondary">&larr; Back</a>
+    <div class="d-flex align-items-center gap-2">
+      % if ($pcap_available) {
+      <div id="pcap-controls" class="d-flex align-items-center gap-1"
+           data-table="<%= $table %>" data-id="<%= $id %>"
+           data-filter="<%= $pcap_filter %>" data-start="<%= $pcap_start %>" data-end="<%= $pcap_end %>"
+           title="Fetch the flow PCAP from a remote Virani instance">
+        % if (@$pcap_remotes > 1) {
+        <select id="pcap-remote" class="form-select form-select-sm" style="width:auto" title="Virani instance">
+          % for my $r (@$pcap_remotes) {
+          <option value="<%= $r %>" <%= (defined $pcap_default && $pcap_default eq $r) ? 'selected' : '' %>><%= $r %></option>
+          % }
+        </select>
+        % } else {
+        <input type="hidden" id="pcap-remote" value="<%= $pcap_remotes->[0] %>">
+        % }
+        <select id="pcap-set" class="form-select form-select-sm" style="width:auto" title="PCAP set">
+          <option value="">(default set)</option>
+        </select>
+        <div class="btn-group btn-group-sm">
+          <button type="button" class="btn btn-outline-secondary" id="pcap-dl">Download PCAP</button>
+          <button type="button" class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split"
+                  data-bs-toggle="dropdown" aria-expanded="false"><span class="visually-hidden">Toggle</span></button>
+          <ul class="dropdown-menu dropdown-menu-end">
+            <li><a class="dropdown-item" href="#" id="pcap-local">Show local virani command</a></li>
+          </ul>
+        </div>
+      </div>
+      % }
+      <a href="/search?table=<%= $table %>&search=1" class="btn btn-sm btn-outline-secondary">&larr; Back</a>
+    </div>
   </div>
+  % if ($pcap_available) {
+  <div class="collapse border-bottom border-secondary" id="pcap-local-cmd">
+    <div class="p-2">
+      <div class="d-flex justify-content-between align-items-center">
+        <span class="text-muted small">Run on the box holding the PCAPs (adjust the set / output path as needed):</span>
+        <div class="d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary py-0" id="pcap-copy">Copy</button>
+          <button type="button" class="btn-close btn-close-white" id="pcap-cmd-close" aria-label="Close"></button>
+        </div>
+      </div>
+      <pre class="mb-0 mt-1 small font-monospace" id="pcap-cmd" style="white-space:pre-wrap"></pre>
+    </div>
+  </div>
+  % }
   <div class="p-0">
     <table class="table table-dark table-sm table-bordered mb-0">
       <tbody>
@@ -1498,5 +1541,62 @@ document.addEventListener('DOMContentLoaded', function() {
       window.showIpInfo(this.dataset.ip);
     });
   });
+
+  // PCAP download controls
+  (function() {
+    var box = document.getElementById('pcap-controls');
+    if (!box) { return; }
+    var remoteEl = document.getElementById('pcap-remote');
+    var setEl    = document.getElementById('pcap-set');
+
+    // Populate the set list from the selected remote's available sets.
+    function loadSets(remote) {
+      while (setEl.options.length > 1) { setEl.remove(1); }   // keep "(default set)"
+      if (!remote) { return; }
+      fetch('/api/virani/sets/' + encodeURIComponent(remote))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          (data.sets || []).forEach(function(s) {
+            var opt = document.createElement('option');
+            opt.value = s; opt.textContent = s;
+            if (s === data.default_set) { opt.textContent = s + ' (default)'; }
+            setEl.appendChild(opt);
+          });
+        })
+        .catch(function() { /* leave just the default option */ });
+    }
+    loadSets(remoteEl.value);
+    if (remoteEl.tagName === 'SELECT') {
+      remoteEl.addEventListener('change', function() { loadSets(this.value); });
+    }
+
+    // Download: fetch from the remote (streamed by the server).
+    document.getElementById('pcap-dl').addEventListener('click', function() {
+      var url = '/event/' + encodeURIComponent(box.dataset.table) + '/' + encodeURIComponent(box.dataset.id)
+              + '/pcap?remote=' + encodeURIComponent(remoteEl.value)
+              + '&set=' + encodeURIComponent(setEl.value);
+      window.location.href = url;
+    });
+
+    // Local command: show the virani invocation to run on the box with the PCAPs.
+    var reveal = document.getElementById('pcap-local-cmd');
+    var cmdEl  = document.getElementById('pcap-cmd');
+    document.getElementById('pcap-local').addEventListener('click', function(e) {
+      e.preventDefault();
+      var set = setEl.value;
+      var cmd = 'virani -s ' + box.dataset.start + ' -e ' + box.dataset.end
+              + (set ? ' --set ' + set : '')
+              + ' -w event-' + box.dataset.id + '.pcap'
+              + " -f '" + box.dataset.filter + "'";
+      cmdEl.textContent = cmd;
+      bootstrap.Collapse.getOrCreateInstance(reveal).show();
+    });
+    document.getElementById('pcap-copy').addEventListener('click', function() {
+      if (navigator.clipboard) { navigator.clipboard.writeText(cmdEl.textContent); }
+    });
+    document.getElementById('pcap-cmd-close').addEventListener('click', function() {
+      bootstrap.Collapse.getOrCreateInstance(reveal).hide();
+    });
+  })();
 });
 </script>

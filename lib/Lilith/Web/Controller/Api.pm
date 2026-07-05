@@ -1,8 +1,49 @@
 package Lilith::Web::Controller::Api;
 
 use Mojo::Base 'Mojolicious::Controller';
-use Net::DNS   ();
-use IO::Select ();
+use Net::DNS     ();
+use IO::Select   ();
+use Mojo::IOLoop ();
+use Mojo::JSON qw(decode_json);
+
+=head2 virani_sets
+
+Returns the PCAP sets available on a configured remote Virani instance as JSON
+C<< { sets => [ ... ], default_set => '...' } >>. The remote lookup runs in a
+subprocess so it does not block the event loop.
+
+=cut
+
+sub virani_sets {
+	my $self   = shift;
+	my $remote = $self->param('remote');
+
+	unless ( $self->virani_enabled && defined $remote && $self->virani_remotes->{$remote} ) {
+		return $self->render( json => { error => 'unknown virani instance' }, status => 400 );
+	}
+	my $client = $self->virani_client_for($remote);
+	unless ($client) {
+		return $self->render( json => { error => 'virani client unavailable' }, status => 400 );
+	}
+
+	$self->render_later;
+	Mojo::IOLoop->subprocess(
+		sub { return $client->get_sets; },    # raw JSON, dies on failure
+		sub {
+			my ( $subprocess, $err, $raw ) = @_;
+			if ($err) {
+				return $self->render( json => { error => 'set lookup failed' }, status => 502 );
+			}
+			my $data = eval { decode_json($raw) };
+			if ( $@ || ref $data ne 'HASH' ) {
+				return $self->render( json => { error => 'unparsable set list' }, status => 502 );
+			}
+			my @sets = ( ref $data->{sets} eq 'HASH' ) ? ( sort keys %{ $data->{sets} } ) : ();
+			$self->render( json => { sets => \@sets, default_set => $data->{default_set} } );
+		},
+	);
+	return;
+} ## end sub virani_sets
 
 =head2 _run_capture
 
@@ -49,6 +90,13 @@ sub _run_capture {
 	return $out;
 } ## end sub _run_capture
 
+=head2 ipinfo
+
+Reverse DNS + whois + GeoIP for an IP, rendered as JSON. The blocking lookups
+run in a subprocess so the web server's event loop stays responsive.
+
+=cut
+
 sub ipinfo {
 	my $self = shift;
 	my $ip   = $self->param('ip');
@@ -57,6 +105,30 @@ sub ipinfo {
 	unless ( defined $ip && $ip =~ /^[0-9a-fA-F:.]+$/ ) {
 		return $self->render( json => { error => 'Invalid IP' }, status => 400 );
 	}
+
+	$self->render_later;
+	Mojo::IOLoop->subprocess(
+		sub { return $self->_ipinfo_gather($ip); },
+		sub {
+			my ( $subprocess, $err, $result ) = @_;
+			if ( $err || ref $result ne 'HASH' ) {
+				return $self->render( json => { ip => $ip, error => 'lookup failed' }, status => 500 );
+			}
+			$self->render( json => $result );
+		},
+	);
+	return;
+} ## end sub ipinfo
+
+=head2 _ipinfo_gather
+
+Performs the blocking reverse-DNS, whois, and GeoIP lookups for an IP and
+returns the result hashref. Intended to be run inside a subprocess.
+
+=cut
+
+sub _ipinfo_gather {
+	my ( $self, $ip ) = @_;
 
 	# Reverse DNS via Net::DNS PTR lookup
 	my $rdns       = '';
@@ -106,18 +178,16 @@ sub ipinfo {
 		_flatten_geo( $record, '', \%geo );
 	}
 
-	$self->render(
-		json => {
-			ip         => $ip,
-			ptr_name   => $ptr_name,
-			rdns       => $rdns,
-			rdns_error => $rdns_error,
-			whois      => $whois,
-			geo        => \%geo,
-			geo_error  => $geo_error,
-		}
-	);
-} ## end sub ipinfo
+	return {
+		ip         => $ip,
+		ptr_name   => $ptr_name,
+		rdns       => $rdns,
+		rdns_error => $rdns_error,
+		whois      => $whois,
+		geo        => \%geo,
+		geo_error  => $geo_error,
+	};
+} ## end sub _ipinfo_gather
 
 =head2 _flatten_geo
 
@@ -228,6 +298,14 @@ sub _whois_domain {
 	return $domain;
 } ## end sub _whois_domain
 
+=head2 domaininfo
+
+DNS + whois + optional dnstracer for a domain, rendered as JSON. Serves from the
+optional cache when fresh; otherwise the blocking gather runs in a subprocess
+(keeping the event loop responsive) and the result is cached back in the parent.
+
+=cut
+
 sub domaininfo {
 	my $self   = shift;
 	my $domain = $self->param('domain');
@@ -246,6 +324,38 @@ sub domaininfo {
 			return $self->render( json => { %{ $entry->{data} }, cached => 1 } );
 		}
 	}
+
+	$self->render_later;
+	Mojo::IOLoop->subprocess(
+		sub { return $self->_domaininfo_gather($domain); },
+		sub {
+			my ( $subprocess, $err, $result ) = @_;
+			if ( $err || ref $result ne 'HASH' ) {
+				return $self->render( json => { domain => $domain, error => 'lookup failed' }, status => 500 );
+			}
+			if ( $cache_on && $ttl > 0 ) {
+				my $cache = $self->domaininfo_cache;
+				my $now   = time();
+				for my $k ( keys %{$cache} ) {    # prune expired entries opportunistically
+					delete $cache->{$k} if ( $now - $cache->{$k}{time} ) >= $ttl;
+				}
+				$cache->{$domain} = { time => $now, data => $result };
+			}
+			$self->render( json => $result );
+		},
+	);
+	return;
+} ## end sub domaininfo
+
+=head2 _domaininfo_gather
+
+Performs the blocking DNS/whois/dnstracer gather for a domain and returns the
+result hashref. Intended to be run inside a subprocess.
+
+=cut
+
+sub _domaininfo_gather {
+	my ( $self, $domain ) = @_;
 
 	my $whois_domain = _whois_domain($domain);
 
@@ -339,7 +449,7 @@ sub domaininfo {
 		}
 	} ## end while (%pending)
 
-	my $result = {
+	return {
 		domain          => $domain,
 		whois_domain    => $whois_domain,
 		dns             => \%dns,
@@ -349,17 +459,6 @@ sub domaininfo {
 		dnstracer_error => '',
 		cached          => 0,
 	};
-
-	if ( $cache_on && $ttl > 0 ) {
-		my $cache = $self->domaininfo_cache;
-		my $now   = time();
-		for my $k ( keys %{$cache} ) {    # prune expired entries opportunistically
-			delete $cache->{$k} if ( $now - $cache->{$k}{time} ) >= $ttl;
-		}
-		$cache->{$domain} = { time => $now, data => $result };
-	}
-
-	$self->render( json => $result );
-} ## end sub domaininfo
+} ## end sub _domaininfo_gather
 
 1;

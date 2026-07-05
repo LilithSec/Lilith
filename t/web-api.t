@@ -327,4 +327,35 @@ sub _make_app {
         'stale entry is older than the ttl (would be refetched, not served)' );
 }
 
+# ---------------------------------------------------------------------------
+# 13.  _virani_fetch_args — BPF filter + time window for a PCAP fetch
+# ---------------------------------------------------------------------------
+
+{
+    require Lilith::Web::Controller::Event;
+    no warnings 'once';
+    my $args = \&Lilith::Web::Controller::Event::_virani_fetch_args;
+
+    my $event = {
+        src_ip     => '192.168.0.5',
+        dest_ip    => '20.64.105.235',
+        src_port   => '40000',
+        dest_port  => '443',
+        flow_start => '2026-07-04T12:00:00',
+        timestamp  => '2026-07-04T12:00:05',
+    };
+    my ( $filter, $start, $end ) = $args->( $event, 60 );
+    like( $filter, qr/host 192\.168\.0\.5 and host 20\.64\.105\.235/, 'BPF filter built from src/dest IPs' );
+    like( $filter, qr/port 40000 or port 443/, 'BPF filter includes the ports' );
+    is( $end->epoch - $start->epoch, 125, 'window is the 5s flow plus a 60s buffer each side' );
+
+    # ports omitted when not both numeric
+    my ($f2) = $args->( { %$event, dest_port => 'foo' }, 60 );
+    unlike( $f2, qr/port /, 'no port clause when a port is non-numeric' );
+
+    # missing IPs is fatal (caught by the controller as a 400)
+    eval { $args->( { flow_start => 't', timestamp => 't' }, 60 ) };
+    like( $@, qr/no source\/destination IP/, 'dies without src/dest IP' );
+}
+
 done_testing();

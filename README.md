@@ -144,6 +144,38 @@ Note: previously instances were plain top-level tables (e.g. `[suricata-eve]`).
 Those are now ignored — nest them under `[eves.NAME]`. `lilith -a run` will warn
 about any stray top-level table it finds.
 
+### Remote Virani instances
+
+Remote [Virani](https://metacpan.org/pod/Virani) instances for PCAP retrieval
+are defined as sub tables under the `virani` table, i.e. `[virani.NAME]`. When
+one or more are configured, the web event view shows a "Download PCAP" control
+for Suricata events; the instance whose name matches the alert's `instance` is
+pre-selected, and any configured instance can be chosen.
+
+| Variable        | Required | Description                                                              |
+|-----------------|----------|--------------------------------------------------------------------------|
+| url             | yes      | URL of the remote `mojo-virani` server.                                  |
+| apikey          | no       | API key, if the remote requires one.                                     |
+| set             | no       | PCAP set to request; the remote's default is used if omitted.            |
+| type            | no       | Filter type: `tcpdump`, `tshark`, or `bpf2tshark`.                       |
+| timeout         | no       | Fetch timeout in seconds. Default `60`.                                  |
+| verify_hostname | no       | Verify the TLS certificate for HTTPS URLs. Default `true`.               |
+
+```toml
+[virani.inari-pie]
+url="https://virani.example.net:7000/"
+apikey="…"
+set="default"
+```
+
+The PCAP is fetched for the flow (the event's src/dest IP and ports, over the
+flow window widened by 60 seconds on each end) and streamed back as a download.
+The "Download PCAP" control lets you pick which set to pull from (the list is
+queried live from the selected remote), and a dropdown also offers a ready-made
+`virani` command to run on the box holding the PCAPs instead of downloading.
+Note: this exposes packet captures to anyone who can reach the web UI — put it
+behind `allowed_referers` and/or a reverse proxy with authentication.
+
 ## Options
 
 ### SYNOPSIS

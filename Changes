@@ -9,6 +9,19 @@ Revision history for Lilith
 		   LIKE support per item.
 		 - lilith -a search: -c may be given multiple times or as a comma
 		   separated list to match/negate several classifications.
+		 - web event view: added a "Download PCAP" control that fetches the
+		   flow PCAP from a remote Virani instance and streams it back.
+		   Remotes are configured as [virani.NAME] tables; the feature is
+		   enabled when one or more are present, and the instance matching
+		   the alert is pre-selected. The fetch runs in a subprocess so it
+		   does not block the web server's event loop. The control also lets
+		   you pick which set to pull from (queried live from the remote) or
+		   copy a ready-made virani command to run locally on the PCAP box.
+		 - web: the /api/ipinfo and /api/domaininfo lookups now run their
+		   blocking work in a subprocess, so a slow whois/DNS lookup no
+		   longer stalls the web server's event loop.
+		 - Lilith->run() now warns and skips a malformed EVE instance
+		   instead of dying, so one bad entry no longer stops the rest.
 
 3.0.0	2026-06-25/01:00
 		 - use DBIx::Class::Migration

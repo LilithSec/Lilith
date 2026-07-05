@@ -229,6 +229,110 @@ sub _make_app {
 }
 
 # ---------------------------------------------------------------------------
+# 3a.  Virani PCAP download — GET /event/:t/:id/pcap
+# ---------------------------------------------------------------------------
+
+# With no [virani.*] configured the feature is off: no button, route is 404.
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $t = Test::Mojo->new('Lilith::Web');
+
+    no warnings qw(redefine once);
+    local *Lilith::search = sub {
+        return [ { id => 5, instance => 'inari-pie', src_ip => '1.1.1.1', dest_ip => '2.2.2.2', raw => '{}' } ];
+    };
+    use warnings qw(redefine once);
+
+    $t->get_ok('/event/suricata/5')->status_is(200)
+        ->element_exists_not( 'div#pcap-controls', 'no PCAP controls when no virani configured' );
+    $t->get_ok('/event/suricata/5/pcap?remote=inari-pie')
+        ->status_is( 404, 'pcap route is 404 when virani is not configured' );
+}
+
+# With [virani.*] configured: button appears, and the route streams the PCAP.
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    print $fh qq{[virani.inari-pie]\nurl = "https://v.example/"\napikey = "k"\nset = "default"\n};
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $t = Test::Mojo->new('Lilith::Web');
+
+    require Virani::Client;
+    no warnings qw(redefine once);
+    local *Lilith::search = sub {
+        return [
+            {   id         => 9,
+                instance   => 'inari-pie',
+                src_ip     => '192.168.0.5',
+                dest_ip    => '20.64.105.235',
+                src_port   => '40000',
+                dest_port  => '443',
+                flow_start => '2026-07-04T12:00:00',
+                timestamp  => '2026-07-04T12:00:05',
+                raw        => '{}',
+            }
+        ];
+    };
+    # The fetch runs in a subprocess, so it (and any capture) happens in a child;
+    # the mock just writes the pcap bytes the parent will stream back.
+    local *Virani::Client::fetch = sub {
+        my ( $self, %o ) = @_;
+        open( my $w, '>:raw', $o{file} ); print $w "PCAPBYTES"; close($w);
+        return '{}';
+    };
+    use warnings qw(redefine once);
+
+    # PCAP controls present in the event view (remote hidden input, set select,
+    # download button, and the local-command menu item)
+    $t->get_ok('/event/suricata/9')->status_is(200)
+        ->element_exists( 'div#pcap-controls',    'PCAP controls present when configured' )
+        ->element_exists( 'button#pcap-dl',       'download button present' )
+        ->element_exists( 'select#pcap-set',      'set selector present' )
+        ->element_exists( 'a#pcap-local',         'local-command menu item present' )
+        ->element_exists( '#pcap-local-cmd button#pcap-cmd-close', 'local-command area has a close button' );
+
+    # unknown remote is rejected
+    $t->get_ok('/event/suricata/9/pcap?remote=nope')
+        ->status_is( 400, 'unknown virani remote is 400' );
+
+    # non-suricata table is rejected
+    $t->get_ok('/event/cape/9/pcap?remote=inari-pie')
+        ->status_is( 400, 'pcap on a non-suricata table is 400' );
+
+    # happy path streams the pcap (fetched in a subprocess, streamed by the parent)
+    $t->get_ok('/event/suricata/9/pcap?remote=inari-pie')
+        ->status_is( 200, 'pcap download renders 200' )
+        ->header_is( 'Content-Type' => 'application/vnd.tcpdump.pcap', 'served as a pcap' )
+        ->header_is( 'Content-Disposition' => 'attachment; filename="event-9.pcap"', 'pcap download filename' )
+        ->content_is( 'PCAPBYTES', 'the fetched pcap bytes are streamed back' );
+
+    # an explicit set is validated
+    $t->get_ok('/event/suricata/9/pcap?remote=inari-pie&set=bad%20set')
+        ->status_is( 400, 'a malformed set is rejected' );
+
+    # the sets endpoint returns the remote's available sets
+    no warnings qw(redefine once);
+    local *Virani::Client::get_sets = sub {
+        return '{"sets":{"http":{},"dns":{}},"default_set":"http"}';
+    };
+    use warnings qw(redefine once);
+
+    $t->get_ok('/api/virani/sets/inari-pie')
+        ->status_is( 200, 'sets endpoint renders 200' )
+        ->json_is( '/default_set', 'http', 'default_set reported' )
+        ->json_is( '/sets',        [ 'dns', 'http' ], 'sets listed (sorted)' );
+
+    $t->get_ok('/api/virani/sets/nope')
+        ->status_is( 400, 'sets endpoint rejects an unknown remote' );
+}
+
+# ---------------------------------------------------------------------------
 # 3b.  HTTP body password-protected zip download — GET /event/:t/:id/body/:w/zip
 # ---------------------------------------------------------------------------
 
