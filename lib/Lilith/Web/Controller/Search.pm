@@ -43,7 +43,19 @@ sub index {
 		my @size      = _split_list( $self->param('size') );
 		my @task      = _split_list( $self->param('task') );
 		my @class     = grep { defined($_) && $_ ne '' } @{ $self->every_param('class') };
-		push( @class, map { '!' . $_ } grep { defined($_) && $_ ne '' } @{ $self->every_param('class_not') } );
+		my @class_not = grep { defined($_) && $_ ne '' } @{ $self->every_param('class_not') };
+
+		# On a fresh form (nothing submitted yet) default to excluding GPCD. This
+		# mirrors the default selection shown by the template's class_not dropdown
+		# so the actual query matches the filter the user sees -- and, crucially,
+		# so auto-refresh (which re-fetches this same URL) keeps excluding it
+		# rather than streaming in new GPCD events.
+		if ( !$self->param('search') ) {
+			push( @class_not, 'Generic Protocol Command Decode' )
+				unless grep { $_ eq 'Generic Protocol Command Decode' } @class_not;
+		}
+
+		push( @class, map { '!' . $_ } @class_not );
 
 		eval {
 			$results = $self->lilith->search(
