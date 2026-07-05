@@ -132,55 +132,20 @@ sub pcap {
 		return $self->render( text => 'cannot build PCAP query: ' . $why, status => 400 );
 	}
 
-	# The fetch is a blocking network round-trip that can be slow and return a
-	# large file, so run it in a subprocess to keep the event loop responsive.
-	# The child fetches to a temp file, reads it back, and returns the bytes.
-	my $tmp = File::Temp->new( SUFFIX => '.pcap' );
-	$self->render_later;
-	Mojo::IOLoop->subprocess(
+	return $self->virani_stream_pcap(
 		sub {
-			my $err;
-			eval {
-				# Virani::Client->fetch prints metadata to STDOUT; discard it.
-				local *STDOUT;
-				open( STDOUT, '>', \my $ignore ) or 1;
-				$client->fetch(
-					start  => $start,
-					end    => $end,
-					filter => $filter,
-					file   => $tmp->filename,
-					( ( defined $set && $set ne '' ) ? ( set => $set ) : () ),
-					( defined $cfg->{type} ? ( type => $cfg->{type} ) : () ),
-				);
-			};
-			$err = $@;
-			my $bytes;
-			if ( !$err && open( my $fh, '<:raw', $tmp->filename ) ) {
-				local $/;
-				$bytes = <$fh>;
-				close($fh);
-			}
-			return ( $err, $bytes );
+			my $file = shift;
+			$client->fetch(
+				start  => $start,
+				end    => $end,
+				filter => $filter,
+				file   => $file,
+				( ( defined $set && $set ne '' ) ? ( set  => $set )         : () ),
+				( defined $cfg->{type}           ? ( type => $cfg->{type} ) : () ),
+			);
 		},
-		sub {
-			my ( $subprocess, $sp_err, $fetch_err, $bytes ) = @_;
-			undef $tmp;    # keep the temp file alive until the child has read it
-			if ($sp_err) {
-				return $self->render( text => 'PCAP subprocess failed: ' . $sp_err, status => 500 );
-			}
-			if ($fetch_err) {
-				( my $why = $fetch_err ) =~ s/\s+\z//;
-				return $self->render( text => 'PCAP fetch failed: ' . $why, status => 502 );
-			}
-			if ( !defined $bytes ) {
-				return $self->render( text => 'failed to read fetched PCAP', status => 500 );
-			}
-			$self->res->headers->content_type('application/vnd.tcpdump.pcap');
-			$self->res->headers->content_disposition( 'attachment; filename="event-' . $id . '.pcap"' );
-			$self->render( data => $bytes );
-		},
+		'event-' . $id . '.pcap',
 	);
-	return;
 } ## end sub pcap
 
 =head2 _virani_fetch_args

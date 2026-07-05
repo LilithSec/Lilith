@@ -1549,25 +1549,10 @@ document.addEventListener('DOMContentLoaded', function() {
     var remoteEl = document.getElementById('pcap-remote');
     var setEl    = document.getElementById('pcap-set');
 
-    // Populate the set list from the selected remote's available sets.
-    function loadSets(remote) {
-      while (setEl.options.length > 1) { setEl.remove(1); }   // keep "(default set)"
-      if (!remote) { return; }
-      fetch('/api/virani/sets/' + encodeURIComponent(remote))
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          (data.sets || []).forEach(function(s) {
-            var opt = document.createElement('option');
-            opt.value = s; opt.textContent = s;
-            if (s === data.default_set) { opt.textContent = s + ' (default)'; }
-            setEl.appendChild(opt);
-          });
-        })
-        .catch(function() { /* leave just the default option */ });
-    }
-    loadSets(remoteEl.value);
+    // Set list comes from the shared loader in the layout.
+    window.loadViraniSets(setEl, remoteEl.value);
     if (remoteEl.tagName === 'SELECT') {
-      remoteEl.addEventListener('change', function() { loadSets(this.value); });
+      remoteEl.addEventListener('change', function() { window.loadViraniSets(setEl, this.value); });
     }
 
     // Download: fetch from the remote (streamed by the server).

@@ -1,10 +1,12 @@
 package Lilith::Web;
 
 use Mojo::Base 'Mojolicious';
-use Mojo::File  qw(curfile);
-use TOML        qw(from_toml);
-use File::Slurp qw(read_file);
-use Lilith      ();
+use Mojo::File   qw(curfile);
+use TOML         qw(from_toml);
+use File::Slurp  qw(read_file);
+use File::Temp   ();
+use Mojo::IOLoop ();
+use Lilith       ();
 
 # When run from a checkout, share/ lives three directories up from
 # lib/Lilith/Web.pm and takes priority so an installed copy of the dist
@@ -193,6 +195,11 @@ sub startup {
 	$self->helper( virani_remotes => sub { \%virani } );
 	$self->helper( virani_enabled => sub { scalar( keys %virani ) ? 1 : 0 } );
 
+	# Whether the standalone Virani PCAP search (arbitrary filter/time range) may
+	# download through the web server. When off, that tool only builds the local
+	# virani command. Off by default because it exposes arbitrary captures.
+	$self->helper( virani_search_enable => sub { $toml->{virani_search_enable} ? 1 : 0 } );
+
 	# A ready Virani::Client for the named remote, or undef if unknown/unusable.
 	$self->helper(
 		virani_client_for => sub {
@@ -208,7 +215,61 @@ sub startup {
 					verify_hostname => ( defined $cfg->{verify_hostname} ? ( $cfg->{verify_hostname} ? 1 : 0 ) : 1 ),
 				);
 			};
+			if ($@) {
+				warn( 'Lilith: failed to create Virani::Client for "' . $name . '": ' . $@ );
+			}
 			return $client;
+		}
+	);
+
+	# Run $fetch_code->($tmpfile) (which fetches a PCAP into that path via some
+	# Virani::Client method) and stream the result back as a download named
+	# $download_name. The blocking fetch runs in a subprocess so the event loop
+	# stays responsive. Shared by the per-event download, the standalone search,
+	# and cached-PCAP retrieval.
+	$self->helper(
+		virani_stream_pcap => sub {
+			my ( $c, $fetch_code, $download_name ) = @_;
+
+			my $tmp = File::Temp->new( SUFFIX => '.pcap' );
+			$c->render_later;
+			Mojo::IOLoop->subprocess(
+				sub {
+					my $err;
+					eval {
+						# Virani::Client fetch methods print to STDOUT; discard it.
+						local *STDOUT;
+						open( STDOUT, '>', \my $ignore ) or 1;
+						$fetch_code->( $tmp->filename );
+					};
+					$err = $@;
+					my $bytes;
+					if ( !$err && open( my $fh, '<:raw', $tmp->filename ) ) {
+						local $/;
+						$bytes = <$fh>;
+						close($fh);
+					}
+					return ( $err, $bytes );
+				},
+				sub {
+					my ( $subprocess, $sp_err, $fetch_err, $bytes ) = @_;
+					undef $tmp;    # keep the temp file alive until the child has read it
+					if ($sp_err) {
+						return $c->render( text => 'PCAP subprocess failed: ' . $sp_err, status => 500 );
+					}
+					if ($fetch_err) {
+						( my $why = $fetch_err ) =~ s/\s+\z//;
+						return $c->render( text => 'PCAP fetch failed: ' . $why, status => 502 );
+					}
+					if ( !defined $bytes ) {
+						return $c->render( text => 'failed to read fetched PCAP', status => 500 );
+					}
+					$c->res->headers->content_type('application/vnd.tcpdump.pcap');
+					$c->res->headers->content_disposition( 'attachment; filename="' . $download_name . '"' );
+					$c->render( data => $bytes );
+				},
+			);
+			return;
 		}
 	);
 
@@ -249,6 +310,9 @@ sub startup {
 	$r->get('/api/ipinfo/*ip')->to('api#ipinfo');
 	$r->get('/api/domaininfo/*domain')->to('api#domaininfo');
 	$r->get('/api/virani/sets/:remote')->to('api#virani_sets');
+	$r->get('/api/virani/pcap')->to('api#virani_pcap');
+	$r->get('/api/virani/cached/:remote')->to('api#virani_cached_list');
+	$r->get('/api/virani/cached/:remote/pcap/:id')->to('api#virani_cached_pcap');
 }
 
 1;

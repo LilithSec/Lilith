@@ -5,6 +5,7 @@ use Net::DNS     ();
 use IO::Select   ();
 use Mojo::IOLoop ();
 use Mojo::JSON qw(decode_json);
+use Time::Piece ();
 
 =head2 virani_sets
 
@@ -32,7 +33,8 @@ sub virani_sets {
 		sub {
 			my ( $subprocess, $err, $raw ) = @_;
 			if ($err) {
-				return $self->render( json => { error => 'set lookup failed' }, status => 502 );
+				chomp( my $why = $err );
+				return $self->render( json => { error => 'set lookup failed: ' . $why }, status => 502 );
 			}
 			my $data = eval { decode_json($raw) };
 			if ( $@ || ref $data ne 'HASH' ) {
@@ -44,6 +46,154 @@ sub virani_sets {
 	);
 	return;
 } ## end sub virani_sets
+
+=head2 virani_pcap
+
+Standalone Virani PCAP search: fetches a capture for an arbitrary BPF filter and
+time range (epoch seconds) from a configured remote and streams it back. Gated
+by virani_search_enable, since it exposes arbitrary captures.
+
+=cut
+
+sub virani_pcap {
+	my $self = shift;
+
+	unless ( $self->virani_search_enable ) {
+		return $self->render( text => 'virani search is disabled', status => 404 );
+	}
+
+	my $remote = $self->param('remote');
+	my $cfg    = ( defined $remote ) ? $self->virani_remotes->{$remote} : undef;
+	my $client = $self->virani_client_for($remote);
+	unless ( $cfg && $client ) {
+		return $self->render( text => 'unknown or unusable virani instance', status => 400 );
+	}
+
+	my $filter = $self->param('filter');
+	unless ( defined $filter && $filter =~ /\S/ ) {
+		return $self->render( text => 'a filter is required', status => 400 );
+	}
+	if ( length($filter) > 1024 ) {
+		return $self->render( text => 'filter too long', status => 400 );
+	}
+
+	my $set = $self->param('set');
+	if ( defined $set && $set ne '' ) {
+		return $self->render( text => 'invalid set', status => 400 ) unless $set =~ /^[A-Za-z0-9._-]+$/;
+	} else {
+		$set = $cfg->{set};
+	}
+
+	my $s = $self->param('start');
+	my $e = $self->param('end');
+	unless ( defined $s && $s =~ /^[0-9]+$/ && defined $e && $e =~ /^[0-9]+$/ ) {
+		return $self->render( text => 'start and end must be epoch seconds', status => 400 );
+	}
+	if ( $s >= $e ) {
+		return $self->render( text => 'start must be before end', status => 400 );
+	}
+
+	return $self->virani_stream_pcap(
+		sub {
+			my $file = shift;
+			$client->fetch(
+				start  => Time::Piece->new( $s + 0 ),
+				end    => Time::Piece->new( $e + 0 ),
+				filter => $filter,
+				file   => $file,
+				( ( defined $set && $set ne '' ) ? ( set  => $set )         : () ),
+				( defined $cfg->{type}           ? ( type => $cfg->{type} ) : () ),
+			);
+		},
+		'virani-' . $s . '-' . $e . '.pcap',
+	);
+} ## end sub virani_pcap
+
+=head2 virani_cached_list
+
+Lists the most recent (up to 50) cached searches on a remote Virani instance,
+enriched with the found/success counts from each one's metadata. Gated by
+virani_search_enable. Runs in a subprocess.
+
+=cut
+
+sub virani_cached_list {
+	my $self = shift;
+
+	unless ( $self->virani_search_enable ) {
+		return $self->render( json => { error => 'virani search is disabled' }, status => 404 );
+	}
+	my $remote = $self->param('remote');
+	my $client = ( defined $remote && $self->virani_remotes->{$remote} ) ? $self->virani_client_for($remote) : undef;
+	unless ($client) {
+		return $self->render( json => { error => 'unknown virani instance' }, status => 400 );
+	}
+
+	$self->render_later;
+	Mojo::IOLoop->subprocess(
+		sub {
+			my $list = decode_json( $client->list_cached );
+			return [] unless ref $list eq 'ARRAY';
+
+			# newest first, capped at 50
+			my @sorted = sort { ( $b->{start_s} // 0 ) <=> ( $a->{start_s} // 0 ) } @{$list};
+			@sorted = @sorted[ 0 .. 49 ] if @sorted > 50;
+
+			# the list lacks the found/success counts; pull them from metadata
+			for my $item (@sorted) {
+				my $meta = eval { decode_json( $client->fetch_cached( id => $item->{id}, meta_only => 1 ) ) };
+				if ($@) {
+					warn( 'Lilith: fetching cached metadata for "' . $item->{id} . '" failed: ' . $@ );
+				} elsif ( ref $meta eq 'HASH' ) {
+					$item->{found}   = $meta->{pcap_count};
+					$item->{success} = $meta->{success_count};
+				}
+			}
+			return \@sorted;
+		},
+		sub {
+			my ( $subprocess, $err, $list ) = @_;
+			if ($err) {
+				chomp( my $why = $err );
+				return $self->render( json => { error => 'cached list lookup failed: ' . $why }, status => 502 );
+			}
+			if ( ref $list ne 'ARRAY' ) {
+				return $self->render( json => { error => 'cached list lookup returned no data' }, status => 502 );
+			}
+			$self->render( json => { cached => $list } );
+		},
+	);
+	return;
+} ## end sub virani_cached_list
+
+=head2 virani_cached_pcap
+
+Streams a cached PCAP by its cache ID from a remote Virani instance. Gated by
+virani_search_enable.
+
+=cut
+
+sub virani_cached_pcap {
+	my $self = shift;
+
+	unless ( $self->virani_search_enable ) {
+		return $self->render( text => 'virani search is disabled', status => 404 );
+	}
+	my $remote = $self->param('remote');
+	my $id     = $self->param('id');
+	my $client = ( defined $remote && $self->virani_remotes->{$remote} ) ? $self->virani_client_for($remote) : undef;
+	unless ($client) {
+		return $self->render( text => 'unknown virani instance', status => 400 );
+	}
+	unless ( defined $id && $id =~ /^[A-Za-z0-9._:-]+$/ ) {
+		return $self->render( text => 'invalid cache id', status => 400 );
+	}
+
+	return $self->virani_stream_pcap(
+		sub { my $file = shift; $client->fetch_cached( id => $id, file => $file ); },
+		'virani-cached-' . $id . '.pcap',
+	);
+} ## end sub virani_cached_pcap
 
 =head2 _run_capture
 

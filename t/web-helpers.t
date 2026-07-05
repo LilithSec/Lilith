@@ -134,6 +134,39 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 }
 
 # ---------------------------------------------------------------------------
+# 5c.  virani config helpers
+# ---------------------------------------------------------------------------
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $app = Test::Mojo->new('Lilith::Web')->app;
+
+    is( $app->virani_enabled(),        0, 'virani disabled when no [virani.*] configured' );
+    is( $app->virani_search_enable(),  0, 'virani search disabled by default' );
+    is_deeply( $app->virani_remotes(), {}, 'no virani remotes by default' );
+}
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    print $fh "virani_search_enable = true\n";
+    print $fh qq{[virani.r1]\nurl = "https://v.example/"\n};
+    print $fh qq{[virani.bad]\napikey = "k"\n};    # no url => skipped
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $app = Test::Mojo->new('Lilith::Web')->app;
+
+    is( $app->virani_enabled(),       1, 'virani enabled with a configured remote' );
+    is( $app->virani_search_enable(), 1, 'virani_search_enable read from config' );
+    is_deeply( [ keys %{ $app->virani_remotes() } ], ['r1'], 'url-less remote is skipped' );
+}
+
+# ---------------------------------------------------------------------------
 # 6.  country_flag helper — code to regional-indicator emoji
 # ---------------------------------------------------------------------------
 

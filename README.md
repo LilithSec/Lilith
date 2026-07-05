@@ -162,11 +162,25 @@ pre-selected, and any configured instance can be chosen.
 | verify_hostname | no       | Verify the TLS certificate for HTTPS URLs. Default `true`.               |
 
 ```toml
+# allow the standalone "Virani" search to download through the web server;
+# off by default since it exposes arbitrary captures. When off, that tool only
+# builds a local virani command to copy.
+virani_search_enable = true
+
 [virani.inari-pie]
 url="https://virani.example.net:7000/"
 apikey="…"
 set="default"
 ```
+
+When any Virani instance is configured, a **Virani** dropdown appears in the
+navbar. **PCAP Search** opens a search for an arbitrary BPF filter and time
+range — it always offers a ready-to-copy local `virani` command, and when
+`virani_search_enable` is true it also offers a direct download through the web
+server. When `virani_search_enable` is true, a **Cached Searches** entry also
+appears, listing the most recent (up to 50) cached searches on a remote — start,
+end, size, set, filter, and found/success counts — with a per-row download of the
+cached PCAP.
 
 The PCAP is fetched for the flow (the event's src/dest IP and ports, over the
 flow window widened by 60 seconds on each end) and streamed back as a download.

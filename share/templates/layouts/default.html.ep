@@ -95,6 +95,20 @@
         </div>
       </div>
 
+      % if ($self->virani_enabled) {
+      <!-- Virani -->
+      <div class="dropdown">
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                id="nav-virani-toggle" data-bs-toggle="dropdown" aria-expanded="false">Virani</button>
+        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="nav-virani-toggle">
+          <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#virani-modal">PCAP Search</a></li>
+          % if ($self->virani_search_enable) {
+          <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#virani-cache-modal">Cached Searches</a></li>
+          % }
+        </ul>
+      </div>
+      % }
+
     </div><!-- /d-flex -->
   </div>
 </nav>
@@ -164,11 +178,137 @@
   </div>
 </div>
 
+% if ($self->virani_enabled) {
+<!-- Virani PCAP Search Modal -->
+<div class="modal fade" id="virani-modal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content bg-dark text-light border-secondary">
+      <div class="modal-header py-2 border-secondary">
+        <h6 class="modal-title">Virani PCAP Search</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-2 mb-2">
+          <div class="col-md-6">
+            <label class="form-label small text-muted mb-1">Virani instance</label>
+            <select id="virani-remote" class="form-select form-select-sm">
+              % for my $r (sort keys %{ $self->virani_remotes }) {
+              <option value="<%= $r %>"><%= $r %></option>
+              % }
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small text-muted mb-1">Set</label>
+            <select id="virani-set" class="form-select form-select-sm">
+              <option value="">(default set)</option>
+            </select>
+          </div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small text-muted mb-1">Time range</label>
+          <div class="btn-group btn-group-sm mb-1" role="group">
+            <button type="button" class="btn btn-outline-secondary virani-range" data-mins="5">Last 5m</button>
+            <button type="button" class="btn btn-outline-secondary virani-range" data-mins="15">15m</button>
+            <button type="button" class="btn btn-outline-secondary virani-range" data-mins="60">1h</button>
+            <button type="button" class="btn btn-outline-secondary virani-range" data-mins="1440">24h</button>
+          </div>
+          <div class="row g-2 mb-1 align-items-center">
+            <div class="col-auto text-muted small" style="width:38px">Start</div>
+            <div class="col"><input type="date" id="virani-start-date" class="form-control form-control-sm"></div>
+            <div class="col-auto"><input type="text" id="virani-start-time" class="form-control form-control-sm"
+                 placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" inputmode="numeric" maxlength="5" style="width:78px"></div>
+          </div>
+          <div class="row g-2 align-items-center">
+            <div class="col-auto text-muted small" style="width:38px">End</div>
+            <div class="col"><input type="date" id="virani-end-date" class="form-control form-control-sm"></div>
+            <div class="col-auto"><input type="text" id="virani-end-time" class="form-control form-control-sm"
+                 placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" inputmode="numeric" maxlength="5" style="width:78px"></div>
+          </div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small text-muted mb-1">BPF filter</label>
+          <input type="text" id="virani-filter" class="form-control form-control-sm"
+                 placeholder="host 1.2.3.4 and port 443">
+        </div>
+        <div id="virani-error" class="text-warning small" style="display:none"></div>
+        <div class="mt-2" id="virani-cmd-wrap" style="display:none">
+          <div class="d-flex justify-content-between align-items-center">
+            <span class="text-muted small">Run on the box holding the PCAPs (adjust the set / output path as needed):</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary py-0" id="virani-copy">Copy</button>
+          </div>
+          <pre class="mb-0 mt-1 small font-monospace" id="virani-cmd" style="white-space:pre-wrap"></pre>
+        </div>
+      </div>
+      <div class="modal-footer py-2 border-secondary">
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="virani-show-cmd">Show local command</button>
+        % if ($self->virani_search_enable) {
+        <button type="button" class="btn btn-sm btn-danger" id="virani-download">Download PCAP</button>
+        % }
+      </div>
+    </div>
+  </div>
+</div>
+% }
+
+% if ($self->virani_enabled && $self->virani_search_enable) {
+<!-- Virani Cached Searches Modal -->
+<div class="modal fade" id="virani-cache-modal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content bg-dark text-light border-secondary">
+      <div class="modal-header py-2 border-secondary">
+        <h6 class="modal-title">Virani Cached Searches</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex align-items-end gap-2 mb-2">
+          <div>
+            <label class="form-label small text-muted mb-1">Virani instance</label>
+            <select id="virani-cache-remote" class="form-select form-select-sm" style="width:auto">
+              % for my $r (sort keys %{ $self->virani_remotes }) {
+              <option value="<%= $r %>"><%= $r %></option>
+              % }
+            </select>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="virani-cache-refresh">Refresh</button>
+          <span class="text-muted small ms-1" id="virani-cache-status"></span>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-dark table-sm table-hover table-bordered mb-0">
+            <thead class="table-secondary">
+              <tr><th>Start</th><th>End</th><th>Size</th><th>Set</th><th>Filter</th>
+                  <th>Found</th><th>Success</th><th></th></tr>
+            </thead>
+            <tbody id="virani-cache-rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+% }
+
 <div class="container-fluid mt-3">
   %= content
 </div>
 <script src="/vendor/bootstrap-5.3.3/js/bootstrap.bundle.min.js"></script>
 <script>
+// Populate a <select> with the PCAP sets available on a Virani remote. Shared by
+// the event view and the Virani search modal. Keeps the first option (default).
+window.loadViraniSets = function(selectEl, remote) {
+  while (selectEl.options.length > 1) { selectEl.remove(1); }
+  if (!remote) { return; }
+  fetch('/api/virani/sets/' + encodeURIComponent(remote))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      (data.sets || []).forEach(function(s) {
+        var opt = document.createElement('option');
+        opt.value = s;
+        opt.textContent = (s === data.default_set) ? s + ' (default)' : s;
+        selectEl.appendChild(opt);
+      });
+    })
+    .catch(function() { /* leave just the default option */ });
+};
 document.addEventListener('DOMContentLoaded', function() {
 
   // Go to Event
@@ -314,6 +454,155 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('nav-domain-input').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') { document.getElementById('nav-domain-go-btn').click(); }
   });
+
+  // Virani PCAP search modal
+  (function() {
+    var modal = document.getElementById('virani-modal');
+    if (!modal) { return; }
+    var remoteEl   = document.getElementById('virani-remote');
+    var setEl      = document.getElementById('virani-set');
+    var startDate  = document.getElementById('virani-start-date');
+    var startTime  = document.getElementById('virani-start-time');
+    var endDate    = document.getElementById('virani-end-date');
+    var endTime    = document.getElementById('virani-end-time');
+    var filterEl   = document.getElementById('virani-filter');
+    var errEl      = document.getElementById('virani-error');
+    var cmdWrap    = document.getElementById('virani-cmd-wrap');
+    var cmdEl      = document.getElementById('virani-cmd');
+
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    // Combine a date field (YYYY-MM-DD) and a 24-hour HH:MM time field into an
+    // epoch, interpreting them in the browser's local timezone. null if invalid.
+    function epochOf(dateEl, timeEl) {
+      if (!dateEl.value || !/^\d{1,2}:\d{2}$/.test(timeEl.value)) { return null; }
+      var t = new Date(dateEl.value + 'T' + timeEl.value);
+      return isNaN(t.getTime()) ? null : Math.floor(t.getTime() / 1000);
+    }
+    function setRange(mins) {
+      var now = new Date(), then = new Date(now.getTime() - mins * 60000);
+      startDate.value = then.getFullYear() + '-' + pad(then.getMonth() + 1) + '-' + pad(then.getDate());
+      startTime.value = pad(then.getHours()) + ':' + pad(then.getMinutes());
+      endDate.value   = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+      endTime.value   = pad(now.getHours()) + ':' + pad(now.getMinutes());
+    }
+    document.querySelectorAll('.virani-range').forEach(function(b) {
+      b.addEventListener('click', function() { setRange(parseInt(this.dataset.mins, 10)); });
+    });
+
+    modal.addEventListener('show.bs.modal', function() {
+      if (!startDate.value || !endDate.value) { setRange(15); }
+      window.loadViraniSets(setEl, remoteEl.value);
+    });
+    remoteEl.addEventListener('change', function() { window.loadViraniSets(setEl, this.value); });
+
+    function query() {
+      errEl.style.display = 'none';
+      var s = epochOf(startDate, startTime), e = epochOf(endDate, endTime);
+      if (!filterEl.value.trim()) { errEl.textContent = 'A BPF filter is required.'; errEl.style.display = ''; return null; }
+      if (s === null || e === null) { errEl.textContent = 'Valid start and end times (HH:MM, 24h) are required.'; errEl.style.display = ''; return null; }
+      if (s >= e) { errEl.textContent = 'Start must be before end.'; errEl.style.display = ''; return null; }
+      return { remote: remoteEl.value, set: setEl.value, start: s, end: e, filter: filterEl.value.trim() };
+    }
+
+    document.getElementById('virani-show-cmd').addEventListener('click', function() {
+      var q = query(); if (!q) { return; }
+      cmdEl.textContent = 'virani -s ' + q.start + ' -e ' + q.end + (q.set ? ' --set ' + q.set : '')
+        + " -w search.pcap -f '" + q.filter + "'";
+      cmdWrap.style.display = '';
+    });
+    var dlBtn = document.getElementById('virani-download');
+    if (dlBtn) {
+      dlBtn.addEventListener('click', function() {
+        var q = query(); if (!q) { return; }
+        window.location.href = '/api/virani/pcap?remote=' + encodeURIComponent(q.remote)
+          + '&set=' + encodeURIComponent(q.set) + '&start=' + q.start + '&end=' + q.end
+          + '&filter=' + encodeURIComponent(q.filter);
+      });
+    }
+    document.getElementById('virani-copy').addEventListener('click', function() {
+      if (navigator.clipboard) { navigator.clipboard.writeText(cmdEl.textContent); }
+    });
+  })();
+
+  // Virani cached searches modal
+  (function() {
+    var modal = document.getElementById('virani-cache-modal');
+    if (!modal) { return; }
+    var remoteEl = document.getElementById('virani-cache-remote');
+    var rowsEl   = document.getElementById('virani-cache-rows');
+    var statusEl = document.getElementById('virani-cache-status');
+
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    function fmtTime(epoch) {
+      if (!epoch) { return ''; }
+      var d = new Date(epoch * 1000);
+      return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+        + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    }
+    function fmtSize(n) {
+      if (n == null || n === '') { return ''; }
+      var u = ['B', 'KB', 'MB', 'GB', 'TB'], i = 0;
+      n = Number(n);
+      while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+      return (i === 0 ? n : n.toFixed(1)) + ' ' + u[i];
+    }
+    function cell(text, cls) {
+      var e = document.createElement('td');
+      e.textContent = (text == null ? '' : text);
+      if (cls) { e.className = cls; }
+      return e;
+    }
+
+    function load() {
+      var remote = remoteEl.value;
+      rowsEl.innerHTML = '';
+      statusEl.textContent = 'Loading…';
+      fetch('/api/virani/cached/' + encodeURIComponent(remote))
+        .then(function(r) {
+          return r.text().then(function(body) {
+            var data = null;
+            try { data = JSON.parse(body); } catch (e) { /* non-JSON error body */ }
+            return { ok: r.ok, status: r.status, data: data };
+          });
+        })
+        .then(function(res) {
+          if (!res.ok) {
+            statusEl.textContent = (res.data && res.data.error) ? res.data.error : ('request failed: HTTP ' + res.status);
+            return;
+          }
+          var items = (res.data && res.data.cached) || [];
+          statusEl.textContent = items.length + ' cached search' + (items.length === 1 ? '' : 'es')
+            + (items.length >= 50 ? ' (newest 50)' : '');
+          items.forEach(function(it) {
+            var tr = document.createElement('tr');
+            tr.appendChild(cell(fmtTime(it.start_s)));
+            tr.appendChild(cell(fmtTime(it.end_s)));
+            tr.appendChild(cell(fmtSize(it.final_size)));
+            tr.appendChild(cell(it.set));
+            tr.appendChild(cell(it.filter, 'font-monospace small'));
+            tr.appendChild(cell(it.found));
+            tr.appendChild(cell(it.success));
+            var dl = document.createElement('td');
+            if (it.has_pcap) {
+              var a = document.createElement('a');
+              a.className = 'btn btn-sm btn-outline-secondary py-0';
+              a.textContent = 'PCAP';
+              a.href = '/api/virani/cached/' + encodeURIComponent(remote) + '/pcap/' + encodeURIComponent(it.id);
+              dl.appendChild(a);
+            } else {
+              dl.className = 'text-muted small';
+              dl.textContent = '(none)';
+            }
+            tr.appendChild(dl);
+            rowsEl.appendChild(tr);
+          });
+        })
+        .catch(function(e) { statusEl.textContent = 'Failed to load cached searches: ' + e; });
+    }
+    modal.addEventListener('show.bs.modal', load);
+    remoteEl.addEventListener('change', load);
+    document.getElementById('virani-cache-refresh').addEventListener('click', load);
+  })();
 
 });
 </script>

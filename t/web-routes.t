@@ -333,6 +333,114 @@ sub _make_app {
 }
 
 # ---------------------------------------------------------------------------
+# 3a-ii.  Standalone Virani PCAP search — modal gating + GET /api/virani/pcap
+# ---------------------------------------------------------------------------
+
+# Search DOWNLOAD disabled (default): navbar modal offers only the command; the
+# general pcap route is a 404.
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    print $fh qq{[virani.r1]\nurl = "https://v.example/"\n};
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $t = Test::Mojo->new('Lilith::Web');
+
+    $t->get_ok('/search')->status_is(200)
+        ->element_exists( 'button#nav-virani-toggle', 'Virani navbar dropdown present' )
+        ->element_exists( 'a.dropdown-item[data-bs-target="#virani-modal"]', 'PCAP Search dropdown item present' )
+        ->element_exists( 'div#virani-modal',       'Virani search modal present' )
+        ->element_exists( 'button#virani-show-cmd', 'show-command button present' )
+        ->element_exists_not( 'button#virani-download', 'download button hidden when search disabled' )
+        ->element_exists_not( 'a.dropdown-item[data-bs-target="#virani-cache-modal"]',
+        'Cached Searches item hidden when search disabled' )
+        ->element_exists_not( 'div#virani-cache-modal', 'cached modal absent when search disabled' );
+
+    $t->get_ok('/api/virani/pcap?remote=r1&filter=host+1.2.3.4&start=1000&end=2000')
+        ->status_is( 404, 'general pcap route is 404 when search is disabled' );
+    $t->get_ok('/api/virani/cached/r1')
+        ->status_is( 404, 'cached list is 404 when search is disabled' );
+}
+
+# Search enabled: download button shown and the route streams.
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    print $fh "virani_search_enable = true\n";
+    print $fh qq{[virani.r1]\nurl = "https://v.example/"\n};
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $t = Test::Mojo->new('Lilith::Web');
+
+    $t->get_ok('/search')->status_is(200)
+        ->element_exists( 'button#virani-download', 'download button shown when search enabled' )
+        ->element_exists( 'a.dropdown-item[data-bs-target="#virani-cache-modal"]',
+        'Cached Searches item shown when search enabled' )
+        ->element_exists( 'div#virani-cache-modal',  'cached modal present when search enabled' )
+        ->element_exists( 'tbody#virani-cache-rows', 'cached results table present' );
+
+    require Virani::Client;
+    no warnings qw(redefine once);
+    local *Virani::Client::fetch = sub {
+        my ( $self, %o ) = @_;
+        open( my $w, '>:raw', $o{file} ); print $w 'SEARCHPCAP'; close($w);
+        return '{}';
+    };
+    my $md5 = 'a' x 32;
+    local *Virani::Client::list_cached = sub {
+        return encode_json(
+            [   { id => "setA-tcpdump-1000-2000-$md5", set => 'setA', type => 'tcpdump',
+                    start_s => 1000, end_s => 2000, final_size => 1234, filter => 'host 1.1.1.1', has_pcap => 1 },
+                { id => "setA-tcpdump-3000-4000-$md5", set => 'setA', type => 'tcpdump',
+                    start_s => 3000, end_s => 4000, final_size => 5678, filter => 'port 443', has_pcap => 1 },
+            ]
+        );
+    };
+    local *Virani::Client::fetch_cached = sub {
+        my ( $self, %o ) = @_;
+        return encode_json( { pcap_count => 10, success_count => 7 } ) if $o{meta_only};
+        open( my $w, '>:raw', $o{file} ); print $w 'CACHEDPCAP'; close($w);
+        return '{}';
+    };
+    use warnings qw(redefine once);
+
+    # cached list is newest-first and enriched with found/success counts
+    my $cached = $t->get_ok('/api/virani/cached/r1')->status_is( 200, 'cached list renders 200' )->tx->res->json;
+    is( scalar( @{ $cached->{cached} } ), 2, 'two cached searches listed' );
+    is( $cached->{cached}[0]{start_s}, 3000, 'cached list is newest-first' );
+    is( $cached->{cached}[0]{found},   10,   'found count enriched from metadata' );
+    is( $cached->{cached}[0]{success}, 7,    'success count enriched from metadata' );
+
+    # cached pcap streams
+    $t->get_ok( '/api/virani/cached/r1/pcap/setA-tcpdump-3000-4000-' . $md5 )
+        ->status_is( 200, 'cached pcap streams 200' )
+        ->header_is( 'Content-Type' => 'application/vnd.tcpdump.pcap', 'served as a pcap' )
+        ->content_is( 'CACHEDPCAP', 'cached pcap bytes streamed' );
+
+    # cached pcap validation
+    $t->get_ok('/api/virani/cached/nope/pcap/x')->status_is( 400, 'cached pcap unknown remote rejected' );
+    $t->get_ok('/api/virani/cached/r1/pcap/bad%20id')->status_is( 400, 'cached pcap invalid id rejected' );
+
+    $t->get_ok('/api/virani/pcap?remote=r1&filter=host+1.2.3.4&start=1000&end=2000')
+        ->status_is( 200, 'general pcap search streams 200' )
+        ->header_is( 'Content-Type' => 'application/vnd.tcpdump.pcap', 'served as a pcap' )
+        ->header_is( 'Content-Disposition' => 'attachment; filename="virani-1000-2000.pcap"', 'download filename' )
+        ->content_is( 'SEARCHPCAP', 'streamed pcap bytes' );
+
+    # validation
+    $t->get_ok('/api/virani/pcap?remote=r1&filter=&start=1000&end=2000')
+        ->status_is( 400, 'empty filter rejected' );
+    $t->get_ok('/api/virani/pcap?remote=r1&filter=x&start=2000&end=1000')
+        ->status_is( 400, 'start after end rejected' );
+    $t->get_ok('/api/virani/pcap?remote=nope&filter=x&start=1&end=2')
+        ->status_is( 400, 'unknown remote rejected' );
+    $t->get_ok('/api/virani/pcap?remote=r1&filter=x&start=notepoch&end=2')
+        ->status_is( 400, 'non-epoch times rejected' );
+}
+
+# ---------------------------------------------------------------------------
 # 3b.  HTTP body password-protected zip download — GET /event/:t/:id/body/:w/zip
 # ---------------------------------------------------------------------------
 

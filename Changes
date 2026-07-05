@@ -17,6 +17,12 @@ Revision history for Lilith
 		   does not block the web server's event loop. The control also lets
 		   you pick which set to pull from (queried live from the remote) or
 		   copy a ready-made virani command to run locally on the PCAP box.
+		 - web: a "Virani" navbar dropdown opens either a PCAP search for an
+		   arbitrary BPF filter and time range, or (when virani_search_enable
+		   is on) a browser of the remote's most recent cached searches with
+		   per-row cached-PCAP download. The search always builds a copyable
+		   local virani command; direct download through the web server is
+		   gated by the virani_search_enable config option (off by default).
 		 - web: the /api/ipinfo and /api/domaininfo lookups now run their
 		   blocking work in a subprocess, so a slow whois/DNS lookup no
 		   longer stalls the web server's event loop.
