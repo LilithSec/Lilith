@@ -865,11 +865,28 @@ Below are complex items.
     - ip
     - port
 
-    # will become "and ( src_ip != '192.168.1.2' or dest_ip != '192.168.1.2' )"
-    ip => '192.16.1.2'
+Each matches either the source or destination column. A plain value is
+ORed across the two columns; a '!'-negated value is ANDed (so it must be
+absent from both sides). port additionally accepts the numeric comparison
+operators (<, <=, >, >=). Several values may be given at once, either as an
+arrayref or as a comma separated string; positive items are ORed together
+and negated items are ANDed.
 
-    # will become "and ( src_port != '22' or dest_port != '22' )"
+    # will become "and ( src_ip = '192.168.1.2' or dest_ip = '192.168.1.2' )"
+    ip => '192.168.1.2'
+
+    # will become "and ( src_ip != '192.168.1.2' and dest_ip != '192.168.1.2' )"
+    ip => '!192.168.1.2'
+
+    # will become "and ( src_port = '22' or dest_port = '22' )"
     port => '22'
+
+    # will become "and ( src_port != '22' and dest_port != '22' )"
+    port => '!22'
+
+    # will become "and ( src_port = '22' or dest_port = '22'
+    #                    or src_port = '80' or dest_port = '80' )"
+    port => '22,80'
 
 =cut
 
@@ -984,7 +1001,11 @@ sub search {
 			if ( defined( $found[0] ) && !defined( $found[1] ) ) {
 				$search->{$item} = $found[0];
 			} elsif ( defined( $found[0] ) && defined( $found[1] ) ) {
-				$search->{$item} = [ '-and' => \@found ];
+				# The terms must be spread as separate elements after '-and'; a
+				# single nested arrayref ( [ '-and' => \@found ] ) is instead ORed
+				# by SQL::Abstract, so e.g. "!22, !443" became "!= 22 OR != 443",
+				# which is true for every row and filtered nothing.
+				$search->{$item} = [ '-and' => @found ];
 			}
 		} ## end if ( defined( $opts{$item} ) )
 	} ## end foreach my $item (@numeric)
@@ -993,21 +1014,85 @@ sub search {
 	# more complex items
 	#
 
-	if ( defined( $opts{ip} ) ) {
-		if ( !defined( $search->{'-and'} ) ) {
-			$search->{'-and'} = [];
+	if ( defined( $opts{ip} ) && $opts{ip} ne '' ) {
+		my @tokens = ref $opts{ip} eq 'ARRAY' ? @{ $opts{ip} } : split( /\s*,\s*/, $opts{ip} );
+
+		# Positive addresses are ORed across src/dest and across items; a
+		# '!'-negated address must be absent on BOTH sides, so it becomes an
+		# AND ( src != X AND dest != X ) and each is ANDed into the query.
+		my @positive;
+		my @negative;
+		foreach my $token (@tokens) {
+			next if !defined($token) || $token eq '';
+			if ( $token =~ s/^\!// ) {
+				push( @negative,
+					{ '-and' => [ { src_ip => { '!=' => $token } }, { dest_ip => { '!=' => $token } } ] } );
+			} else {
+				push( @positive, { src_ip => { '=' => $token } }, { dest_ip => { '=' => $token } } );
+			}
 		}
-		$search->{'-and'} = [ { '-or' => { src_ip => { '=', $opts{ip} }, dest_ip => { '=', $opts{ip} } } } ];
+
+		if ( @positive || @negative ) {
+			if ( !defined( $search->{'-and'} ) ) {
+				$search->{'-and'} = [];
+			}
+			push( @{ $search->{'-and'} }, { '-or' => \@positive } ) if @positive;
+			push( @{ $search->{'-and'} }, @negative );
+		}
 	}
 
-	if ( defined( $opts{port} ) ) {
-		if ( !defined( $search->{'-and'} ) ) {
-			$search->{'-and'} = [];
+	if ( defined( $opts{port} ) && $opts{port} ne '' ) {
+		my @tokens = ref $opts{port} eq 'ARRAY' ? @{ $opts{port} } : split( /\s*,\s*/, $opts{port} );
+
+		# Positive ports are ORed across src/dest and across items; a negated
+		# port must be absent on BOTH sides, so it becomes an AND
+		# ( src != 22 AND dest != 22 ) and each is ANDed into the query.
+		my @positive;
+		my @negative;
+		foreach my $token (@tokens) {
+			$token =~ s/[\ \t]//g;
+			next if $token eq '';
+
+			my $equality;
+			my $number;
+			if ( $token =~ /^([0-9]+)$/ ) {
+				$equality = '=';
+				$number   = $1;
+			} elsif ( $token =~ /^\<\=([0-9]+)$/ ) {
+				$equality = '<=';
+				$number   = $1;
+			} elsif ( $token =~ /^\<([0-9]+)$/ ) {
+				$equality = '<';
+				$number   = $1;
+			} elsif ( $token =~ /^\>\=([0-9]+)$/ ) {
+				$equality = '>=';
+				$number   = $1;
+			} elsif ( $token =~ /^\>([0-9]+)$/ ) {
+				$equality = '>';
+				$number   = $1;
+			} elsif ( $token =~ /^\!([0-9]+)$/ ) {
+				$equality = '!=';
+				$number   = $1;
+			} else {
+				die( '"' . $token . '" does not appear to be a valid item for a port search' );
+			}
+
+			if ( $equality eq '!=' ) {
+				push( @negative,
+					{ '-and' => [ { src_port => { $equality => $number } }, { dest_port => { $equality => $number } } ] }
+				);
+			} else {
+				push( @positive, { src_port => { $equality => $number } }, { dest_port => { $equality => $number } } );
+			}
+		} ## end foreach my $token (@tokens)
+
+		if ( @positive || @negative ) {
+			if ( !defined( $search->{'-and'} ) ) {
+				$search->{'-and'} = [];
+			}
+			push( @{ $search->{'-and'} }, { '-or' => \@positive } ) if @positive;
+			push( @{ $search->{'-and'} }, @negative );
 		}
-		push(
-			@{ $search->{'-and'} },
-			[ { '-or' => { src_port => { '=', $opts{port} }, dest_port => { '=', $opts{port} } } } ]
-		);
 	}
 
 	#

@@ -133,4 +133,152 @@ $captured_search = undef;
 $lilith->search( table => 'suricata', class => [ 'Misc Attack', 'Exploit Attempt' ], port => '22' );
 is( scalar( @{ $captured_search->{'-and'} } ), 2, 'class clauses are pushed alongside the port -and clause' );
 
+# ---------------------------------------------------------------------------
+# numeric items (dest_port / src_port / ...)
+# ---------------------------------------------------------------------------
+
+sub port_search {
+	my ($dest_port) = @_;
+	$captured_search = undef;
+	$lilith->search( table => 'suricata', dest_port => $dest_port );
+	return $captured_search;
+}
+
+$search = port_search( ['22'] );
+is_deeply( $search->{dest_port}, { '=' => '22' }, 'single dest_port becomes an equality' );
+
+$search = port_search( ['!22'] );
+is_deeply( $search->{dest_port}, { '!=' => '22' }, 'single negated dest_port becomes a !=' );
+
+# The regression: multiple negated ports must be ANDed, not ORed. "!22, !443"
+# ORed is true for every row (a 443 row still satisfies "!= 22"), so nothing
+# was filtered.
+$search = port_search( [ '!22', '!443' ] );
+is_deeply(
+	$search->{dest_port},
+	[ '-and' => { '!=' => '22' }, { '!=' => '443' } ],
+	'multiple negated dest_ports are ANDed together (not ORed)'
+);
+
+$search = port_search( [ '22', '!443' ] );
+is_deeply(
+	$search->{dest_port},
+	[ '-and' => { '=' => '22' }, { '!=' => '443' } ],
+	'positive and negated dest_ports are ANDed together'
+);
+
+# Confirm the generated SQL actually excludes a negated port, end to end.
+{
+	require SQL::Abstract;
+	my $sa = SQL::Abstract->new;
+	my ( $sql, @bind ) = $sa->where( { dest_port => port_search( [ '!22', '!443' ] )->{dest_port} } );
+	like( $sql, qr/dest_port\s*!=\s*\?\s+AND\s+dest_port\s*!=\s*\?/i, 'negated ports render as ANDed !=' );
+	is_deeply( \@bind, [ '22', '443' ], 'both negated port values are bound' );
+}
+
+# ---------------------------------------------------------------------------
+# the complex "port" item (matches src_port or dest_port)
+# ---------------------------------------------------------------------------
+
+sub complex_port_search {
+	my ($port) = @_;
+	$captured_search = undef;
+	$lilith->search( table => 'suricata', port => $port );
+	return $captured_search->{'-and'};
+}
+
+is_deeply(
+	complex_port_search('22'),
+	[ { '-or' => [ { src_port => { '=' => '22' } }, { dest_port => { '=' => '22' } } ] } ],
+	'plain port is ORed across src_port and dest_port'
+);
+
+# The regression: "!22" used to be passed straight through as an integer,
+# blowing up Postgres. It must parse the '!' and, because it is a negation,
+# AND across both columns so a match on either side is excluded.
+is_deeply(
+	complex_port_search('!22'),
+	[ { '-and' => [ { src_port => { '!=' => '22' } }, { dest_port => { '!=' => '22' } } ] } ],
+	'negated port is ANDed across src_port and dest_port with a !='
+);
+
+is_deeply(
+	complex_port_search('>=1024'),
+	[ { '-or' => [ { src_port => { '>=' => '1024' } }, { dest_port => { '>=' => '1024' } } ] } ],
+	'port accepts numeric comparison operators'
+);
+
+# The regression: several comma separated ports used to die ("22,80" is not a
+# valid single port). Positive items are ORed across both columns and items.
+is_deeply(
+	complex_port_search('22,80'),
+	[
+		{
+			'-or' => [
+				{ src_port => { '=' => '22' } }, { dest_port => { '=' => '22' } },
+				{ src_port => { '=' => '80' } }, { dest_port => { '=' => '80' } },
+			]
+		}
+	],
+	'multiple ports are ORed across src_port and dest_port'
+);
+
+# Mixed positive and negated: positives ORed as a group, each negation ANDed in.
+is_deeply(
+	complex_port_search('80,!22'),
+	[
+		{ '-or'  => [ { src_port => { '=' => '80' } }, { dest_port => { '=' => '80' } } ] },
+		{ '-and' => [ { src_port => { '!=' => '22' } }, { dest_port => { '!=' => '22' } } ] },
+	],
+	'a mix of positive and negated ports ORs the positives and ANDs the negation'
+);
+
+# And end to end: the negated port really renders as ANDed != in SQL.
+{
+	my $sa = SQL::Abstract->new;
+	my ( $sql, @bind ) = $sa->where( { '-and' => complex_port_search('!22') } );
+	like(
+		$sql,
+		qr/src_port\s*!=\s*\?\s+AND\s+dest_port\s*!=\s*\?/i,
+		'negated port renders as ( src_port != ? AND dest_port != ? )'
+	);
+	is_deeply( \@bind, [ '22', '22' ], 'negated port value is bound for both columns' );
+}
+
+# ---------------------------------------------------------------------------
+# the complex "ip" item (matches src_ip or dest_ip)
+# ---------------------------------------------------------------------------
+
+sub complex_ip_search {
+	my ($ip) = @_;
+	$captured_search = undef;
+	$lilith->search( table => 'suricata', ip => $ip );
+	return $captured_search->{'-and'};
+}
+
+is_deeply(
+	complex_ip_search('192.168.1.2'),
+	[ { '-or' => [ { src_ip => { '=' => '192.168.1.2' } }, { dest_ip => { '=' => '192.168.1.2' } } ] } ],
+	'plain ip is ORed across src_ip and dest_ip'
+);
+
+is_deeply(
+	complex_ip_search('!192.168.1.2'),
+	[ { '-and' => [ { src_ip => { '!=' => '192.168.1.2' } }, { dest_ip => { '!=' => '192.168.1.2' } } ] } ],
+	'negated ip is ANDed across src_ip and dest_ip with a !='
+);
+
+is_deeply(
+	complex_ip_search('10.0.0.1,10.0.0.2'),
+	[
+		{
+			'-or' => [
+				{ src_ip => { '=' => '10.0.0.1' } }, { dest_ip => { '=' => '10.0.0.1' } },
+				{ src_ip => { '=' => '10.0.0.2' } }, { dest_ip => { '=' => '10.0.0.2' } },
+			]
+		}
+	],
+	'multiple ips are ORed across src_ip and dest_ip'
+);
+
 done_testing();

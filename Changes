@@ -41,6 +41,17 @@ Revision history for Lilith
 		   detail (type, size, revoked/testing flags, hashes, etc.).
 		 - Lilith->run() now warns and skips a malformed EVE instance
 		   instead of dying, so one bad entry no longer stops the rest.
+		 - search(): fix multi-value numeric filters (src_port, dest_port,
+		   gid, sid, rev, size, malscore, task). Multiple terms were ORed
+		   instead of ANDed, so e.g. dest_port "!22, !443" matched every
+		   row (a 443 row still satisfies "!= 22") and filtered nothing.
+		 - search(): the complex "port" and "ip" filters now understand a
+		   '!' prefix (and port the <, <=, >, >= operators) and accept
+		   several comma separated values. Previously "!22" was passed
+		   straight to Postgres as an integer and errored, and "22,80"
+		   died as an invalid port. Positive values are ORed across the
+		   source/destination columns and items; a negated value is ANDed
+		   so it is excluded from both sides.
 
 3.0.0	2026-06-25/01:00
 		 - use DBIx::Class::Migration
