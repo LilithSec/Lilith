@@ -231,12 +231,12 @@
   </div>
 </div>
 
-<!-- Global Mail Auth Modal (SPF / DMARC / DKIM) -->
+<!-- Global Mail Info Modal (SPF / DMARC / DKIM) -->
 <div class="modal fade" id="mailinfo-modal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content bg-dark text-light border-secondary">
       <div class="modal-header py-2 border-secondary">
-        <h6 class="modal-title" id="mailinfo-modal-title">Mail Auth</h6>
+        <h6 class="modal-title" id="mailinfo-modal-title">Mail Info</h6>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -626,7 +626,7 @@ document.addEventListener('DOMContentLoaded', function() {
     showHttpsInfo(domain, port);
   });
 
-  // Mail auth (SPF / DMARC / DKIM). Reuses httpsRow for the detail rows.
+  // Mail Info (SPF / DMARC / DKIM). Reuses httpsRow for the detail rows.
   var mailModal = new bootstrap.Modal(document.getElementById('mailinfo-modal'));
   function badge(el, text, cls) {
     el.innerHTML = '';
@@ -642,7 +642,7 @@ document.addEventListener('DOMContentLoaded', function() {
     return ({ reject: 'bg-success', quarantine: 'bg-warning text-dark', none: 'bg-secondary' })[p] || 'bg-secondary';
   }
   function showMailInfo(domain, ip, selector) {
-    document.getElementById('mailinfo-modal-title').textContent = 'Mail Auth — ' + domain;
+    document.getElementById('mailinfo-modal-title').textContent = 'Mail Info — ' + domain;
     document.getElementById('mailinfo-loading').style.display = '';
     document.getElementById('mailinfo-content').style.display = 'none';
     mailModal.show();
@@ -732,7 +732,7 @@ document.addEventListener('DOMContentLoaded', function() {
       })
       .catch(function() {
         var errEl = document.getElementById('mailinfo-error');
-        errEl.textContent = 'Error fetching mail auth info.'; errEl.style.display = '';
+        errEl.textContent = 'Error fetching mail info.'; errEl.style.display = '';
         document.getElementById('mailinfo-loading').style.display = 'none';
         document.getElementById('mailinfo-content').style.display = '';
       });
