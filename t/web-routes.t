@@ -69,7 +69,15 @@ sub _make_app {
         ->element_exists( 'span#ar-status', 'auto-refresh status indicator is present' )
         ->element_exists( 'input#nav-https-port[value="443"]', 'HTTPS port input defaults to 443' )
         ->element_exists( 'button#nav-https-btn',  'HTTPS button present in Domain Info' )
-        ->element_exists( 'div#httpsinfo-modal',   'HTTPS info modal present' );
+        ->element_exists( 'div#httpsinfo-modal',   'HTTPS info modal present' )
+        ->element_exists( 'input#nav-mail-ip',       'SPF IP input present in Domain Info' )
+        ->element_exists( 'input#nav-mail-selector', 'DKIM selector input present in Domain Info' )
+        ->element_exists( 'button#nav-mail-btn',     'Mail button present in Domain Info' )
+        ->element_exists( 'div#mailinfo-modal',      'Mail auth modal present' )
+        ->element_exists( 'tbody#mailinfo-mx',       'MX section present' )
+        ->element_exists( 'tbody#mailinfo-spf',      'SPF section present' )
+        ->element_exists( 'tbody#mailinfo-dmarc',    'DMARC section present' )
+        ->element_exists( 'div#mailinfo-dkim',       'DKIM section present' );
 
     # search param triggers a DB query; no real DB so it stashes an error but
     # still renders 200

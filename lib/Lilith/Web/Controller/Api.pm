@@ -12,6 +12,10 @@ use IO::Socket::IP ();
 use IO::Socket::SSL qw(SSL_VERIFY_PEER SSL_VERIFY_NONE);
 use Net::SSLeay ();
 use Mozilla::CA ();
+use Mail::SPF            ();
+use Mail::DMARC::PurePerl ();
+use Mail::DMARC::Policy  ();
+use Mail::DKIM::PublicKey ();
 
 =head2 virani_sets
 
@@ -838,5 +842,309 @@ sub _httpsinfo_gather {
 
 	return \%r;
 } ## end sub _httpsinfo_gather
+
+=head2 mailinfo
+
+Combined mail-authentication check for a domain: SPF (record + summary, plus an
+evaluation when an IP is given), DMARC (record + policy, with the organizational
+domain tree walk), and DKIM (the given selector, or a probe of common selectors).
+Runs in a subprocess.
+
+=cut
+
+sub mailinfo {
+	my $self     = shift;
+	my $domain   = $self->param('domain');
+	my $ip       = $self->param('ip');
+	my $selector = $self->param('selector');
+
+	unless ( defined $domain && $domain =~ /^[A-Za-z0-9._-]+$/ ) {
+		return $self->render( json => { error => 'Invalid domain' }, status => 400 );
+	}
+	if ( defined $ip && $ip ne '' ) {
+		return $self->render( json => { error => 'Invalid IP' }, status => 400 )
+			unless $ip =~ /^[0-9a-fA-F:.]+$/;
+	} else { $ip = undef; }
+	if ( defined $selector && $selector ne '' ) {
+		return $self->render( json => { error => 'Invalid selector' }, status => 400 )
+			unless $selector =~ /^[A-Za-z0-9._-]+$/;
+	} else { $selector = undef; }
+
+	$self->render_later;
+	Mojo::IOLoop->subprocess(
+		sub { return _mailinfo_gather( $domain, $ip, $selector ) },
+		sub {
+			my ( $subprocess, $err, $result ) = @_;
+			if ( $err || ref $result ne 'HASH' ) {
+				chomp( my $why = ( $err // 'lookup failed' ) );
+				return $self->render( json => { domain => $domain, error => 'mailinfo failed: ' . $why },
+					status => 500 );
+			}
+			$self->render( json => $result );
+		},
+	);
+	return;
+} ## end sub mailinfo
+
+=head2 _mailinfo_gather
+
+Gathers SPF, DMARC, and DKIM for a domain. Intended to be run in a subprocess.
+
+=cut
+
+sub _mailinfo_gather {
+	my ( $domain, $ip, $selector ) = @_;
+	return {
+		domain => $domain,
+		mx     => _mx_gather($domain),
+		spf    => _spfinfo_gather( $domain, $ip ),
+		dmarc  => _dmarc_gather($domain),
+		dkim   => _dkim_gather( $domain, $selector ),
+	};
+}
+
+=head2 _mx_gather
+
+Returns the domain's MX records as an arrayref of { preference, exchange },
+sorted by preference.
+
+=cut
+
+sub _mx_gather {
+	my ($domain) = @_;
+	my @mx;
+	eval {
+		my $resolver = Net::DNS::Resolver->new( udp_timeout => 3, tcp_timeout => 3, retry => 1 );
+		my $reply    = $resolver->query( $domain, 'MX' );
+		if ($reply) {
+			for my $rr ( $reply->answer ) {
+				next unless $rr->type eq 'MX';
+				push( @mx, { preference => $rr->preference + 0, exchange => $rr->exchange } );
+			}
+		}
+	};
+	@mx = sort { $a->{preference} <=> $b->{preference} } @mx;
+	return \@mx;
+} ## end sub _mx_gather
+
+=head2 _fetch_txt
+
+Returns the first TXT record at $name matching $re, or undef. Uses a short
+timeout so probing many names does not hang.
+
+=cut
+
+sub _fetch_txt {
+	my ( $name, $re ) = @_;
+	my $rec;
+	eval {
+		my $resolver = Net::DNS::Resolver->new( udp_timeout => 3, tcp_timeout => 3, retry => 1 );
+		my $reply    = $resolver->query( $name, 'TXT' );
+		if ($reply) {
+			for my $rr ( $reply->answer ) {
+				next unless $rr->type eq 'TXT';
+				my $txt = join( '', $rr->txtdata );
+				if ( $txt =~ $re ) { $rec = $txt; last; }
+			}
+		}
+	};
+	return $rec;
+}
+
+=head2 _dmarc_gather
+
+DMARC record and parsed policy for a domain, walking up to the organizational
+domain (via Mail::DMARC) when the exact domain has no record.
+
+=cut
+
+sub _dmarc_gather {
+	my ($domain) = @_;
+	my %d;
+
+	my $org = eval { Mail::DMARC::PurePerl->new->get_organizational_domain($domain) };
+	my @cands = ($domain);
+	push( @cands, $org ) if defined $org && $org ne $domain;
+
+	my ( $record, $found_at );
+	for my $cand (@cands) {
+		my $rec = _fetch_txt( '_dmarc.' . $cand, qr/^v=DMARC1\b/i );
+		if ($rec) { $record = $rec; $found_at = $cand; last; }
+	}
+
+	if ($record) {
+		$d{record}   = $record;
+		$d{found_at} = $found_at;
+		my $policy = eval { Mail::DMARC::Policy->new($record) };
+		if ($policy) {
+			for my $f (qw( v p sp pct rua ruf adkim aspf fo rf ri )) {
+				my $val = eval { $policy->$f };
+				$d{$f} = "$val" if defined $val && $val ne '';
+			}
+		}
+	} else {
+		$d{note} = 'no DMARC record found for ' . $domain
+			. ( ( defined $org && $org ne $domain ) ? ' or ' . $org : '' );
+	}
+	return \%d;
+} ## end sub _dmarc_gather
+
+# Common DKIM selectors to probe when none is supplied.
+my @COMMON_DKIM_SELECTORS = qw(
+	default google selector1 selector2 s1 s2 k1 k2 k3 mail dkim dkim1
+	mandrill mxvault sig1 fm1 fm2 fm3 protonmail protonmail2 protonmail3
+	zoho zmail smtp key1 pic scph mte1
+);
+
+=head2 _dkim_gather
+
+DKIM public keys for a domain: the given selector, or a probe of common
+selectors when none is supplied. Returns any found keys parsed for detail.
+
+=cut
+
+sub _dkim_gather {
+	my ( $domain, $selector ) = @_;
+	my %d;
+	my @selectors;
+	if ( defined $selector && $selector ne '' ) {
+		@selectors    = ($selector);
+		$d{selector}  = $selector;
+	} else {
+		@selectors = @COMMON_DKIM_SELECTORS;
+		$d{probed} = 1;
+	}
+
+	my @keys;
+	for my $sel (@selectors) {
+		my $txt = _fetch_txt( $sel . '._domainkey.' . $domain, qr/(?:^v=DKIM1|(?:^|;)\s*[kp]=)/i );
+		push( @keys, _dkim_parse_record( $sel, $txt ) ) if defined $txt;
+	}
+	$d{keys} = \@keys;
+	unless (@keys) {
+		$d{note} = $d{probed}
+			? 'no DKIM key found for the probed common selectors — supply the selector if known'
+			: 'no DKIM key found for that selector';
+	}
+	return \%d;
+} ## end sub _dkim_gather
+
+=head2 _dkim_parse_record
+
+Parses a DKIM public-key TXT record into a detail hashref (best effort). Pure,
+no DNS. Key size is computed via Mail::DKIM when the key is present.
+
+=cut
+
+sub _dkim_parse_record {
+	my ( $selector, $txt ) = @_;
+	my %info = ( selector => $selector, record => $txt );
+
+	my %tag;
+	for my $t ( split /\s*;\s*/, $txt ) {
+		if ( $t =~ /^\s*([a-z]+)\s*=\s*(.*)$/is ) { $tag{ lc $1 } = $2; }
+	}
+	$info{version}         = $tag{v} if defined $tag{v};
+	$info{key_type}        = $tag{k} // 'rsa';
+	$info{hash_algorithms} = $tag{h} if defined $tag{h};
+	$info{service_types}   = $tag{s} if defined $tag{s};
+	$info{granularity}     = $tag{g} if defined $tag{g};
+	$info{notes}           = $tag{n} if defined $tag{n};
+	$info{flags}           = $tag{t} if defined $tag{t};
+	$info{testing}         = ( defined $tag{t} && $tag{t} =~ /(?:^|:)\s*y\s*(?::|$)/ ) ? 1 : 0;
+	$info{revoked}         = ( !defined $tag{p} || $tag{p} eq '' ) ? 1 : 0;
+	$info{public_key}      = $tag{p} if defined $tag{p} && $tag{p} ne '';
+
+	unless ( $info{revoked} ) {
+		my $bits = eval { Mail::DKIM::PublicKey->parse($txt)->cork->size * 8 };
+		$info{key_bits} = $bits if $bits;
+	}
+	return \%info;
+} ## end sub _dkim_parse_record
+
+=head2 _spfinfo_gather
+
+Does the blocking SPF evaluation (and v=spf1 record lookup) for spfinfo and
+returns a result hashref. Intended to be run inside a subprocess.
+
+=cut
+
+sub _spfinfo_gather {
+	my ( $domain, $ip ) = @_;
+	my %r = ( domain => $domain );
+	$r{ip} = $ip if defined $ip;
+
+	# The domain's v=spf1 TXT record, plus a static summary of it.
+	eval {
+		my $resolver = Net::DNS::Resolver->new;
+		my $reply    = $resolver->query( $domain, 'TXT' );
+		if ($reply) {
+			for my $rr ( $reply->answer ) {
+				next unless $rr->type eq 'TXT';
+				my $txt = join( '', $rr->txtdata );
+				if ( $txt =~ /^v=spf1\b/i ) { $r{record} = $txt; last; }
+			}
+		}
+	};
+	$r{summary} = _spf_summary( $r{record} ) if defined $r{record};
+
+	# Evaluate the policy for a sending IP only when one was given.
+	if ( defined $ip && $ip ne '' ) {
+		my $identity = 'postmaster@' . $domain;
+		$r{identity} = $identity;
+		eval {
+			my $server  = Mail::SPF::Server->new( query_timeout => 5 );
+			my $request = Mail::SPF::Request->new(
+				scope      => 'mfrom',
+				identity   => $identity,
+				ip_address => $ip,
+			);
+			my $result = $server->process($request);
+			$r{result}       = $result->code;
+			$r{explanation}  = eval { $result->local_explanation };
+			$r{received_spf} = eval { $result->received_spf_header };
+		};
+		if ($@) {
+			( my $why = $@ ) =~ s/\s+\z//;
+			$r{error} = 'SPF evaluation failed: ' . $why;
+		}
+	}
+
+	return \%r;
+} ## end sub _spfinfo_gather
+
+=head2 _spf_summary
+
+Parses a v=spf1 record string into a summary: the default (all) policy, the
+list of mechanisms and modifiers, and a count of the DNS-lookup-consuming terms
+in this record.
+
+=cut
+
+sub _spf_summary {
+	my ($record) = @_;
+	return undef unless defined $record;
+
+	my @terms = split /\s+/, $record;
+	shift @terms if @terms && lc( $terms[0] ) eq 'v=spf1';
+
+	my %qual = ( '+' => 'pass', '-' => 'fail', '~' => 'softfail', '?' => 'neutral' );
+	my %s = ( mechanisms => [], modifiers => [], dns_lookups => 0 );
+	for my $term (@terms) {
+		next if $term eq '';
+		if ( $term =~ /^(redirect|exp)=/i ) {
+			push @{ $s{modifiers} }, $term;
+			$s{dns_lookups}++ if lc($1) eq 'redirect';
+			next;
+		}
+		my ( $q, $mech ) = $term =~ /^([+\-~?]?)(.*)$/;
+		my ($name) = ( lc( $mech // '' ) =~ /^([a-z]+)/ );
+		$name //= '';
+		if ( $name eq 'all' ) { $s{all} = $qual{ $q eq '' ? '+' : $q } // 'pass'; }
+		push @{ $s{mechanisms} }, $term;
+		$s{dns_lookups}++ if $name =~ /^(?:include|a|mx|ptr|exists)$/;
+	}
+	return \%s;
+} ## end sub _spf_summary
 
 1;

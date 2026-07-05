@@ -409,4 +409,73 @@ sub _make_app {
     is( $j->{total_ms},    60.0,                       'total timing reported' );
 }
 
+# ---------------------------------------------------------------------------
+# 15.  Mail auth — GET /api/mailinfo (SPF/DMARC/DKIM) + the pure parsers
+# ---------------------------------------------------------------------------
+
+{
+    require Lilith::Web::Controller::Api;
+    no warnings 'once';
+
+    # _spf_summary: static parse of a record (no network)
+    my $sum = Lilith::Web::Controller::Api::_spf_summary('v=spf1 ip4:1.2.3.0/24 include:_spf.example.com a mx -all');
+    is( $sum->{all},         'fail', 'SPF default policy parsed from -all' );
+    is( $sum->{dns_lookups}, 3,      'SPF DNS-lookup terms counted (include, a, mx)' );
+    is_deeply( $sum->{mechanisms}, [ 'ip4:1.2.3.0/24', 'include:_spf.example.com', 'a', 'mx', '-all' ],
+        'SPF mechanisms listed' );
+
+    # _dkim_parse_record: static parse of a DKIM key record (no network)
+    my $dk = Lilith::Web::Controller::Api::_dkim_parse_record( 's1',
+        'v=DKIM1; k=rsa; h=sha256; s=email; t=y; p=MIIBIjANBg' );
+    is( $dk->{selector},        's1',     'DKIM selector kept' );
+    is( $dk->{key_type},        'rsa',    'DKIM key type parsed' );
+    is( $dk->{hash_algorithms}, 'sha256', 'DKIM hash algorithms parsed' );
+    is( $dk->{service_types},   'email',  'DKIM service types parsed' );
+    is( $dk->{testing},         1,        'DKIM testing flag detected from t=y' );
+    is( $dk->{revoked},         0,        'DKIM not revoked when p is present' );
+
+    my $rv = Lilith::Web::Controller::Api::_dkim_parse_record( 's2', 'v=DKIM1; k=rsa; p=' );
+    is( $rv->{revoked}, 1, 'DKIM revoked when p= is empty' );
+}
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $t = Test::Mojo->new('Lilith::Web');
+
+    # validation
+    $t->get_ok('/api/mailinfo/bad domain')->status_is( 400, 'invalid domain rejected' );
+    $t->get_ok('/api/mailinfo/example.com?ip=not-an-ip')->status_is( 400, 'invalid IP rejected' );
+    $t->get_ok('/api/mailinfo/example.com?selector=bad+sel')->status_is( 400, 'invalid selector rejected' );
+
+    # mock the blocking gather; verify the combined SPF/DMARC/DKIM shape renders
+    no warnings qw(redefine once);
+    local *Lilith::Web::Controller::Api::_mailinfo_gather = sub {
+        my ( $domain, $ip, $selector ) = @_;
+        return {
+            domain => $domain,
+            mx     => [ { preference => 10, exchange => 'mail.' . $domain } ],
+            spf    => { record => 'v=spf1 -all', summary => { all => 'fail' }, ( $ip ? ( ip => $ip, result => 'fail' ) : () ) },
+            dmarc  => { record => 'v=DMARC1; p=reject', found_at => $domain, p => 'reject', rua => 'mailto:x@' . $domain },
+            dkim   => {
+                ( $selector ? ( selector => $selector ) : ( probed => 1 ) ),
+                keys => [ { selector => ( $selector // 'default' ), key_type => 'rsa', key_bits => 2048, revoked => 0 } ],
+            },
+        };
+    };
+    use warnings qw(redefine once);
+
+    my $j = $t->get_ok('/api/mailinfo/example.com?ip=8.8.8.8&selector=default')
+        ->status_is( 200, 'mailinfo renders 200' )->tx->res->json;
+    is( $j->{mx}[0]{exchange},    'mail.example.com', 'MX records present' );
+    is( $j->{mx}[0]{preference},  10,       'MX preference present' );
+    is( $j->{spf}{result},        'fail',   'SPF section present' );
+    is( $j->{dmarc}{p},           'reject', 'DMARC policy present' );
+    is( $j->{dkim}{keys}[0]{key_bits}, 2048, 'DKIM key detail present' );
+    is( $j->{dkim}{selector},     'default', 'DKIM selector passed through' );
+}
+
 done_testing();

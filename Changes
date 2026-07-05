@@ -32,6 +32,13 @@ Revision history for Lilith
 		   the cert is expired, whether it validates (full chain + hostname),
 		   and as much certificate detail as possible. 5s timeout, 512KB read
 		   cap, both noted when hit.
+		 - web: a "Mail" button under Domain Info runs a combined SPF / DMARC
+		   / DKIM check. SPF shows the v=spf1 record and a summary, plus a
+		   Mail::SPF evaluation when an IP is given. DMARC shows the record
+		   and parsed policy (via Mail::DMARC, with the organizational-domain
+		   tree walk). DKIM shows the public key for a given selector, or
+		   probes common selectors when none is supplied, with maximal key
+		   detail (type, size, revoked/testing flags, hashes, etc.).
 		 - Lilith->run() now warns and skips a malformed EVE instance
 		   instead of dying, so one bad entry no longer stops the rest.
 
