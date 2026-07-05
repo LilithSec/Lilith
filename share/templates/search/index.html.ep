@@ -80,7 +80,7 @@
           <label class="form-label d-block">&nbsp;</label>
           <div class="d-flex align-items-center gap-2">
             <div class="form-check mb-0">
-              <input class="form-check-input" type="checkbox" id="auto-fc">
+              <input class="form-check-input" type="checkbox" id="auto-fc" checked>
               <label class="form-check-label small" for="auto-fc"
                      title="Keep the filter area collapsed until the Filters button is clicked">Auto-FC</label>
             </div>
@@ -558,9 +558,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Auto-FC: keep the filter panel collapsed on load (overriding the server's
   // auto-expand when filters are set) until the Filters button is clicked.
-  var afcCb       = document.getElementById('auto-fc');
-  var filterPanel = document.getElementById('filter-panel');
-  afcCb.checked = localStorage.getItem('autoFc') === 'true';
+  var afcCb        = document.getElementById('auto-fc');
+  var filterPanel  = document.getElementById('filter-panel');
+  var storedAutoFc = localStorage.getItem('autoFc');
+  // default on when the user has not made an explicit choice
+  afcCb.checked = ( storedAutoFc === null ) ? true : ( storedAutoFc === 'true' );
   if (afcCb.checked) { filterPanel.classList.remove('show'); }
   afcCb.addEventListener('change', function() {
     localStorage.setItem('autoFc', this.checked);
