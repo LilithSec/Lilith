@@ -26,6 +26,7 @@ lib/Lilith/Web/Controller/Search.pm
 lib/Lilith/Web/Controller/Event.pm
 share/templates/layouts/default.html.ep
 share/templates/search/index.html.ep
+share/templates/search/_results.html.ep
 share/templates/event/view.html.ep
 share/public/vendor/bootstrap-5.3.3/css/bootstrap.min.css
 share/public/vendor/bootstrap-5.3.3/js/bootstrap.bundle.min.js

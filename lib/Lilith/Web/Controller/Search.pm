@@ -30,7 +30,10 @@ sub index {
 	my $results;
 	my $error;
 
-	if ( $self->param('search') ) {
+	# Always run a search. With no query parameters this yields the default
+	# search (Suricata, last 1440 minutes), so results are shown as soon as the
+	# page is pulled up rather than an empty form.
+	{
 		my @src_port  = _split_list( $self->param('src_port') );
 		my @dest_port = _split_list( $self->param('dest_port') );
 		my @gid       = _split_list( $self->param('gid') );
@@ -40,6 +43,7 @@ sub index {
 		my @size      = _split_list( $self->param('size') );
 		my @task      = _split_list( $self->param('task') );
 		my @class     = grep { defined($_) && $_ ne '' } @{ $self->every_param('class') };
+		push( @class, map { '!' . $_ } grep { defined($_) && $_ ne '' } @{ $self->every_param('class_not') } );
 
 		eval {
 			$results = $self->lilith->search(
@@ -93,6 +97,12 @@ sub index {
 		limit           => $limit,
 		offset          => $offset,
 	);
+
+	# Auto-refresh fetches partial=1 to get just the results fragment (no layout
+	# or filter form), which is far smaller than the full page.
+	if ( $self->param('partial') && defined $results ) {
+		return $self->render( 'search/_results', layout => undef );
+	}
 }
 
 sub _split_list {

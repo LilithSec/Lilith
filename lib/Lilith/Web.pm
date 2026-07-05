@@ -71,6 +71,114 @@ sub startup {
 	$self->helper( dnstracer_enable => sub { $toml->{dnstracer_enable} ? 1 : 0 } );
 	$self->helper( dns_bg_timeout   => sub { defined $toml->{dns_bg_timeout} ? $toml->{dns_bg_timeout} + 0 : 3 } );
 
+	# Optional in-memory cache for /api/domaininfo results. Enabled with
+	# domaininfo_cache; entries are considered fresh for domaininfo_cache_ttl
+	# seconds (default 300). The store is per worker process.
+	my %domaininfo_cache;
+	$self->helper( domaininfo_cache         => sub { \%domaininfo_cache } );
+	$self->helper( domaininfo_cache_enabled => sub { $toml->{domaininfo_cache} ? 1 : 0 } );
+	$self->helper(
+		domaininfo_cache_ttl => sub {
+			defined $toml->{domaininfo_cache_ttl} ? $toml->{domaininfo_cache_ttl} + 0 : 300;
+		}
+	);
+
+	# GeoIP / MMDB lookups.  Each database type has its own config key pointing
+	# at a MaxMind DB file; when a key is omitted the standard filename under the
+	# platform's GeoIP directory is used if it exists.  The web UI's IP info
+	# modal merges records from every database that opened.  Databases are opened
+	# once at startup so lookups stay cheap.
+	my $geoip_dir = ( $^O eq 'freebsd' ) ? '/usr/local/share/GeoIP' : '/usr/share/GeoIP';
+	my @geoip_defs = (
+		{ key => 'geoip_ip_city',    file => 'GeoLite2-City.mmdb' },
+		{ key => 'geoip_ip_country', file => 'GeoLite2-Country.mmdb' },
+		{ key => 'geoip_ip_asn',     file => 'GeoLite2-ASN.mmdb' },
+	);
+	my @mmdbs;
+	for my $def (@geoip_defs) {
+		my $configured = ( defined $toml->{ $def->{key} } && !ref $toml->{ $def->{key} } );
+		my $path = $configured ? $toml->{ $def->{key} } : $geoip_dir . '/' . $def->{file};
+
+		# A missing default is normal (the DB simply is not installed); only an
+		# explicitly configured path that is absent is worth a warning.
+		if ( !-e $path ) {
+			warn 'Lilith::Web: configured MMDB "' . $path . '" for ' . $def->{key} . " does not exist\n"
+				if $configured;
+			next;
+		}
+
+		require IP::Geolocation::MMDB;
+		my $db = eval { IP::Geolocation::MMDB->new( file => $path ) };
+		if ($db) {
+			push( @mmdbs, $db );
+		} else {
+			warn 'Lilith::Web: failed to open MMDB "' . $path . '"' . ( $@ ? ": $@" : "\n" );
+		}
+	}
+	$self->helper( geoip_mmdbs => sub { \@mmdbs } );
+
+	# Country + top subdivision (state/province) codes for an IP from a single
+	# pass over the databases -- one record_for_address per DB instead of one per
+	# field. Country falls back from the physical 'country' to
+	# 'registered_country' / 'represented_country' so anycast and hosting IPs
+	# (which often carry only a registered country, e.g. Cloudflare) still
+	# resolve. Results are memoized per request so repeated IPs across many rows
+	# only hit the databases once. Returns { country => 'US', subdivision => 'TX' }
+	# with empty strings for anything unknown.
+	$self->helper(
+		ip_geo => sub {
+			my ( $c, $ip ) = @_;
+			my $empty = { country => '', subdivision => '' };
+			return $empty unless defined $ip && $ip =~ /^[0-9a-fA-F:.]+$/;
+
+			my $cache;
+			if ( eval { $c->can('stash') } ) {
+				$cache = $c->stash->{'_ip_geo_cache'} ||= {};
+				return $cache->{$ip} if $cache->{$ip};
+			}
+
+			my $country     = '';
+			my $subdivision = '';
+			for my $db (@mmdbs) {
+				my $record = eval { $db->record_for_address($ip) };
+				next unless ref $record eq 'HASH';
+				if ( $country eq '' ) {
+					for my $field (qw( country registered_country represented_country )) {
+						my $cc = ref $record->{$field} eq 'HASH' ? $record->{$field}{iso_code} : undef;
+						if ( defined $cc && $cc ne '' ) { $country = uc $cc; last; }
+					}
+				}
+				if ( $subdivision eq '' ) {
+					my $subs = $record->{subdivisions};
+					if ( ref $subs eq 'ARRAY' && ref $subs->[0] eq 'HASH' ) {
+						my $code = $subs->[0]{iso_code};
+						$subdivision = uc $code if defined $code && $code ne '';
+					}
+				}
+				last if $country ne '' && $subdivision ne '';
+			}
+
+			my $geo = { country => $country, subdivision => $subdivision };
+			$cache->{$ip} = $geo if $cache;
+			return $geo;
+		}
+	);
+
+	# Thin wrappers kept for template/readability convenience; both share the one
+	# ip_geo lookup above.
+	$self->helper( ip_country     => sub { $_[0]->ip_geo( $_[1] )->{country} } );
+	$self->helper( ip_subdivision => sub { $_[0]->ip_geo( $_[1] )->{subdivision} } );
+
+	# Regional-indicator emoji flag for a two-letter country code, e.g. 'US' ->
+	# the flag. Returns '' for anything that is not two ASCII letters.
+	$self->helper(
+		country_flag => sub {
+			my ( $c, $cc ) = @_;
+			return '' unless defined $cc && $cc =~ /^[A-Za-z]{2}$/;
+			return join( '', map { chr( 0x1F1E6 + ( ord( uc $_ ) - ord('A') ) ) } split( //, $cc ) );
+		}
+	);
+
 	# Referer checking — enforced only when allowed_referers is non-empty in the
 	# config.  Each entry is treated as a URL prefix; a request is allowed if its
 	# Referer header starts with any of the configured prefixes.
@@ -103,6 +211,7 @@ sub startup {
 	$r->get('/')->to( cb => sub { $_[0]->redirect_to('/search') } );
 	$r->get('/search')->to('search#index');
 	$r->get('/event/:table/:id')->to('event#view');
+	$r->get('/event/:table/:id/body/:which/zip')->to('event#body_zip');
 	$r->get('/api/ipinfo/*ip')->to('api#ipinfo');
 	$r->get('/api/domaininfo/*domain')->to('api#domaininfo');
 }

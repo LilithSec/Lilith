@@ -102,4 +102,216 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
     );
 }
 
+# ---------------------------------------------------------------------------
+# 5b.  domaininfo cache config helpers
+# ---------------------------------------------------------------------------
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $app = Test::Mojo->new('Lilith::Web')->app;
+
+    is( $app->domaininfo_cache_enabled(), 0,   'domaininfo cache is disabled by default' );
+    is( $app->domaininfo_cache_ttl(),     300, 'domaininfo cache ttl defaults to 300' );
+    is_deeply( $app->domaininfo_cache(), {}, 'domaininfo cache store starts empty' );
+}
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    print $fh "domaininfo_cache = true\n";
+    print $fh "domaininfo_cache_ttl = 900\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $app = Test::Mojo->new('Lilith::Web')->app;
+
+    is( $app->domaininfo_cache_enabled(), 1,   'domaininfo_cache = true enables the cache' );
+    is( $app->domaininfo_cache_ttl(),     900, 'domaininfo_cache_ttl is read from config' );
+}
+
+# ---------------------------------------------------------------------------
+# 6.  country_flag helper — code to regional-indicator emoji
+# ---------------------------------------------------------------------------
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $app = Test::Mojo->new('Lilith::Web')->app;
+
+    is( $app->country_flag('US'), "\x{1F1FA}\x{1F1F8}", 'US maps to the regional-indicator flag' );
+    is( $app->country_flag('de'), "\x{1F1E9}\x{1F1EA}", 'lowercase code is upcased before mapping' );
+    is( $app->country_flag(''),      '', 'empty code yields empty string' );
+    is( $app->country_flag(undef),   '', 'undef code yields empty string' );
+    is( $app->country_flag('USA'),   '', 'non two-letter code yields empty string' );
+    is( $app->country_flag('1.2'),   '', 'non-alpha code yields empty string' );
+}
+
+# ---------------------------------------------------------------------------
+# 7.  ip_country helper — empty when no country-aware database is loaded
+# ---------------------------------------------------------------------------
+
+{
+    # Force every geoip key to a missing path so the platform defaults (which
+    # may be installed on the test host) are overridden and no DB loads. The
+    # missing paths warn by design; capture them to keep the output clean.
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    print $fh qq{geoip_ip_city    = "/nonexistent/city.mmdb"\n};
+    print $fh qq{geoip_ip_country = "/nonexistent/country.mmdb"\n};
+    print $fh qq{geoip_ip_asn     = "/nonexistent/asn.mmdb"\n};
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    local $SIG{__WARN__} = sub { };
+    my $app = Test::Mojo->new('Lilith::Web')->app;
+
+    is( $app->ip_country('8.8.8.8'),   '', 'ip_country is empty when no MMDB is loaded' );
+    is( $app->ip_country('not-an-ip'), '', 'ip_country rejects malformed input' );
+    is( $app->ip_country(undef),       '', 'ip_country handles undef' );
+    is( $app->ip_country('10.0.0.1'),  '', 'ip_country is empty for a private IP' );
+}
+
+# ---------------------------------------------------------------------------
+# 8.  ip_country helper — real lookup when a default database is present
+#     (host-dependent; skipped when no country DB is installed)
+# ---------------------------------------------------------------------------
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $app = Test::Mojo->new('Lilith::Web')->app;
+
+    my $cc = $app->ip_country('8.8.8.8');
+  SKIP: {
+        skip 'no country-aware MMDB installed on this host', 2 unless $cc ne '';
+        like( $cc, qr/^[A-Z]{2}$/, 'ip_country returns a two-letter uppercase code' );
+        is( length( $app->country_flag($cc) ), 2, 'the code renders as a two-codepoint emoji flag' );
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 9.  ip_country helper — field fallback (country -> registered_country ->
+#     represented_country). Needs a loaded DB to iterate; record lookups are
+#     mocked so the assertions do not depend on any specific IP's real data.
+# ---------------------------------------------------------------------------
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $app = Test::Mojo->new('Lilith::Web')->app;
+
+  SKIP: {
+        skip 'no MMDB installed on this host to iterate over', 4
+            unless @{ $app->geoip_mmdbs };
+
+        my $record;
+        no warnings qw(redefine once);
+        local *IP::Geolocation::MMDB::record_for_address = sub { return $record };
+        use warnings qw(redefine once);
+
+        $record = { country => { iso_code => 'de' } };
+        is( $app->ip_country('1.2.3.4'), 'DE', 'physical country is used and upcased' );
+
+        # anycast / hosting IPs (e.g. Cloudflare) expose only registered_country
+        $record = { registered_country => { iso_code => 'US' } };
+        is( $app->ip_country('1.2.3.4'), 'US', 'falls back to registered_country' );
+
+        $record = { represented_country => { iso_code => 'GB' } };
+        is( $app->ip_country('1.2.3.4'), 'GB', 'falls back to represented_country' );
+
+        $record = { city => { names => { en => 'Nowhere' } } };
+        is( $app->ip_country('1.2.3.4'), '', 'no country field of any kind yields empty' );
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 10.  ip_subdivision helper — top subdivision (state/province) code
+# ---------------------------------------------------------------------------
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $app = Test::Mojo->new('Lilith::Web')->app;
+
+    is( $app->ip_subdivision('not-an-ip'), '', 'ip_subdivision rejects malformed input' );
+    is( $app->ip_subdivision(undef),       '', 'ip_subdivision handles undef' );
+
+  SKIP: {
+        skip 'no MMDB installed on this host to iterate over', 3
+            unless @{ $app->geoip_mmdbs };
+
+        my $record;
+        no warnings qw(redefine once);
+        local *IP::Geolocation::MMDB::record_for_address = sub { return $record };
+        use warnings qw(redefine once);
+
+        $record = { subdivisions => [ { iso_code => 'tx' }, { iso_code => 'zz' } ] };
+        is( $app->ip_subdivision('1.2.3.4'), 'TX', 'returns the first subdivision code, upcased' );
+
+        $record = { country => { iso_code => 'US' } };
+        is( $app->ip_subdivision('1.2.3.4'), '', 'empty when the record has no subdivisions' );
+
+        $record = { subdivisions => [] };
+        is( $app->ip_subdivision('1.2.3.4'), '', 'empty when the subdivisions list is empty' );
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 11.  ip_geo helper — combined country + subdivision, with per-request memoization
+# ---------------------------------------------------------------------------
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $app = Test::Mojo->new('Lilith::Web')->app;
+
+    is_deeply( $app->ip_geo('not-an-ip'), { country => '', subdivision => '' },
+        'ip_geo returns empty pair for malformed input' );
+
+  SKIP: {
+        skip 'no MMDB installed on this host to iterate over', 3
+            unless @{ $app->geoip_mmdbs };
+
+        my $record = { country => { iso_code => 'us' }, subdivisions => [ { iso_code => 'ca' } ] };
+        my $calls  = 0;
+        my $orig   = IP::Geolocation::MMDB->can('record_for_address');
+        no warnings qw(redefine once);
+        local *IP::Geolocation::MMDB::record_for_address = sub { $calls++; return $record };
+        use warnings qw(redefine once);
+
+        is_deeply( $app->ip_geo('1.2.3.4'), { country => 'US', subdivision => 'CA' },
+            'ip_geo returns both codes from one pass, upcased' );
+
+        # per-request memoization: repeated IPs on the same controller only hit
+        # the databases on the first lookup
+        my $c = $app->build_controller;
+        $calls = 0;
+        $c->ip_geo('9.9.9.9');
+        my $first = $calls;
+        $c->ip_geo('9.9.9.9');
+        $c->ip_geo('9.9.9.9');
+        ok( $first >= 1, 'first ip_geo performs at least one database lookup' );
+        is( $calls, $first, 'repeated ip_geo for the same IP adds no further lookups (memoized)' );
+    }
+}
+
 done_testing();

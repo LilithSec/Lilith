@@ -210,4 +210,121 @@ sub _make_app {
         ->json_is( '/dnstracer', '', 'dnstracer output is empty string when dnstracer_enable is false' );
 }
 
+# ---------------------------------------------------------------------------
+# 8.  GeoIP / MMDB — _flatten_geo record flattening
+# ---------------------------------------------------------------------------
+
+{
+    my $record = {
+        continent => { code => 'NA', names => { en => 'North America', de => 'Nordamerika' } },
+        country   => { iso_code => 'US', geoname_id => 6252001, names => { en => 'United States' } },
+        subdivisions => [ { iso_code => 'CA', names => { en => 'California' } } ],
+        city     => { names => { en => 'Mountain View' } },
+        location => { latitude => 37.386, longitude => -122.0838, time_zone => 'America/Los_Angeles' },
+        postal   => { code => '94035' },
+    };
+
+    my %out;
+    Lilith::Web::Controller::Api::_flatten_geo( $record, '', \%out );
+
+    is( $out{'country'},          'United States', 'country name collapsed from names.en' );
+    is( $out{'country.iso_code'}, 'US',            'country.iso_code preserved alongside collapsed name' );
+    is( $out{'continent'},        'North America', 'localized name prefers English' );
+    is( $out{'city'},             'Mountain View', 'city name collapsed' );
+    is( $out{'subdivisions.0'},   'California',     'array elements are indexed and collapsed' );
+    is( $out{'location.latitude'}, 37.386, 'nested numeric scalar preserved' );
+    is( $out{'postal.code'},      '94035', 'postal code preserved' );
+    ok( !exists $out{'country.names'}, 'raw names hash is not emitted as its own key' );
+}
+
+# ---------------------------------------------------------------------------
+# 9.  GeoIP / MMDB — ipinfo always exposes geo fields; bad DB path is skipped
+# ---------------------------------------------------------------------------
+
+{
+    # No MMDB configured: geo is an (empty) object and no error
+    my $t = _make_app();
+    $t->get_ok('/api/ipinfo/8.8.8.8')
+        ->status_is( 200, 'ipinfo renders 200 with no MMDB configured' )
+        ->json_has( '/geo',       'response has a geo object' )
+        ->json_is( '/geo_error', '', 'geo_error is empty when no MMDB is configured' );
+
+    # An explicitly configured but missing MMDB must not break startup or the
+    # request. It warns to STDERR by design; capture it so output stays clean.
+    my @warnings;
+    local $SIG{__WARN__} = sub { push @warnings, $_[0] };
+    my $t2 = _make_app( qq{geoip_ip_city = "/nonexistent/does-not-exist.mmdb"\n} );
+    like( join( '', @warnings ), qr/does not exist/, 'a configured but missing MMDB is reported via a warning' );
+    $t2->get_ok('/api/ipinfo/8.8.8.8')
+        ->status_is( 200, 'ipinfo still renders 200 when a configured MMDB is missing' )
+        ->json_has( '/geo', 'response still has a geo object' );
+}
+
+# ---------------------------------------------------------------------------
+# 10.  _run_capture — external command output with a hard, non-hanging timeout
+# ---------------------------------------------------------------------------
+
+{
+    require Lilith::Web::Controller::Api;
+
+    my $out = Lilith::Web::Controller::Api::_run_capture( 5, 'echo', 'hello world' );
+    like( $out, qr/hello world/, '_run_capture returns the command output' );
+
+    # A command that outlives the timeout must be killed, returning promptly
+    # rather than hanging on close()/waitpid (the whois/dnstracer hang bug).
+    my $start = time;
+    my $slow  = Lilith::Web::Controller::Api::_run_capture( 1, 'sleep', '10' );
+    my $took  = time - $start;
+    is( $slow, '', '_run_capture returns empty when the command is killed on timeout' );
+    ok( $took < 5, "_run_capture enforces the timeout (took ${took}s vs the 10s command)" );
+}
+
+# ---------------------------------------------------------------------------
+# 11.  _whois_domain — registrable domain reduction
+# ---------------------------------------------------------------------------
+
+{
+    require Lilith::Web::Controller::Api;
+    no warnings 'once';
+    my $wd = \&Lilith::Web::Controller::Api::_whois_domain;
+    is( $wd->('example.com'),          'example.com', 'two-label domain is unchanged' );
+    is( $wd->('gitea.eesdp.org'),      'eesdp.org',   'subdomain is reduced to the registrable domain' );
+    is( $wd->('a.b.c.example.co.uk'),  'example.co.uk', 'multi-level public suffix handled' );
+}
+
+# ---------------------------------------------------------------------------
+# 12.  domaininfo cache — a fresh entry is served without touching the network
+# ---------------------------------------------------------------------------
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    print $fh "domaininfo_cache = true\n";
+    print $fh "domaininfo_cache_ttl = 600\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $t   = Test::Mojo->new('Lilith::Web');
+    my $app = $t->app;
+
+    # Seed a cache entry; a hit must return it verbatim with cached => 1 and do
+    # no DNS/whois work.
+    $app->domaininfo_cache->{'seeded.example'} = {
+        time => time(),
+        data => { domain => 'seeded.example', whois_domain => 'seeded.example', whois => 'SENTINEL', dns => {} },
+    };
+    $t->get_ok('/api/domaininfo/seeded.example')
+        ->status_is( 200, 'cached domaininfo renders 200' )
+        ->json_is( '/whois',  'SENTINEL', 'cache hit returns the stored whois' )
+        ->json_is( '/cached', 1,          'cache hit is flagged cached => 1' );
+
+    # An expired entry is not served (ttl has passed).
+    $app->domaininfo_cache->{'stale.example'} = {
+        time => time() - 10_000,
+        data => { whois => 'STALE' },
+    };
+    ok( ( time() - $app->domaininfo_cache->{'stale.example'}{time} ) >= $app->domaininfo_cache_ttl,
+        'stale entry is older than the ttl (would be refetched, not served)' );
+}
+
 done_testing();

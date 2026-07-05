@@ -40,6 +40,9 @@
             % if (($key eq 'src_ip' || $key eq 'dest_ip') && $event->{$key}) {
             <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn ms-1"
                     data-ip="<%= $event->{$key} %>" style="font-size:0.65rem;line-height:1.2">?</button>
+            % if (my $cc = $self->ip_country($event->{$key})) {
+            <span class="text-muted small" title="<%= $cc %>"><%= $self->country_flag($cc) %> <%= $cc %><% if (my $sub = $self->ip_subdivision($event->{$key})) { %>/<%= $sub %><% } %></span>
+            % }
             % }
           </td>
         </tr>
@@ -87,6 +90,11 @@
             data-type="<%= $h->{http_content_type} || 'application/octet-stream' %>">
       Download Response Body
     </button>
+    <a class="btn btn-sm btn-outline-secondary"
+       href="/event/<%= $table %>/<%= $id %>/body/response/zip" download
+       title="Password protected zip (password: infected)">
+      Download Response Body (zip, pw: infected)
+    </a>
     % }
   </div>
   % }
@@ -1376,32 +1384,6 @@
   </div>
 </div>
 
-<!-- IP Info Modal -->
-<div class="modal fade" id="ipinfo-modal" tabindex="-1">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content bg-dark text-light border-secondary">
-      <div class="modal-header py-2 border-secondary">
-        <h6 class="modal-title" id="ipinfo-modal-title">IP Info</h6>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div id="ipinfo-loading" class="text-center text-muted py-3">Loading…</div>
-        <div id="ipinfo-content" style="display:none">
-          <div class="mb-2">
-            <span class="text-muted small fw-semibold">Reverse DNS</span>
-            <div id="ipinfo-rdns" class="font-monospace small mt-1"></div>
-            <div id="ipinfo-ptr-name" class="text-muted small mt-1"></div>
-            <div id="ipinfo-rdns-error" class="text-warning small mt-1" style="display:none"></div>
-          </div>
-          <div>
-            <span class="text-muted small fw-semibold">WHOIS</span>
-            <pre id="ipinfo-whois" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -1510,32 +1492,10 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 
-  var ipinfoModal = new bootstrap.Modal(document.getElementById('ipinfo-modal'));
+  // The IP info modal + lookup lives in the layout; just wire the buttons.
   document.querySelectorAll('.ip-info-btn').forEach(function(el) {
     el.addEventListener('click', function() {
-      var ip = this.dataset.ip;
-      document.getElementById('ipinfo-modal-title').textContent = ip;
-      document.getElementById('ipinfo-loading').style.display = '';
-      document.getElementById('ipinfo-content').style.display = 'none';
-      ipinfoModal.show();
-      fetch('/api/ipinfo/' + encodeURIComponent(ip))
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          document.getElementById('ipinfo-rdns').textContent     = data.rdns || '(none)';
-          document.getElementById('ipinfo-ptr-name').textContent = data.ptr_name ? 'queried: ' + data.ptr_name : '';
-          var errEl = document.getElementById('ipinfo-rdns-error');
-          if (data.rdns_error) { errEl.textContent = data.rdns_error; errEl.style.display = ''; }
-          else { errEl.style.display = 'none'; }
-          document.getElementById('ipinfo-whois').textContent = data.whois || '(none)';
-          document.getElementById('ipinfo-loading').style.display = 'none';
-          document.getElementById('ipinfo-content').style.display = '';
-        })
-        .catch(function() {
-          document.getElementById('ipinfo-rdns').textContent = 'Error fetching data';
-          document.getElementById('ipinfo-whois').textContent = '';
-          document.getElementById('ipinfo-loading').style.display = 'none';
-          document.getElementById('ipinfo-content').style.display = '';
-        });
+      window.showIpInfo(this.dataset.ip);
     });
   });
 });

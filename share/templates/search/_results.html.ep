@@ -1,0 +1,129 @@
+% # Results fragment — shared by the full search page and the partial (auto-refresh)
+% # render. Expects $results (arrayref), $table, $offset, $limit set in the stash.
+% my $count = scalar @$results;
+<div id="search-results">
+  <div class="d-flex align-items-center mb-2 gap-3">
+    <span class="text-muted small"><%= $count %> result<%= $count == 1 ? '' : 's' %></span>
+    % if ($offset > 0 || $count >= $limit) {
+    <div class="d-flex gap-1">
+      % if ($offset > 0) {
+        % my $prev = $offset - $limit;
+        % $prev = 0 if $prev < 0;
+      <a href="<%= url_with->query({offset => $prev, partial => undef}) %>" class="btn btn-sm btn-outline-secondary">&larr; Prev</a>
+      % }
+      % if ($count >= $limit) {
+      <a href="<%= url_with->query({offset => $offset + $limit, partial => undef}) %>" class="btn btn-sm btn-outline-secondary">Next &rarr;</a>
+      % }
+    </div>
+    % }
+  </div>
+
+  % if ($count > 0) {
+  <div class="table-responsive">
+    <table class="table table-dark table-sm table-hover table-bordered mb-0">
+
+      % if ($table eq 'suricata') {
+      <thead class="table-secondary">
+        <tr>
+          <th>ID</th><th>Timestamp</th><th>Instance</th><th class="col-host" style="display:none">Host</th><th>If</th>
+          <th>Src IP</th><th>Sport</th><th>Dst IP</th><th>Dport</th>
+          <th>Proto</th><th>AProto</th><th>Class</th><th>Signature</th><th>Rule</th>
+        </tr>
+      </thead>
+      <tbody>
+        % for my $row (@$results) {
+        <tr>
+          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
+          <td><%= $row->{timestamp} // '' %></td>
+          <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
+          <td class="col-host" style="display:none"><% if (my $i = $row->{host}) { %><a href="#" class="host-filter" data-host="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{in_iface}) { %><a href="#" class="iface-filter" data-iface="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $i %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $cc = $self->ip_country($i)) { %> <span class="text-muted small" title="<%= $cc %>"><%= $self->country_flag($cc) %> <%= $cc %><% if (my $sub = $self->ip_subdivision($i)) { %>/<%= $sub %><% } %></span><% } %><% } %></td>
+          <td><% if (my $i = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{dest_ip}) { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $i %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $cc = $self->ip_country($i)) { %> <span class="text-muted small" title="<%= $cc %>"><%= $self->country_flag($cc) %> <%= $cc %><% if (my $sub = $self->ip_subdivision($i)) { %>/<%= $sub %><% } %></span><% } %><% } %></td>
+          <td><% if (my $i = $row->{dest_port}) { %><a href="#" class="port-filter" data-port="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{proto}) { %><a href="#" class="proto-filter" data-proto="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{app_proto}) { %><a href="#" class="aproto-filter" data-aproto="<%= $i %>"><%= $i %></a><% } %></td>
+          <td title="<%= $row->{classification} // '' %>">
+            <%= $self->lilith->get_short_class($row->{classification}) %>
+          </td>
+          <td><% if (my $i = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $i %>"><%= $i %></a><% } %></td>
+          <td class="text-muted">
+            <% if (my $g = $row->{gid}) { %><a href="#" class="gid-filter" data-gid="<%= $g %>"><%= $g %></a><% } %>:<% if (my $s = $row->{sid}) { %><a href="#" class="sid-filter" data-sid="<%= $s %>"><%= $s %></a><% } %>:<% if (my $r = $row->{rev}) { %><a href="#" class="rev-filter" data-rev="<%= $r %>"><%= $r %></a><% } %>
+          </td>
+        </tr>
+        % }
+      </tbody>
+
+      % } elsif ($table eq 'sagan') {
+      <thead class="table-secondary">
+        <tr>
+          <th>ID</th><th>Timestamp</th><th>Instance</th><th class="col-host" style="display:none">Instance Host</th>
+          <th>Src IP</th><th>Sport</th><th>Host</th><th>Program</th>
+          <th>Facility</th><th>Level</th><th>Priority</th>
+          <th>Class</th><th>Signature</th><th>Rule</th>
+        </tr>
+      </thead>
+      <tbody>
+        % for my $row (@$results) {
+        <tr>
+          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
+          <td><%= $row->{timestamp} // '' %></td>
+          <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
+          <td class="col-host" style="display:none"><% if (my $i = $row->{instance_host}) { %><a href="#" class="instance-host-filter" data-instance-host="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $i = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $i %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $cc = $self->ip_country($i)) { %> <span class="text-muted small" title="<%= $cc %>"><%= $self->country_flag($cc) %> <%= $cc %><% if (my $sub = $self->ip_subdivision($i)) { %>/<%= $sub %><% } %></span><% } %><% } %></td>
+          <td><% if (my $i = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><%= $row->{host}      // '' %></td>
+          <td><%= $row->{program}   // '' %></td>
+          <td><%= $row->{facility}  // '' %></td>
+          <td><%= $row->{level}     // '' %></td>
+          <td><%= $row->{priority}  // '' %></td>
+          <td title="<%= $row->{classification} // '' %>">
+            <%= $self->lilith->get_short_class($row->{classification}) %>
+          </td>
+          <td><% if (my $i = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $i %>"><%= $i %></a><% } %></td>
+          <td class="text-muted">
+            <% if (my $g = $row->{gid}) { %><a href="#" class="gid-filter" data-gid="<%= $g %>"><%= $g %></a><% } %>:<% if (my $s = $row->{sid}) { %><a href="#" class="sid-filter" data-sid="<%= $s %>"><%= $s %></a><% } %>:<% if (my $r = $row->{rev}) { %><a href="#" class="rev-filter" data-rev="<%= $r %>"><%= $r %></a><% } %>
+          </td>
+        </tr>
+        % }
+      </tbody>
+
+      % } else { # cape
+      <thead class="table-secondary">
+        <tr>
+          <th>ID</th><th>Instance</th><th class="col-host" style="display:none">Instance Host</th><th>Target</th><th>Malscore</th>
+          <th>Package</th><th>Size</th><th>MD5</th><th>SHA256</th>
+          <th>Subbed From</th>
+        </tr>
+      </thead>
+      <tbody>
+        % for my $row (@$results) {
+        <tr>
+          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
+          <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
+          <td class="col-host" style="display:none"><% if (my $i = $row->{instance_host}) { %><a href="#" class="instance-host-filter" data-instance-host="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><%= $row->{target}    // '' %></td>
+          <td><%= $row->{malscore}  // '' %></td>
+          <td><%= $row->{pkg}       // '' %></td>
+          <td><%= $row->{size}      // '' %></td>
+          <td><small class="text-muted"><%= $row->{md5}    // '' %></small></td>
+          <td><small class="text-muted"><%= defined $row->{sha256} ? substr($row->{sha256}, 0, 16) . '…' : '' %></small></td>
+          <td>
+            <%= $row->{subbed_from_ip} // '' %>
+            % if ($row->{subbed_from_host}) {
+            <small class="text-muted">(<%= $row->{subbed_from_host} %>)</small>
+            % }
+          </td>
+        </tr>
+        % }
+      </tbody>
+      % }
+
+    </table>
+  </div><!-- /table-responsive -->
+
+  % } else {
+  <div class="alert alert-secondary py-2">No results found.</div>
+  % }
+</div><!-- /search-results -->

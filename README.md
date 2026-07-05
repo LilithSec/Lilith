@@ -108,6 +108,11 @@ The default config file is `/usr/local/etc/lilith.toml`.
 | `user`             | User to use for the connetion.                                                                                                                                                                                                      |
 | `class_ignore`     | Array of classes to ignore.                                                                                                                                                                                                         |
 | `allowed_referers` | Optional array of URL prefixes permitted as the `Referer` header on web UI requests. When set, any request whose `Referer` does not start with one of the listed prefixes is rejected with a 403. Omit to disable referer checking. |
+| `geoip_ip_city`    | Optional path to a GeoLite2/GeoIP2 City `.mmdb`. When present, the web UI's IP info modal shows geolocation data looked up via [IP::Geolocation::MMDB][https://metacpan.org/pod/IP::Geolocation::MMDB]. Defaults to `GeoLite2-City.mmdb` under the platform GeoIP directory (`/usr/local/share/GeoIP` on FreeBSD, `/usr/share/GeoIP` elsewhere) if that file exists. |
+| `geoip_ip_country` | Optional path to a Country `.mmdb`. Defaults to `GeoLite2-Country.mmdb` in the platform GeoIP directory if present. |
+| `geoip_ip_asn`     | Optional path to an ASN `.mmdb`. Defaults to `GeoLite2-ASN.mmdb` in the platform GeoIP directory if present. Records from every database that opens are merged in the IP info modal. |
+| `domaininfo_cache` | Optional boolean. When true, results of the domain info lookup (`/api/domaininfo`) are cached in memory per worker process, so repeat lookups of the same domain are served instantly. Default false (disabled). |
+| `domaininfo_cache_ttl` | Optional. How long, in seconds, a cached domain info result is considered fresh. Default `300` (5 minutes). Only used when `domaininfo_cache` is true. |
 
 Sub hashes are then treated as a instance. The following values are
 available for that.
