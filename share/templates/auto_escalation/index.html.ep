@@ -133,13 +133,34 @@
         </div>
 
         <div class="mb-2">
-          <label class="form-label small text-muted mb-1">Match (JSON)</label>
-          <textarea id="rule-match" class="form-control form-control-sm font-monospace" rows="8"
-                    spellcheck="false" style="white-space:pre"></textarea>
+          <label class="form-label small text-muted mb-1">Description (optional)</label>
+          <input type="text" id="rule-description" class="form-control form-control-sm">
+        </div>
+
+        <div class="mb-2">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <label class="form-label small text-muted mb-0">Match conditions</label>
+            <button type="button" class="btn btn-sm btn-outline-secondary py-0" id="rule-json-toggle">Advanced (JSON)</button>
+          </div>
+          <div id="rule-builder" class="border border-secondary rounded p-2"></div>
+          <textarea id="rule-match" class="form-control form-control-sm font-monospace mt-1" rows="8"
+                    spellcheck="false" style="white-space:pre;display:none"></textarea>
           <div class="form-text text-muted">
-            e.g. <code>{"all":[{"field":"malscore","op":"&gt;=","value":8},{"field":"raw.alert.severity","op":"&lt;=","value":2}]}</code>
+            Build nested ALL / ANY / NOT groups of field tests, or switch to raw JSON. A field is an
+            alert column (<code>malscore</code>, <code>signature</code>) or a dotted path into the raw
+            payload (<code>raw.alert.severity</code>).
           </div>
         </div>
+
+        <datalist id="rule-field-list">
+          <option value="malscore"></option><option value="signature"></option>
+          <option value="classification"></option><option value="src_ip"></option>
+          <option value="dest_ip"></option><option value="src_port"></option>
+          <option value="dest_port"></option><option value="proto"></option>
+          <option value="app_proto"></option><option value="gid"></option>
+          <option value="sid"></option><option value="raw.alert.severity"></option>
+          <option value="raw.alert.signature"></option>
+        </datalist>
 
         <div id="rule-error" class="text-warning small mb-2" style="display:none"></div>
 
@@ -201,6 +222,194 @@ document.addEventListener('DOMContentLoaded', function() {
     return null;
   }
 
+  // ---- Visual match builder ------------------------------------------------
+  // The builder edits the same match tree the DSL uses. A group serializes to
+  // {all:[...]} or {any:[...]}; a leaf to {field,op,value}; a set "not" toggle
+  // wraps either in {not:...}. The DOM is the source of truth: serialize walks
+  // it, and rebuild constructs it from a parsed match. An "Advanced (JSON)"
+  // toggle swaps the builder for a raw textarea, syncing in both directions.
+  var AE_OPS  = ['==','!=','>','>=','<','<=','regex','in','contains','exists'];
+  var jsonMode = false;
+
+  function el(tag, attrs, kids) {
+    var e = document.createElement(tag);
+    if (attrs) { Object.keys(attrs).forEach(function(k){
+      if (k === 'class') { e.className = attrs[k]; }
+      else if (k === 'text') { e.textContent = attrs[k]; }
+      else { e.setAttribute(k, attrs[k]); }
+    }); }
+    (kids || []).forEach(function(c){ if (c) { e.appendChild(c); } });
+    return e;
+  }
+
+  // numeric-looking strings become numbers so ==/in compare as intended
+  function coerce(v) { return /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v; }
+
+  function valueWidget(op, value) {
+    if (op === 'exists') {
+      var sel = el('select', { class: 'form-select form-select-sm leaf-value', style: 'max-width:6rem' });
+      ['true','false'].forEach(function(b){ sel.appendChild(el('option', { value: b, text: b })); });
+      sel.value = (value === false ? 'false' : 'true');
+      return sel;
+    }
+    var inp = el('input', { type: 'text', class: 'form-control form-control-sm leaf-value', style: 'max-width:13rem' });
+    if (op === 'in') {
+      inp.placeholder = 'a, b, c';
+      inp.value = Array.isArray(value) ? value.join(', ') : (value == null ? '' : value);
+    } else {
+      inp.placeholder = 'value';
+      inp.value = (value == null ? '' : value);
+    }
+    return inp;
+  }
+
+  function negateControl(checked) {
+    var box = el('input', { type: 'checkbox', class: 'form-check-input mt-0 node-negate' });
+    box.checked = !!checked;
+    return el('label', { class: 'small text-muted mb-0 d-inline-flex align-items-center gap-1' },
+              [box, document.createTextNode('not')]);
+  }
+
+  function makeLeaf(leaf) {
+    leaf = leaf || { field: '', op: '==', value: '' };
+    var row = el('div', { class: 'leaf-node d-flex gap-1 align-items-center mb-1 flex-wrap' });
+    row.dataset.kind = 'leaf';
+
+    var field = el('input', { type: 'text', class: 'form-control form-control-sm leaf-field',
+                              list: 'rule-field-list', placeholder: 'field', style: 'max-width:12rem' });
+    field.value = leaf.field || '';
+
+    var op = el('select', { class: 'form-select form-select-sm leaf-op', style: 'max-width:6.5rem' });
+    AE_OPS.forEach(function(o){ var opt = el('option', { value: o, text: o }); if (o === leaf.op) { opt.selected = true; } op.appendChild(opt); });
+
+    var valWrap = el('span', { class: 'leaf-value-wrap' }, [ valueWidget(leaf.op, leaf.value) ]);
+    op.addEventListener('change', function(){
+      var cur = valWrap.firstChild ? valWrap.firstChild.value : '';
+      valWrap.innerHTML = '';
+      valWrap.appendChild(valueWidget(op.value, cur));
+    });
+
+    var rm = el('button', { type: 'button', class: 'btn btn-sm btn-outline-danger py-0 node-remove', text: '×' });
+    rm.addEventListener('click', function(){ row.remove(); });
+
+    row.appendChild(negateControl(leaf.negate));
+    row.appendChild(field);
+    row.appendChild(op);
+    row.appendChild(valWrap);
+    row.appendChild(rm);
+    return row;
+  }
+
+  function makeGroup(group, isRoot) {
+    group = group || { combinator: 'all', negate: false, children: [] };
+    var box = el('div', { class: 'group-node border-start border-2 border-secondary ps-2 mb-1' });
+    box.dataset.kind = 'group';
+
+    var comb = el('select', { class: 'form-select form-select-sm group-combinator', style: 'max-width:6rem' });
+    [['all','ALL'],['any','ANY']].forEach(function(c){ var o = el('option', { value: c[0], text: c[1] }); if (c[0] === group.combinator) { o.selected = true; } comb.appendChild(o); });
+
+    var kids = el('div', { class: 'group-children ms-1' });
+    var addCond = el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary py-0', text: '+ condition' });
+    var addGrp  = el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary py-0', text: '+ group' });
+    addCond.addEventListener('click', function(){ kids.appendChild(makeLeaf(null)); });
+    addGrp.addEventListener('click', function(){ kids.appendChild(makeGroup(null, false)); });
+
+    var head = el('div', { class: 'd-flex gap-1 align-items-center mb-1 flex-wrap' },
+                  [ negateControl(group.negate), comb, addCond, addGrp ]);
+    if (!isRoot) {
+      var rm = el('button', { type: 'button', class: 'btn btn-sm btn-outline-danger py-0 node-remove', text: '× group' });
+      rm.addEventListener('click', function(){ box.remove(); });
+      head.appendChild(rm);
+    }
+
+    box.appendChild(head);
+    box.appendChild(kids);
+    (group.children || []).forEach(function(ch){
+      kids.appendChild(ch.kind === 'group' ? makeGroup(ch, false) : makeLeaf(ch));
+    });
+    return box;
+  }
+
+  function parseMatch(node) {
+    var negate = false;
+    while (node && typeof node === 'object' && node.not !== undefined) { negate = !negate; node = node.not; }
+    if (node && (node.all || node.any)) {
+      var comb = node.all ? 'all' : 'any';
+      return { kind: 'group', negate: negate, combinator: comb, children: (node[comb] || []).map(parseMatch) };
+    }
+    node = node || {};
+    return { kind: 'leaf', negate: negate, field: node.field || '', op: node.op || '==', value: node.value };
+  }
+
+  function rebuildBuilder(match) {
+    var model = parseMatch(match || {});
+    if (model.kind !== 'group') { model = { kind: 'group', negate: false, combinator: 'all', children: [ model ] }; }
+    var container = document.getElementById('rule-builder');
+    container.innerHTML = '';
+    container.appendChild(makeGroup(model, true));
+  }
+
+  function serializeNode(node) {
+    var out, negate;
+    if (node.dataset.kind === 'group') {
+      var head = node.children[0];
+      var comb = head.querySelector('.group-combinator').value;
+      negate = head.querySelector('.node-negate').checked;
+      var children = [];
+      Array.prototype.forEach.call(node.children[1].children, function(ch){ children.push(serializeNode(ch)); });
+      out = {}; out[comb] = children;
+    } else {
+      negate = node.querySelector('.node-negate').checked;
+      var op  = node.querySelector('.leaf-op').value;
+      var vEl = node.querySelector('.leaf-value');
+      out = { field: node.querySelector('.leaf-field').value.trim(), op: op };
+      if (op === 'exists') {
+        out.value = (vEl.value === 'true');
+      } else if (op === 'in') {
+        out.value = vEl.value.split(',').map(function(s){ return coerce(s.trim()); }).filter(function(s){ return s !== ''; });
+      } else if (op === '>' || op === '>=' || op === '<' || op === '<=') {
+        out.value = Number(vEl.value);
+      } else if (op === 'regex' || op === 'contains') {
+        out.value = vEl.value;
+      } else {
+        out.value = coerce(vEl.value);
+      }
+    }
+    if (negate) { out = { not: out }; }
+    return out;
+  }
+
+  function serializeBuilder() {
+    return serializeNode(document.getElementById('rule-builder').children[0]);
+  }
+
+  // the current match, from whichever editor is active; throws on bad JSON
+  function buildMatch() {
+    if (jsonMode) { return JSON.parse((document.getElementById('rule-match').value || '{}').trim() || '{}'); }
+    return serializeBuilder();
+  }
+
+  document.getElementById('rule-json-toggle').addEventListener('click', function(){
+    var errEl = document.getElementById('rule-error');
+    var ta    = document.getElementById('rule-match');
+    var bld   = document.getElementById('rule-builder');
+    if (!jsonMode) {
+      ta.value = JSON.stringify(serializeBuilder(), null, 2);
+      bld.style.display = 'none'; ta.style.display = '';
+      this.textContent = 'Visual builder';
+      jsonMode = true;
+    } else {
+      var parsed;
+      try { parsed = JSON.parse((ta.value || '{}').trim() || '{}'); }
+      catch (e) { errEl.textContent = 'Advanced JSON is invalid: ' + e.message; errEl.style.display = ''; return; }
+      errEl.style.display = 'none';
+      rebuildBuilder(parsed);
+      ta.style.display = 'none'; bld.style.display = '';
+      this.textContent = 'Advanced (JSON)';
+      jsonMode = false;
+    }
+  });
+
   // datalist of known target names for the escalate_to input
   AE_TARGETS.forEach(function(t) {
     var opt = document.createElement('option');
@@ -209,9 +418,13 @@ document.addEventListener('DOMContentLoaded', function() {
   });
 
   function setDisabled(dis) {
-    ['rule-name','rule-priority','rule-enabled','rule-stop','rule-targets','rule-note','rule-match']
+    ['rule-name','rule-priority','rule-enabled','rule-stop','rule-targets','rule-note','rule-description']
       .forEach(function(id){ document.getElementById(id).disabled = dis; });
-    document.querySelectorAll('.rule-table').forEach(function(el){ el.disabled = dis; });
+    document.querySelectorAll('.rule-table').forEach(function(elm){ elm.disabled = dis; });
+    // builder controls are rebuilt per open, so disable the fresh nodes here
+    document.querySelectorAll('#rule-builder input, #rule-builder select, #rule-builder button')
+      .forEach(function(elm){ elm.disabled = dis; });
+    document.getElementById('rule-match').readOnly = dis;
   }
 
   function openModal(rule) {
@@ -224,13 +437,14 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('rule-priority').value = rule ? rule.priority : 100;
     document.getElementById('rule-enabled').checked = rule ? !!rule.enabled : true;
     document.getElementById('rule-stop').checked    = rule ? !!rule.stop_on_match : false;
+    document.getElementById('rule-description').value = rule ? (rule.description || '') : '';
 
     var tables = (rule && rule.tables) || ['suricata','sagan','cape'];
-    document.querySelectorAll('.rule-table').forEach(function(el){
-      el.checked = tables.indexOf(el.value) !== -1;
+    document.querySelectorAll('.rule-table').forEach(function(elm){
+      elm.checked = tables.indexOf(elm.value) !== -1;
     });
 
-    // decompose the stored rule: match JSON, and merged escalate_to + first note
+    // decompose the stored rule: match tree, and merged escalate_to + first note
     var match = {}, targets = [], note = '';
     if (rule && rule.rule) {
       match = rule.rule.match || {};
@@ -239,7 +453,15 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!note && a.note) { note = a.note; }
       });
     }
-    document.getElementById('rule-match').value   = JSON.stringify(match, null, 2);
+
+    // load the match into the visual builder, leaving JSON (advanced) mode
+    jsonMode = false;
+    document.getElementById('rule-match').style.display = 'none';
+    document.getElementById('rule-builder').style.display = '';
+    document.getElementById('rule-json-toggle').textContent = 'Advanced (JSON)';
+    document.getElementById('rule-error').style.display = 'none';
+    rebuildBuilder(match);
+
     document.getElementById('rule-targets').value = targets.join(', ');
     document.getElementById('rule-note').value    = note;
     document.getElementById('rule-preview-table').value =
@@ -253,16 +475,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Build the rule payload from the modal inputs. Returns {body} or {error}.
   function buildBody() {
-    var matchText = document.getElementById('rule-match').value.trim();
     var match;
-    try { match = JSON.parse(matchText || '{}'); }
+    try { match = buildMatch(); }
     catch (e) { return { error: 'Match is not valid JSON: ' + e.message }; }
 
     var targets = document.getElementById('rule-targets').value
       .split(',').map(function(s){ return s.trim(); }).filter(function(s){ return s !== ''; });
 
     var tables = [];
-    document.querySelectorAll('.rule-table').forEach(function(el){ if (el.checked) { tables.push(el.value); } });
+    document.querySelectorAll('.rule-table').forEach(function(elm){ if (elm.checked) { tables.push(elm.value); } });
 
     var note = document.getElementById('rule-note').value.trim();
     var action = { escalate_to: targets };
@@ -276,7 +497,7 @@ document.addEventListener('DOMContentLoaded', function() {
       priority:      document.getElementById('rule-priority').value.trim(),
       stop_on_match: document.getElementById('rule-stop').checked ? 1 : 0,
       enabled:       document.getElementById('rule-enabled').checked ? 1 : 0,
-      description:   '' // description editing omitted from phase 1 form
+      description:   document.getElementById('rule-description').value.trim()
     } };
   }
 
