@@ -1,0 +1,397 @@
+% layout 'default';
+% title 'Auto-Escalation Rules';
+
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/search" class="text-danger">Search</a></li>
+    <li class="breadcrumb-item active">Auto-Escalation Rules</li>
+  </ol>
+</nav>
+
+% if ($error) {
+<div class="alert alert-danger py-2">
+  <strong>Error:</strong> <%= $error %>
+</div>
+% }
+
+<div class="card border-secondary mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Auto-Escalation Rules</span>
+    % if ($can_manage) {
+    <button type="button" class="btn btn-sm btn-danger" id="rule-add-btn">Add Rule</button>
+    % } else {
+    <span class="badge bg-secondary">read-only — set auto_escalation_manage_enable to edit</span>
+    % }
+  </div>
+  <div class="p-2">
+    <div id="ae-action-status" class="small mb-2" style="display:none"></div>
+    % if (@$rules) {
+    <div class="table-responsive">
+      <table class="table table-dark table-sm table-hover table-bordered mb-0" id="ae-rules-table">
+        <thead class="table-secondary">
+          <tr>
+            <th>ID</th><th>Name</th><th>Enabled</th><th>Pri</th><th>Stop</th>
+            <th>Tables</th><th>Matches</th><th>Last Matched</th><th>Description</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          % for my $r (@$rules) {
+          <tr data-rule-id="<%= $r->{id} %>">
+            <td><%= $r->{id} %></td>
+            <td><%= $r->{name} %></td>
+            <td>
+              % if ($can_manage) {
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input rule-toggle" type="checkbox"
+                       data-rule-id="<%= $r->{id} %>" <%= $r->{enabled} ? 'checked' : '' %>>
+              </div>
+              % } elsif ($r->{enabled}) {
+              <span class="badge bg-success">enabled</span>
+              % } else {
+              <span class="badge bg-secondary">disabled</span>
+              % }
+            </td>
+            <td><%= $r->{priority} %></td>
+            <td><%= $r->{stop_on_match} ? 'yes' : '' %></td>
+            <td class="small"><%= join(',', @{ $r->{tables} }) %></td>
+            <td><%= $r->{match_count} %></td>
+            <td class="text-muted small"><%= $r->{last_matched} // '' %></td>
+            <td><%= $r->{description} // '' %></td>
+            <td class="text-nowrap">
+              % if ($can_manage) {
+              <button type="button" class="btn btn-sm btn-outline-secondary py-0 rule-edit-btn"
+                      data-rule-id="<%= $r->{id} %>">Edit</button>
+              <button type="button" class="btn btn-sm btn-outline-danger py-0 rule-delete-btn"
+                      data-rule-id="<%= $r->{id} %>" data-rule-name="<%= $r->{name} %>">Delete</button>
+              % } else {
+              <button type="button" class="btn btn-sm btn-outline-secondary py-0 rule-edit-btn"
+                      data-rule-id="<%= $r->{id} %>">View</button>
+              % }
+            </td>
+          </tr>
+          % }
+        </tbody>
+      </table>
+    </div>
+    % } else {
+    <div class="alert alert-secondary py-2 mb-0">No auto-escalation rules configured yet.</div>
+    % }
+  </div>
+</div>
+
+<!-- Add/edit/view rule modal. Phase 1 edits the match tree as JSON; the
+     actions are built from the targets + note inputs. -->
+<div class="modal fade" id="rule-modal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content bg-dark text-light border-secondary">
+      <div class="modal-header py-2 border-secondary">
+        <h6 class="modal-title" id="rule-modal-title">Add Rule</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="rule-id" value="">
+        <div class="row g-2 mb-2">
+          <div class="col-md-5">
+            <label class="form-label small text-muted mb-1">Name</label>
+            <input type="text" id="rule-name" class="form-control form-control-sm">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small text-muted mb-1">Priority</label>
+            <input type="text" id="rule-priority" class="form-control form-control-sm" value="100" inputmode="numeric">
+          </div>
+          <div class="col-md-5 d-flex align-items-end gap-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="rule-enabled" checked>
+              <label class="form-check-label small" for="rule-enabled">Enabled</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="rule-stop">
+              <label class="form-check-label small" for="rule-stop">Stop on match</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="mb-2">
+          <label class="form-label small text-muted mb-1">Tables</label>
+          <div class="d-flex gap-3">
+            <div class="form-check"><input class="form-check-input rule-table" type="checkbox" value="suricata" id="rule-table-suricata" checked><label class="form-check-label small" for="rule-table-suricata">suricata</label></div>
+            <div class="form-check"><input class="form-check-input rule-table" type="checkbox" value="sagan" id="rule-table-sagan" checked><label class="form-check-label small" for="rule-table-sagan">sagan</label></div>
+            <div class="form-check"><input class="form-check-input rule-table" type="checkbox" value="cape" id="rule-table-cape" checked><label class="form-check-label small" for="rule-table-cape">cape</label></div>
+          </div>
+        </div>
+
+        <div class="row g-2 mb-2">
+          <div class="col-md-7">
+            <label class="form-label small text-muted mb-1">Escalate to (target names or ids, comma separated)</label>
+            <input type="text" id="rule-targets" class="form-control form-control-sm" list="rule-target-list" placeholder="soc-hook, ir">
+            <datalist id="rule-target-list"></datalist>
+          </div>
+          <div class="col-md-5">
+            <label class="form-label small text-muted mb-1">Note (optional)</label>
+            <input type="text" id="rule-note" class="form-control form-control-sm">
+          </div>
+        </div>
+
+        <div class="mb-2">
+          <label class="form-label small text-muted mb-1">Match (JSON)</label>
+          <textarea id="rule-match" class="form-control form-control-sm font-monospace" rows="8"
+                    spellcheck="false" style="white-space:pre"></textarea>
+          <div class="form-text text-muted">
+            e.g. <code>{"all":[{"field":"malscore","op":"&gt;=","value":8},{"field":"raw.alert.severity","op":"&lt;=","value":2}]}</code>
+          </div>
+        </div>
+
+        <div id="rule-error" class="text-warning small mb-2" style="display:none"></div>
+
+        <!-- Dry-run preview -->
+        <div class="border-top border-secondary pt-2">
+          <div class="d-flex align-items-end gap-2 mb-2">
+            <div>
+              <label class="form-label small text-muted mb-1">Preview against last</label>
+              <div class="input-group input-group-sm">
+                <input type="text" id="rule-preview-minutes" class="form-control" value="60" inputmode="numeric" style="max-width:5rem">
+                <span class="input-group-text">min of</span>
+                <select id="rule-preview-table" class="form-select">
+                  <option value="suricata">suricata</option>
+                  <option value="sagan">sagan</option>
+                  <option value="cape">cape</option>
+                </select>
+              </div>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-info" id="rule-preview-btn">Run preview</button>
+          </div>
+          <div id="rule-preview-status" class="small mb-1" style="display:none"></div>
+          <div id="rule-preview-results" class="table-responsive" style="display:none;max-height:260px;overflow-y:auto">
+            <table class="table table-dark table-sm table-bordered mb-0">
+              <thead class="table-secondary"><tr><th>ID</th><th>Time</th><th>Signature/Class</th><th>Src</th><th>Dest</th><th>Malscore</th></tr></thead>
+              <tbody id="rule-preview-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer py-2 border-secondary">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+        % if ($can_manage) {
+        <button type="button" class="btn btn-sm btn-danger" id="rule-save-btn">Save</button>
+        % }
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var AE_RULES     = <%== $rules_json %>;
+var AE_TARGETS   = <%== $targets_json %>;
+var AE_CAN_MANAGE = <%= $can_manage ? 'true' : 'false' %>;
+
+document.addEventListener('DOMContentLoaded', function() {
+  var ruleModal = new bootstrap.Modal(document.getElementById('rule-modal'));
+  var statusEl  = document.getElementById('ae-action-status');
+
+  function status(msg, ok) {
+    statusEl.textContent = msg;
+    statusEl.className = 'small mb-2 ' + (ok ? 'text-success' : 'text-warning');
+    statusEl.style.display = '';
+  }
+
+  function findRule(id) {
+    for (var i = 0; i < AE_RULES.length; i++) {
+      if (String(AE_RULES[i].id) === String(id)) { return AE_RULES[i]; }
+    }
+    return null;
+  }
+
+  // datalist of known target names for the escalate_to input
+  AE_TARGETS.forEach(function(t) {
+    var opt = document.createElement('option');
+    opt.value = t.name;
+    document.getElementById('rule-target-list').appendChild(opt);
+  });
+
+  function setDisabled(dis) {
+    ['rule-name','rule-priority','rule-enabled','rule-stop','rule-targets','rule-note','rule-match']
+      .forEach(function(id){ document.getElementById(id).disabled = dis; });
+    document.querySelectorAll('.rule-table').forEach(function(el){ el.disabled = dis; });
+  }
+
+  function openModal(rule) {
+    document.getElementById('rule-error').style.display = 'none';
+    document.getElementById('rule-preview-results').style.display = 'none';
+    document.getElementById('rule-preview-status').style.display = 'none';
+
+    document.getElementById('rule-id').value       = rule ? rule.id : '';
+    document.getElementById('rule-name').value     = rule ? rule.name : '';
+    document.getElementById('rule-priority').value = rule ? rule.priority : 100;
+    document.getElementById('rule-enabled').checked = rule ? !!rule.enabled : true;
+    document.getElementById('rule-stop').checked    = rule ? !!rule.stop_on_match : false;
+
+    var tables = (rule && rule.tables) || ['suricata','sagan','cape'];
+    document.querySelectorAll('.rule-table').forEach(function(el){
+      el.checked = tables.indexOf(el.value) !== -1;
+    });
+
+    // decompose the stored rule: match JSON, and merged escalate_to + first note
+    var match = {}, targets = [], note = '';
+    if (rule && rule.rule) {
+      match = rule.rule.match || {};
+      (rule.rule.actions || []).forEach(function(a){
+        (a.escalate_to || []).forEach(function(x){ targets.push(x); });
+        if (!note && a.note) { note = a.note; }
+      });
+    }
+    document.getElementById('rule-match').value   = JSON.stringify(match, null, 2);
+    document.getElementById('rule-targets').value = targets.join(', ');
+    document.getElementById('rule-note').value    = note;
+    document.getElementById('rule-preview-table').value =
+      (tables.indexOf('suricata') !== -1) ? 'suricata' : tables[0] || 'suricata';
+
+    setDisabled(!AE_CAN_MANAGE);
+    document.getElementById('rule-modal-title').textContent =
+      rule ? ((AE_CAN_MANAGE ? 'Edit' : 'View') + ' Rule — ' + rule.name) : 'Add Rule';
+    ruleModal.show();
+  }
+
+  // Build the rule payload from the modal inputs. Returns {body} or {error}.
+  function buildBody() {
+    var matchText = document.getElementById('rule-match').value.trim();
+    var match;
+    try { match = JSON.parse(matchText || '{}'); }
+    catch (e) { return { error: 'Match is not valid JSON: ' + e.message }; }
+
+    var targets = document.getElementById('rule-targets').value
+      .split(',').map(function(s){ return s.trim(); }).filter(function(s){ return s !== ''; });
+
+    var tables = [];
+    document.querySelectorAll('.rule-table').forEach(function(el){ if (el.checked) { tables.push(el.value); } });
+
+    var note = document.getElementById('rule-note').value.trim();
+    var action = { escalate_to: targets };
+    if (note !== '') { action.note = note; }
+
+    return { body: {
+      id:            document.getElementById('rule-id').value,
+      name:          document.getElementById('rule-name').value.trim(),
+      rule:          { match: match, actions: [ action ] },
+      tables:        tables,
+      priority:      document.getElementById('rule-priority').value.trim(),
+      stop_on_match: document.getElementById('rule-stop').checked ? 1 : 0,
+      enabled:       document.getElementById('rule-enabled').checked ? 1 : 0,
+      description:   '' // description editing omitted from phase 1 form
+    } };
+  }
+
+  if (document.getElementById('rule-add-btn')) {
+    document.getElementById('rule-add-btn').addEventListener('click', function(){ openModal(null); });
+  }
+  document.querySelectorAll('.rule-edit-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){ openModal(findRule(this.dataset.ruleId)); });
+  });
+
+  var saveBtn = document.getElementById('rule-save-btn');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', function(){
+      var errEl = document.getElementById('rule-error');
+      errEl.style.display = 'none';
+      var built = buildBody();
+      if (built.error) { errEl.textContent = built.error; errEl.style.display = ''; return; }
+      fetch('/api/auto_escalation/rules', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(built.body)
+      })
+        .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, data: d }; }); })
+        .then(function(res){
+          if (!res.ok || res.data.error) {
+            errEl.textContent = res.data.error || 'save failed';
+            errEl.style.display = '';
+            return;
+          }
+          window.location.reload();
+        })
+        .catch(function(e){ errEl.textContent = 'save failed: ' + e; errEl.style.display = ''; });
+    });
+  }
+
+  document.querySelectorAll('.rule-delete-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var id = this.dataset.ruleId;
+      if (!window.confirm('Delete auto-escalation rule "' + this.dataset.ruleName + '"?')) { return; }
+      fetch('/api/auto_escalation/rules/' + encodeURIComponent(id) + '/delete', { method: 'POST' })
+        .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, data: d }; }); })
+        .then(function(res){
+          if (!res.ok || res.data.error) { status(res.data.error || 'delete failed', false); return; }
+          window.location.reload();
+        })
+        .catch(function(e){ status('delete failed: ' + e, false); });
+    });
+  });
+
+  document.querySelectorAll('.rule-toggle').forEach(function(el){
+    el.addEventListener('change', function(){
+      var id = this.dataset.ruleId, want = this.checked, box = this;
+      fetch('/api/auto_escalation/rules/' + encodeURIComponent(id) + '/toggle', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: want ? 1 : 0 })
+      })
+        .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, data: d }; }); })
+        .then(function(res){
+          if (!res.ok || res.data.error) { box.checked = !want; status(res.data.error || 'toggle failed', false); return; }
+          status('rule ' + id + (want ? ' enabled' : ' disabled'), true);
+        })
+        .catch(function(e){ box.checked = !want; status('toggle failed: ' + e, false); });
+    });
+  });
+
+  document.getElementById('rule-preview-btn').addEventListener('click', function(){
+    var errEl    = document.getElementById('rule-error');
+    var statusP  = document.getElementById('rule-preview-status');
+    var resultsP = document.getElementById('rule-preview-results');
+    var tbody    = document.getElementById('rule-preview-tbody');
+    errEl.style.display = 'none';
+    resultsP.style.display = 'none';
+
+    var built = buildBody();
+    if (built.error) { errEl.textContent = built.error; errEl.style.display = ''; return; }
+
+    statusP.textContent = 'Running preview…';
+    statusP.className = 'small mb-1 text-muted';
+    statusP.style.display = '';
+
+    fetch('/api/auto_escalation/preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rule: built.body.rule,
+        table: document.getElementById('rule-preview-table').value,
+        go_back_minutes: document.getElementById('rule-preview-minutes').value.trim()
+      })
+    })
+      .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, data: d }; }); })
+      .then(function(res){
+        if (!res.ok || res.data.error) {
+          statusP.textContent = res.data.error || 'preview failed';
+          statusP.className = 'small mb-1 text-warning';
+          return;
+        }
+        var d = res.data;
+        var unknown = (d.unknown_targets && d.unknown_targets.length)
+          ? ' — unknown targets: ' + d.unknown_targets.join(', ') : '';
+        statusP.textContent = d.matched + ' of ' + d.scanned + ' recent ' + d.table
+          + ' alerts would match' + unknown;
+        statusP.className = 'small mb-1 ' + (d.matched ? 'text-success' : 'text-muted');
+        tbody.innerHTML = '';
+        (d.matches || []).forEach(function(m){
+          var tr = document.createElement('tr');
+          [ m.id, m.timestamp || '', m.signature || m.classification || '', m.src_ip || '',
+            m.dest_ip || '', (m.malscore == null ? '' : m.malscore) ].forEach(function(v){
+            var td = document.createElement('td'); td.textContent = v; tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        });
+        resultsP.style.display = (d.matches && d.matches.length) ? '' : 'none';
+      })
+      .catch(function(e){
+        statusP.textContent = 'preview failed: ' + e;
+        statusP.className = 'small mb-1 text-warning';
+      });
+  });
+});
+</script>

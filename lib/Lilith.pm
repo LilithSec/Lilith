@@ -1840,6 +1840,121 @@ sub auto_escalation_delete {
 	return 1;
 } ## end sub auto_escalation_delete
 
+=head2 auto_escalation_preview
+
+Evaluates a single, possibly unsaved, rule against recent alerts and
+returns which would match, B<without> escalating anything and B<without>
+stamping any alert as considered. This backs the web UI's dry run: it
+looks at all alerts in the window (not just ones auto_escalate has yet
+to consider) so a rule can be tried against history.
+
+The C<rule> is validated with L<Lilith::AutoEscalate>'s check_rule.
+C<table> selects the alert table (default suricata), C<go_back_minutes>
+the window (default 60), and C<limit> caps how many recent alerts are
+fetched (default 500). Returns a hash ref with C<table>,
+C<go_back_minutes>, C<scanned>, C<matched>, the resolved C<targets> and
+any C<unknown_targets> the rule's actions name, and C<matches> (a array
+ref of light weight per alert summaries).
+
+    my $preview = $lilith->auto_escalation_preview(
+                                                   rule            => $rule,
+                                                   table           => 'cape',
+                                                   go_back_minutes => 60,
+                                                  );
+
+=cut
+
+sub auto_escalation_preview {
+	my ( $self, %opts ) = @_;
+
+	if ( ref( $opts{rule} ) ne 'HASH' ) {
+		die('"rule" is required and must be a hash ref');
+	}
+	Lilith::AutoEscalate->check_rule( $opts{rule} );
+
+	my $table = defined( $opts{table} ) ? $opts{table} : 'suricata';
+	if ( $table ne 'suricata' && $table ne 'sagan' && $table ne 'cape' ) {
+		die( '"' . $table . '" is not a known table type' );
+	}
+
+	my $minutes = defined( $opts{go_back_minutes} ) ? $opts{go_back_minutes} : 60;
+	if ( $minutes !~ /^[0-9]+$/ ) {
+		die( '"' . $minutes . '" for go_back_minutes is not numeric' );
+	}
+
+	my $limit = defined( $opts{limit} ) ? $opts{limit} : 500;
+	if ( $limit !~ /^[0-9]+$/ ) {
+		die('"limit" must be numeric');
+	}
+
+	my $events = $self->search(
+		table           => $table,
+		go_back_minutes => $minutes,
+		limit           => $limit,
+		order_by        => ( $table eq 'cape' ? 'id' : 'timestamp' ),
+		order_dir       => 'DESC',
+	);
+
+	my $matches = Lilith::AutoEscalate->evaluate(
+		rules  => [ { id => 0, name => 'preview', priority => 0, stop_on_match => 0, rule => $opts{rule} } ],
+		events => $events,
+	);
+
+	# resolve the rule's escalate_to tokens for display, flagging any that
+	# do not name a known target
+	my %target_id;
+	my %target_name;
+	foreach my $target ( @{ $self->escalation_targets } ) {
+		$target_id{ $target->{name} } = $target->{id};
+		$target_name{ $target->{id} } = $target->{name};
+	}
+	my @wanted;
+	foreach my $action ( @{ $opts{rule}{actions} } ) {
+		push( @wanted, @{ $action->{escalate_to} } );
+	}
+	my @targets;
+	my @unknown;
+	my %seen;
+	foreach my $token (@wanted) {
+		next if $seen{$token}++;
+		if ( $token =~ /^[0-9]+$/ ) {
+			defined( $target_name{$token} ) ? push( @targets, $token ) : push( @unknown, $token );
+		} elsif ( defined( $target_id{$token} ) ) {
+			push( @targets, $token );
+		} else {
+			push( @unknown, $token );
+		}
+	} ## end foreach my $token (@wanted)
+
+	my @results;
+	foreach my $match ( @{$matches} ) {
+		my $event = $match->{event};
+		push(
+			@results,
+			{
+				id             => $event->{id},
+				event_id       => $event->{event_id},
+				timestamp      => ( $table eq 'cape' ? $event->{stop} : $event->{timestamp} ),
+				signature      => $event->{signature},
+				classification => $event->{classification},
+				src_ip         => $event->{src_ip},
+				dest_ip        => $event->{dest_ip},
+				malscore       => $event->{malscore},
+			}
+		);
+	} ## end foreach my $match ( @{$matches...})
+
+	return {
+		table           => $table,
+		go_back_minutes => $minutes + 0,
+		scanned         => scalar( @{$events} ),
+		matched         => scalar(@results),
+		targets         => \@targets,
+		unknown_targets => \@unknown,
+		matches         => \@results,
+	};
+} ## end sub auto_escalation_preview
+
 =head2 auto_escalate
 
 Evaluates the enabled auto escalation rules against recently ingested

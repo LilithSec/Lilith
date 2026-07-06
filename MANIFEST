@@ -29,6 +29,7 @@ t/manifest.t
 t/pod-coverage.t
 t/pod.t
 t/web-api.t
+t/web-auto-escalation.t
 t/web-escalation.t
 t/web-helpers.t
 t/web-referer.t
@@ -37,6 +38,7 @@ src_bin/lilith
 src_bin/lilith-web
 lib/Lilith/Web.pm
 lib/Lilith/Web/Controller/Api.pm
+lib/Lilith/Web/Controller/AutoEscalation.pm
 lib/Lilith/Web/Controller/Escalation.pm
 lib/Lilith/Web/Controller/Search.pm
 lib/Lilith/Web/Controller/Event.pm
@@ -45,6 +47,7 @@ share/templates/search/index.html.ep
 share/templates/search/_results.html.ep
 share/templates/event/view.html.ep
 share/templates/escalation/index.html.ep
+share/templates/auto_escalation/index.html.ep
 share/public/vendor/bootstrap-5.3.3/css/bootstrap.min.css
 share/public/vendor/bootstrap-5.3.3/js/bootstrap.bundle.min.js
 init/freebsd

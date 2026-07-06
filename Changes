@@ -48,7 +48,15 @@ Revision history for Lilith
 		   run periodically, plus ae_list / ae_get / ae_create /
 		   ae_update / ae_delete to manage rules. A systemd service +
 		   timer and a cron example for running auto_escalate every few
-		   minutes ship under init/.
+		   minutes ship under init/. The web UI gets a /auto_escalation
+		   page for managing rules (edit the match as JSON, with a live
+		   dry-run preview against recent alerts that never sends). Its
+		   gating is two tiered: the page and its read/preview endpoints
+		   follow escalation_enable, while creating/editing/deleting
+		   rules additionally requires the new auto_escalation_manage_enable
+		   (off by default, so a saved rule can not be changed from the
+		   web UI unless explicitly opted in); with it off the page is
+		   read only.
 		 - EVE instances are now defined under the [eves.*] table, e.g.
 		   [eves.suricata-eve], instead of as plain top-level tables. Old
 		   top-level instance tables are ignored, with a warning.

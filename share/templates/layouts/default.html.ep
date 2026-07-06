@@ -123,6 +123,8 @@
       % if ($self->escalation_enable) {
       <!-- Escalation target management -->
       <a class="btn btn-sm btn-outline-secondary" href="/escalation" id="nav-escalation">Escalation</a>
+      <!-- Auto escalation rule management -->
+      <a class="btn btn-sm btn-outline-secondary" href="/auto_escalation" id="nav-auto-escalation">Auto-Esc</a>
       % }
 
       % if ($self->virani_enabled) {

@@ -73,6 +73,14 @@ sub startup {
 	# and change escalation target config.
 	$self->helper( escalation_enable => sub { $toml->{escalation_enable} ? 1 : 0 } );
 
+	# Whether auto escalation rules may be created/edited/deleted from the web
+	# UI. Off by default and separate from escalation_enable: a saved+enabled
+	# rule escalates automatically on the timer with no human in the loop, so
+	# editing it is more sensitive than the manual escalate button. The
+	# /auto_escalation page and its read/preview endpoints are gated by
+	# escalation_enable; only the mutating endpoints additionally require this.
+	$self->helper( auto_escalation_manage_enable => sub { $toml->{auto_escalation_manage_enable} ? 1 : 0 } );
+
 	my $dnstracer_flags = [];
 	if ( ref $toml->{dnstracer_flags} eq 'ARRAY' ) {
 		$dnstracer_flags = $toml->{dnstracer_flags};
@@ -332,6 +340,12 @@ sub startup {
 	$r->post('/api/escalation/targets/:id/test')->to('escalation#target_test');
 	$r->post('/api/escalation/escalate')->to('escalation#escalate');
 	$r->get('/api/escalation/history/:table/:id')->to('escalation#history');
+	$r->get('/auto_escalation')->to('auto_escalation#index');
+	$r->get('/api/auto_escalation/rules')->to('auto_escalation#rules');
+	$r->post('/api/auto_escalation/rules')->to('auto_escalation#save');
+	$r->post('/api/auto_escalation/rules/:id/delete')->to('auto_escalation#delete');
+	$r->post('/api/auto_escalation/rules/:id/toggle')->to('auto_escalation#toggle');
+	$r->post('/api/auto_escalation/preview')->to('auto_escalation#preview');
 }
 
 1;
