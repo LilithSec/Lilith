@@ -1,0 +1,24 @@
+# systemd timer for Lilith automatic escalation.
+#
+# Fires lilith-auto-escalate.service a couple of minutes after boot and
+# then every five minutes. The service's -m window is larger than this
+# interval on purpose so an alert ingested between runs is still within a
+# run's scan; the per-alert auto_escalated marker keeps that from causing
+# a double escalation.
+#
+# Enable with:
+#   systemctl enable --now lilith-auto-escalate.timer
+
+[Unit]
+Description=Run Lilith automatic escalation periodically
+Documentation=man:lilith
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+# after downtime just run once when back, rather than firing every missed slot
+Persistent=false
+
+[Install]
+WantedBy=timers.target

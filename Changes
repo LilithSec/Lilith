@@ -33,6 +33,22 @@ Revision history for Lilith
 		   --set key=value items. The escalation actions are not gated
 		   by escalation_enable, as that exists for the unauthenticated
 		   web UI; the CLI already holds the DB credentials.
+		 - Add automatic escalation. A new auto_escalations table (still
+		   schema version 3) holds rules as a JSON match/actions DSL;
+		   Lilith::AutoEscalate validates a rule and compiles its match
+		   into a Rule::Engine ruleset. auto_escalate() evaluates the
+		   enabled rules against alerts ingested within a window and,
+		   for each match, escalates the alert to the rule's targets via
+		   the existing escalate(), so auto escalations share the same
+		   audit trail and per-row escalations array. Each alert gains a
+		   auto_escalated timestamp so it is considered exactly once;
+		   rules are evaluated in priority order and a stop_on_match rule
+		   halts later rules for that alert. The lilith CLI gets an
+		   auto_escalate action (with --dry-run and --tables) meant to be
+		   run periodically, plus ae_list / ae_get / ae_create /
+		   ae_update / ae_delete to manage rules. A systemd service +
+		   timer and a cron example for running auto_escalate every few
+		   minutes ship under init/.
 		 - EVE instances are now defined under the [eves.*] table, e.g.
 		   [eves.suricata-eve], instead of as plain top-level tables. Old
 		   top-level instance tables are ignored, with a warning.

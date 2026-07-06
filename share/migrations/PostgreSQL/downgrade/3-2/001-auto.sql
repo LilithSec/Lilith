@@ -1,6 +1,14 @@
 -- Lilith schema downgrade 3 -> 2: drop the escalation system tables and
 -- the per-alert escalation ID arrays
 
+ALTER TABLE suricata_alerts DROP COLUMN auto_escalated;
+
+ALTER TABLE sagan_alerts DROP COLUMN auto_escalated;
+
+ALTER TABLE cape_alerts DROP COLUMN auto_escalated;
+
+DROP TABLE auto_escalations;
+
 ALTER TABLE suricata_alerts DROP COLUMN escalations;
 
 ALTER TABLE sagan_alerts DROP COLUMN escalations;

@@ -167,6 +167,11 @@ __PACKAGE__->table("sagan_alerts");
   data_type: 'bigint[]'
   is_nullable: 1
 
+=head2 auto_escalated
+
+  data_type: 'timestamp with time zone'
+  is_nullable: 1
+
 =cut
 
 __PACKAGE__->add_columns(
@@ -227,6 +232,8 @@ __PACKAGE__->add_columns(
   { data_type => "jsonb", is_nullable => 0 },
   "escalations",
   { data_type => "bigint[]", is_nullable => 1 },
+  "auto_escalated",
+  { data_type => "timestamp with time zone", is_nullable => 1 },
 );
 
 =head1 PRIMARY KEY

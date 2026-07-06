@@ -84,6 +84,31 @@ If using snmpd.
 extend lilith /usr/local/bin/lilith -a extend
 ```
 
+### Scheduling automatic escalation
+
+If you use auto escalation rules (see the `auto_escalate` and `ae_*`
+actions), run `lilith -a auto_escalate` periodically so new alerts are
+evaluated against the rules. Two ready made units ship under `init/`:
+
+```
+cp init/lilith-auto-escalate.service init/lilith-auto-escalate.timer \
+    /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now lilith-auto-escalate.timer
+```
+
+Or, without systemd, install the cron entry:
+
+```
+cp init/lilith-auto-escalate.cron /etc/cron.d/lilith-auto-escalate
+```
+
+Both run every five minutes with `-m 60`. The `-m` window only bounds how
+far back each run scans for alerts it has not considered yet; the
+per-alert `auto_escalated` marker is what prevents an alert from being
+escalated twice. Use `--dry-run` first (`lilith -a auto_escalate
+--dry-run`) to see what would fire without sending anything.
+
 ### Upgrading
 
 ```

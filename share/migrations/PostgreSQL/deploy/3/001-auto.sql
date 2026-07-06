@@ -26,6 +26,7 @@ CREATE TABLE suricata_alerts (
     rev bigint,
     raw jsonb,
     escalations bigint[],
+    auto_escalated TIMESTAMP WITH TIME ZONE,
     PRIMARY KEY(id)
 );
 
@@ -56,6 +57,7 @@ CREATE TABLE sagan_alerts (
     rev bigint,
     raw jsonb NOT NULL,
     escalations bigint[],
+    auto_escalated TIMESTAMP WITH TIME ZONE,
     PRIMARY KEY(id)
 );
 
@@ -85,6 +87,7 @@ CREATE TABLE cape_alerts (
     size integer,
     raw jsonb NOT NULL,
     escalations bigint[],
+    auto_escalated TIMESTAMP WITH TIME ZONE,
     PRIMARY KEY(id)
 );
 
@@ -124,6 +127,28 @@ CREATE TABLE escalations (
 );
 
 CREATE INDEX escalations_event_idx ON escalations (table_name, alert_id);
+
+-- auto_escalations holds rules evaluated against newly ingested alerts by
+-- auto_escalate(). 'rule' is the match/actions DSL as JSONB, compiled into a
+-- Rule::Engine ruleset at evaluation time. 'tables' scopes which alert tables
+-- a rule applies to, 'priority' orders evaluation (lower first), and
+-- 'stop_on_match' keeps later rules from firing on an alert an earlier rule
+-- already matched. The per-alert 'auto_escalated' timestamp records when
+-- auto_escalate() last considered a row so each is evaluated exactly once.
+CREATE TABLE auto_escalations (
+    id bigserial NOT NULL,
+    name varchar(255) NOT NULL UNIQUE,
+    enabled boolean NOT NULL DEFAULT TRUE,
+    priority integer NOT NULL DEFAULT 100,
+    tables varchar(64)[] NOT NULL DEFAULT '{suricata,sagan,cape}',
+    rule jsonb NOT NULL DEFAULT '{}',
+    stop_on_match boolean NOT NULL DEFAULT FALSE,
+    description varchar(2048),
+    last_matched TIMESTAMP WITH TIME ZONE,
+    match_count bigint NOT NULL DEFAULT 0,
+    updated TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    PRIMARY KEY(id)
+);
 
 CREATE TABLE dbix_class_deploymenthandler_versions (
   id bigserial NOT NULL,

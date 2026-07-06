@@ -1,0 +1,35 @@
+# systemd service for Lilith automatic escalation.
+#
+# This is a oneshot run driven by lilith-auto-escalate.timer; it is not a
+# long running daemon. Install both files into /etc/systemd/system/ and
+# enable the timer (not the service):
+#
+#   cp init/lilith-auto-escalate.service init/lilith-auto-escalate.timer \
+#       /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now lilith-auto-escalate.timer
+#
+# Each run evaluates the enabled auto escalation rules against alerts and
+# escalates any matches. The -m window below only bounds how far back a
+# run scans for alerts it has not considered yet; the per-alert
+# auto_escalated marker is what prevents an alert from being escalated
+# twice. A generous window is therefore safe and mostly matters for CAPE
+# alerts, whose 'stop' time can lag well behind when Lilith ingested them.
+# Raise -m if your CAPE analysis lag exceeds it.
+
+[Unit]
+Description=Lilith automatic escalation run
+Documentation=man:lilith
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# run as the same low privilege user that holds Lilith's database
+# credentials; auto escalation only touches the database, not the EVE logs
+User=lilith
+Group=lilith
+Nice=10
+ExecStart=/usr/local/bin/lilith -a auto_escalate -m 60
+# to use a non default config file, comment the line above and use:
+#ExecStart=/usr/local/bin/lilith -c /usr/local/etc/lilith.toml -a auto_escalate -m 60

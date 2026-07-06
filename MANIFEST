@@ -1,10 +1,12 @@
 Changes
 lib/Lilith.pm
+lib/Lilith/AutoEscalate.pm
 lib/Lilith/Escalate.pm
 lib/Lilith/Escalate/Type/Email.pm
 lib/Lilith/Escalate/Type/Syslog.pm
 lib/Lilith/Escalate/Type/Webhook.pm
 lib/Lilith/Schema.pm
+lib/Lilith/Schema/Result/AutoEscalation.pm
 lib/Lilith/Schema/Result/CapeAlert.pm
 lib/Lilith/Schema/Result/Escalation.pm
 lib/Lilith/Schema/Result/EscalationTarget.pm
@@ -15,6 +17,7 @@ MANIFEST			This list of files
 README.md
 share/migrations/PostgreSQL/deploy/1/001-auto.sql
 t/00-load.t
+t/auto-escalate.t
 t/escalate.t
 t/lib/TestEscType/Mock.pm
 t/lilith-class-methods.t
@@ -45,6 +48,9 @@ share/templates/escalation/index.html.ep
 share/public/vendor/bootstrap-5.3.3/css/bootstrap.min.css
 share/public/vendor/bootstrap-5.3.3/js/bootstrap.bundle.min.js
 init/freebsd
+init/lilith-auto-escalate.service
+init/lilith-auto-escalate.timer
+init/lilith-auto-escalate.cron
 share/migrations/PostgreSQL/deploy/1/001-auto.sql
 share/migrations/PostgreSQL/deploy/2/001-auto.sql
 share/migrations/PostgreSQL/deploy/3/001-auto.sql

@@ -40,6 +40,7 @@ my %WriteMakefileArgs = (
 		'MIME::Base64'           => '0',
 		'Net::Server::Daemonize' => '0',
 		'POE'                    => '0',
+		'Rule::Engine'           => '0',
 		'Sys::Hostname'          => '0',
 		'Sys::Syslog'            => '0',
 		'Term::ANSIColor'        => '0',

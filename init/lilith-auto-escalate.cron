@@ -1,0 +1,11 @@
+# /etc/cron.d style entry for Lilith automatic escalation, for systems not
+# using systemd. Install as /etc/cron.d/lilith-auto-escalate (the fifth
+# field is the user to run as).
+#
+# Runs every five minutes. The -m 60 window only bounds how far back each
+# run scans; the per-alert auto_escalated marker is what prevents an alert
+# from being escalated twice, so a generous window is safe and mostly
+# matters for CAPE alerts whose 'stop' time can lag ingestion. Add
+# `-c /path/to/lilith.toml` for a non default config file.
+
+*/5 * * * * lilith /usr/local/bin/lilith -a auto_escalate -m 60

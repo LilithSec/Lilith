@@ -516,6 +516,80 @@ recorded to it are kept, with the name they were recorded under.
 Sends a synthetic test event to a escalation target, picked via --tid or
 --name, and prints the payload sent as JSON.
 
+=head2 auto_escalate
+
+Evaluates the enabled auto escalation rules against recently ingested
+alerts and escalates each match to the rule's targets. Meant to be run
+periodically (cron/timer). Prints a per-table summary as a table, or as
+JSON with C<--output json>.
+
+=head3 --tables <list>
+
+Comma separated list of alert tables to scan (suricata/sagan/cape). All
+three are scanned when not given.
+
+=head3 -m <minutes>
+
+How far back to look for alerts that have not yet been considered.
+
+    - Default :: 5
+
+=head3 --dry-run
+
+Evaluate rules and report what would be escalated, without sending
+anything or marking any alert as considered.
+
+=head3 --by <who>
+
+Recorded (prefixed onto the rule name) as the requester of each
+escalation.
+
+    - Default :: auto
+
+=head2 ae_list
+
+Lists the auto escalation rules.
+
+=head2 ae_get
+
+Prints a single auto escalation rule as JSON, picked via --id.
+
+=head2 ae_create
+
+Creates a auto escalation rule. Takes --name, --rule, and optionally
+--tables, --priority, --stop, --desc, and --disable.
+
+=head3 --rule <json>
+
+The rule as a JSON object, or C<@file> to read the JSON from a file. See
+L<Lilith::AutoEscalate> for the match/actions format.
+
+=head3 --tables <list>
+
+Comma separated alert tables the rule applies to. All three when not
+given.
+
+=head3 --priority <int>
+
+Evaluation order, lower first.
+
+    - Default :: 100
+
+=head3 --stop
+
+Set stop_on_match so later rules do not fire on a alert this rule
+matched.
+
+=head2 ae_update
+
+Updates a auto escalation rule, picked via --id. Any of --name, --rule,
+--tables, --priority, --stop, --desc, --enable, or --disable may be
+given.
+
+=head2 ae_delete
+
+Deletes a auto escalation rule, picked via --id.
+
 =head1 ENVIROMENTAL VARIABLES
 
 =head2 Lilith_color_enable
@@ -785,6 +859,30 @@ sub esc_resolve_targets {
 	return \@ids;
 } ## end sub esc_resolve_targets
 
+# reads the --rule value, which is either a JSON string or, when it begins
+# with '@', the path to a file holding the JSON. Returns the decoded hash ref.
+sub ae_read_rule {
+	my ($rule) = @_;
+
+	if ( !defined($rule) || $rule eq '' ) {
+		die('--rule is required and must be a JSON object (or @file)');
+	}
+
+	my $json = $rule;
+	if ( $rule =~ /^\@(.+)$/ ) {
+		my $file = $1;
+		$json = read_file($file) or die( 'failed to read rule file "' . $file . '"' );
+	}
+
+	my $decoded;
+	eval { $decoded = decode_json($json); };
+	if ( $@ || ref($decoded) ne 'HASH' ) {
+		die( 'could not parse --rule as a JSON object: ' . ( $@ ? $@ : 'not a object' ) );
+	}
+
+	return $decoded;
+} ## end sub ae_read_rule
+
 sub help {
 	&version;
 
@@ -863,6 +961,11 @@ my @esc_set;
 my $esc_to;
 my $esc_note;
 my $esc_by;
+my $ae_rule;
+my $ae_priority;
+my $ae_tables;
+my $ae_stop;
+my $ae_dry_run;
 Getopt::Long::Configure('no_ignore_case');
 Getopt::Long::Configure('bundling');
 GetOptions(
@@ -931,6 +1034,11 @@ GetOptions(
 	'to=s'             => \$esc_to,
 	'note=s'           => \$esc_note,
 	'by=s'             => \$esc_by,
+	'rule=s'           => \$ae_rule,
+	'priority=s'       => \$ae_priority,
+	'tables=s'         => \$ae_tables,
+	'stop'             => \$ae_stop,
+	'dry-run'          => \$ae_dry_run,
 );
 
 @class = split( /\s*,\s*/, join( ',', @class ) );
@@ -1883,6 +1991,224 @@ if ( $action eq 'esc_history' ) {
 
 	exit 0;
 } ## end if ( $action eq 'esc_history' )
+
+#
+# evaluates the auto escalation rules against recent alerts
+#
+if ( $action eq 'auto_escalate' ) {
+	if ( !defined($go_back_minutes) ) {
+		$go_back_minutes = 5;
+	}
+
+	# --tables scopes which alert tables are scanned; all three by default
+	my @tables = grep { $_ ne '' } split( /\s*,\s*/, defined($ae_tables) ? $ae_tables : '' );
+	if ( !@tables ) {
+		@tables = ( 'suricata', 'sagan', 'cape' );
+	}
+
+	if ( !defined($esc_by) || $esc_by eq '' ) {
+		$esc_by = 'auto';
+	}
+
+	my @summaries;
+	foreach my $ae_table (@tables) {
+		my $result = $lilith->auto_escalate(
+			table           => $ae_table,
+			go_back_minutes => $go_back_minutes,
+			dry_run         => ( $ae_dry_run ? 1 : 0 ),
+			requested_by    => $esc_by,
+		);
+		push( @summaries, @{$result} );
+	} ## end foreach my $ae_table (@tables)
+
+	if ( $search_output eq 'json' ) {
+		my $json = JSON->new;
+		if ($pretty) {
+			$json->canonical(1);
+			$json->pretty(1);
+		}
+		print $json->encode( \@summaries );
+		if ( !$pretty ) {
+			print "\n";
+		}
+		exit 0;
+	} ## end if ( $search_output eq 'json' )
+
+	my $tb = esc_table( 'Table', 'Scanned', 'Rules', 'Matched', 'Alert', 'Rule', 'Targets', 'Status' );
+	my @td;
+	foreach my $summary (@summaries) {
+		if ( !@{ $summary->{escalations} } ) {
+			push( @td,
+				[ $summary->{table}, $summary->{scanned}, $summary->{rules}, $summary->{matched}, '', '', '', '' ] );
+			next;
+		}
+		foreach my $entry ( @{ $summary->{escalations} } ) {
+			my @targets = @{ $entry->{target_ids} };
+			push( @targets, map { $_ . '?' } @{ $entry->{unknown_targets} } );
+			push(
+				@td,
+				[
+					$summary->{table}, $summary->{scanned}, $summary->{rules}, $summary->{matched},
+					$entry->{alert_id}, $entry->{rule_name}, join( ',', @targets ), $entry->{status},
+				]
+			);
+		} ## end foreach my $entry ( @{ $summary...})
+	} ## end foreach my $summary (@summaries)
+	$tb->add_rows( \@td );
+	print $tb->draw;
+
+	exit 0;
+} ## end if ( $action eq 'auto_escalate' )
+
+#
+# lists the auto escalation rules
+#
+if ( $action eq 'ae_list' ) {
+	my $rules = $lilith->auto_escalations;
+
+	if ( $search_output eq 'json' ) {
+		my $json = JSON->new;
+		if ($pretty) {
+			$json->canonical(1);
+			$json->pretty(1);
+		}
+		print $json->encode($rules);
+		if ( !$pretty ) {
+			print "\n";
+		}
+		exit 0;
+	} ## end if ( $search_output eq 'json' )
+
+	my $tb = esc_table( 'ID', 'Name', 'Enabled', 'Priority', 'Stop', 'Tables', 'Matches', 'Description' );
+	my @td;
+	foreach my $rule ( @{$rules} ) {
+		push(
+			@td,
+			[
+				$rule->{id},
+				$rule->{name},
+				$rule->{enabled} ? 'yes' : 'no',
+				$rule->{priority},
+				$rule->{stop_on_match} ? 'yes' : 'no',
+				join( ',', @{ $rule->{tables} } ),
+				$rule->{match_count},
+				defined( $rule->{description} ) ? $rule->{description} : '',
+			]
+		);
+	} ## end foreach my $rule ( @{$rules} )
+	$tb->add_rows( \@td );
+	print $tb->draw;
+
+	exit 0;
+} ## end if ( $action eq 'ae_list' )
+
+#
+# fetches a single auto escalation rule
+#
+if ( $action eq 'ae_get' ) {
+	if ( !defined( $id[0] ) ) {
+		die('--id is required for fetching a auto escalation rule');
+	}
+
+	my $rule = $lilith->auto_escalation_get( $id[0] );
+
+	my $json = JSON->new;
+	$json->canonical(1);
+	if ($pretty) {
+		$json->pretty(1);
+	}
+	print $json->encode($rule);
+	if ( !$pretty ) {
+		print "\n";
+	}
+
+	exit 0;
+} ## end if ( $action eq 'ae_get' )
+
+#
+# creates a auto escalation rule
+#
+if ( $action eq 'ae_create' ) {
+	if ( !defined($esc_name) || $esc_name eq '' ) {
+		die('--name is required for creating a auto escalation rule');
+	}
+
+	my $rule = ae_read_rule($ae_rule);
+
+	my @tables = grep { $_ ne '' } split( /\s*,\s*/, defined($ae_tables) ? $ae_tables : '' );
+
+	my $new_id = $lilith->auto_escalation_create(
+		name          => $esc_name,
+		rule          => $rule,
+		tables        => ( @tables ? \@tables : undef ),
+		priority      => $ae_priority,
+		stop_on_match => ( $ae_stop ? 1 : 0 ),
+		description   => $esc_desc,
+		enabled       => ( $esc_disable ? 0 : 1 ),
+	);
+
+	print 'created auto escalation ' . $new_id . "\n";
+
+	exit 0;
+} ## end if ( $action eq 'ae_create' )
+
+#
+# updates a auto escalation rule
+#
+if ( $action eq 'ae_update' ) {
+	if ( !defined( $id[0] ) ) {
+		die('--id is required for updating a auto escalation rule');
+	}
+
+	my %update = ( id => $id[0] );
+
+	if ( defined($esc_name) && $esc_name ne '' ) {
+		$update{name} = $esc_name;
+	}
+	if ( defined($ae_rule) && $ae_rule ne '' ) {
+		$update{rule} = ae_read_rule($ae_rule);
+	}
+	if ( defined($ae_tables) ) {
+		my @tables = grep { $_ ne '' } split( /\s*,\s*/, $ae_tables );
+		$update{tables} = \@tables;
+	}
+	if ( defined($ae_priority) ) {
+		$update{priority} = $ae_priority;
+	}
+	if ($ae_stop) {
+		$update{stop_on_match} = 1;
+	}
+	if ( defined($esc_desc) ) {
+		$update{description} = $esc_desc;
+	}
+	if ($esc_enable) {
+		$update{enabled} = 1;
+	}
+	if ($esc_disable) {
+		$update{enabled} = 0;
+	}
+
+	$lilith->auto_escalation_update(%update);
+
+	print 'updated auto escalation ' . $id[0] . "\n";
+
+	exit 0;
+} ## end if ( $action eq 'ae_update' )
+
+#
+# deletes a auto escalation rule
+#
+if ( $action eq 'ae_delete' ) {
+	if ( !defined( $id[0] ) ) {
+		die('--id is required for deleting a auto escalation rule');
+	}
+
+	$lilith->auto_escalation_delete( $id[0] );
+
+	print 'deleted auto escalation ' . $id[0] . "\n";
+
+	exit 0;
+} ## end if ( $action eq 'ae_delete' )
 
 #
 # means we did not match anything

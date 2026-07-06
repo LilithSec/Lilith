@@ -10,8 +10,9 @@ use DBI              ();
 use Digest::SHA      qw(sha256_base64);
 use Sys::Syslog      qw( closelog openlog syslog );
 use POSIX            qw( strftime );
-use Lilith::Schema   ();
-use Lilith::Escalate ();
+use Lilith::Schema       ();
+use Lilith::Escalate     ();
+use Lilith::AutoEscalate ();
 
 =head1 NAME
 
@@ -1652,6 +1653,484 @@ sub escalations_for {
 
 	return \@escalations;
 } ## end sub escalations_for
+
+=head2 auto_escalations
+
+Returns a array ref of every auto escalation rule, ordered by priority
+then name, with each row's C<rule> decoded to a hash ref and C<tables>
+to a array ref.
+
+    my $rules = $lilith->auto_escalations;
+
+=cut
+
+sub auto_escalations {
+	my ($self) = @_;
+
+	my $dbh = $self->_escalation_dbh;
+
+	my $sth = $dbh->prepare('select * from auto_escalations order by priority asc, name asc;');
+	$sth->execute();
+
+	my @rules;
+	while ( my $row = $sth->fetchrow_hashref ) {
+		$row->{rule}   = $self->_auto_decode_rule( $row->{rule} );
+		$row->{tables} = $self->_auto_decode_tables( $row->{tables} );
+		push( @rules, $row );
+	}
+
+	return \@rules;
+} ## end sub auto_escalations
+
+=head2 auto_escalation_get
+
+Fetches a single auto escalation rule by ID, with C<rule> decoded to a
+hash ref and C<tables> to a array ref. Dies if the ID is not numeric or
+no such rule exists.
+
+    my $rule = $lilith->auto_escalation_get(3);
+
+=cut
+
+sub auto_escalation_get {
+	my ( $self, $id ) = @_;
+
+	if ( !defined($id) || $id !~ /^[0-9]+$/ ) {
+		die('auto escalation id is required and must be numeric');
+	}
+
+	my $dbh = $self->_escalation_dbh;
+
+	my $sth = $dbh->prepare('select * from auto_escalations where id = ?;');
+	$sth->execute($id);
+
+	my $row = $sth->fetchrow_hashref;
+	if ( !$row ) {
+		die( 'no auto escalation with the id "' . $id . '"' );
+	}
+
+	$row->{rule}   = $self->_auto_decode_rule( $row->{rule} );
+	$row->{tables} = $self->_auto_decode_tables( $row->{tables} );
+
+	return $row;
+} ## end sub auto_escalation_get
+
+=head2 auto_escalation_create
+
+Creates a auto escalation rule and returns its ID. The rule is
+validated by L<Lilith::AutoEscalate>'s check_rule and the tables must
+all be known table types.
+
+    my $id = $lilith->auto_escalation_create(
+                                             name          => 'high-malscore',
+                                             rule          => {
+                                                 match   => { field => 'malscore', op => '>=', value => 8 },
+                                                 actions => [ { escalate_to => ['soc-hook'] } ],
+                                             },
+                                             tables        => ['cape'],
+                                             priority      => 50,
+                                             stop_on_match => 1,
+                                             description   => 'escalate nasty cape submissions',
+                                             enabled       => 1,
+                                            );
+
+=cut
+
+sub auto_escalation_create {
+	my ( $self, %opts ) = @_;
+
+	if ( !defined( $opts{name} ) || $opts{name} eq '' ) {
+		die('"name" is required');
+	}
+
+	if ( ref( $opts{rule} ) ne 'HASH' ) {
+		die('"rule" is required and must be a hash ref');
+	}
+	Lilith::AutoEscalate->check_rule( $opts{rule} );
+
+	my $tables = $self->_auto_check_tables( $opts{tables} );
+
+	my $priority = defined( $opts{priority} ) ? $opts{priority} : 100;
+	if ( $priority !~ /^-?[0-9]+$/ ) {
+		die('"priority" must be an integer');
+	}
+
+	my $enabled = ( !defined( $opts{enabled} ) || $opts{enabled} ) ? 1 : 0;
+	my $stop    = $opts{stop_on_match} ? 1 : 0;
+
+	my $dbh = $self->_escalation_dbh;
+
+	my $sth
+		= $dbh->prepare(
+		'insert into auto_escalations ( name, enabled, priority, tables, rule, stop_on_match, description )'
+			. ' VALUES ( ?, ?, ?, ?::varchar[], ?, ?, ? ) RETURNING id;' );
+	$sth->execute( $opts{name}, $enabled, $priority, $self->_pg_text_array($tables),
+		encode_json( $opts{rule} ), $stop, $opts{description} );
+
+	my ($id) = $sth->fetchrow_array;
+
+	return $id;
+} ## end sub auto_escalation_create
+
+=head2 auto_escalation_update
+
+Updates a auto escalation rule. Any of name, rule, tables, priority,
+stop_on_match, description, or enabled may be given; unspecified items
+keep their current value. The resulting rule and tables are
+revalidated.
+
+    $lilith->auto_escalation_update(
+                                    id      => 3,
+                                    enabled => 0,
+                                   );
+
+=cut
+
+sub auto_escalation_update {
+	my ( $self, %opts ) = @_;
+
+	my $existing = $self->auto_escalation_get( $opts{id} );
+
+	my $name = defined( $opts{name} ) && $opts{name} ne '' ? $opts{name} : $existing->{name};
+	my $rule = ref( $opts{rule} ) eq 'HASH' ? $opts{rule} : $existing->{rule};
+	Lilith::AutoEscalate->check_rule($rule);
+
+	my $tables = exists( $opts{tables} ) ? $self->_auto_check_tables( $opts{tables} ) : $existing->{tables};
+
+	my $priority = defined( $opts{priority} ) ? $opts{priority} : $existing->{priority};
+	if ( $priority !~ /^-?[0-9]+$/ ) {
+		die('"priority" must be an integer');
+	}
+
+	my $stop = exists( $opts{stop_on_match} ) ? ( $opts{stop_on_match} ? 1 : 0 ) : ( $existing->{stop_on_match} ? 1 : 0 );
+	my $enabled     = exists( $opts{enabled} )     ? ( $opts{enabled} ? 1 : 0 ) : ( $existing->{enabled} ? 1 : 0 );
+	my $description = exists( $opts{description} ) ? $opts{description}          : $existing->{description};
+
+	my $dbh = $self->_escalation_dbh;
+
+	my $sth
+		= $dbh->prepare( 'update auto_escalations set name = ?, enabled = ?, priority = ?, tables = ?::varchar[],'
+			. ' rule = ?, stop_on_match = ?, description = ?, updated = now() where id = ?;' );
+	$sth->execute( $name, $enabled, $priority, $self->_pg_text_array($tables),
+		encode_json($rule), $stop, $description, $opts{id} );
+
+	return 1;
+} ## end sub auto_escalation_update
+
+=head2 auto_escalation_delete
+
+Deletes a auto escalation rule by ID.
+
+    $lilith->auto_escalation_delete(3);
+
+=cut
+
+sub auto_escalation_delete {
+	my ( $self, $id ) = @_;
+
+	if ( !defined($id) || $id !~ /^[0-9]+$/ ) {
+		die('auto escalation id is required and must be numeric');
+	}
+
+	my $dbh = $self->_escalation_dbh;
+
+	my $sth = $dbh->prepare('delete from auto_escalations where id = ?;');
+	$sth->execute($id);
+
+	return 1;
+} ## end sub auto_escalation_delete
+
+=head2 auto_escalate
+
+Evaluates the enabled auto escalation rules against recently ingested
+alerts and, for each match, escalates the alert to the rule's targets
+via escalate(). Each scanned alert is stamped with a auto_escalated
+time so it is considered exactly once, regardless of whether a rule
+matched.
+
+The C<table> option limits processing to a single table type; when
+omitted all three (suricata/sagan/cape) are processed.
+C<go_back_minutes> bounds how far back to look for alerts that have not
+yet been considered (default 5). With C<dry_run> set, no escalation is
+sent and nothing is stamped; the returned summary shows what would have
+happened. C<requested_by> is prefixed onto the rule name when recording
+each escalation (default "auto").
+
+Returns a array ref with one summary hash ref per table processed, each
+having the keys C<table>, C<scanned>, C<rules>, C<matched>, C<dry_run>,
+and C<escalations> (a array ref of per-match details).
+
+    my $summaries = $lilith->auto_escalate(
+                                            go_back_minutes => 5,
+                                            dry_run         => 1,
+                                           );
+
+=cut
+
+sub auto_escalate {
+	my ( $self, %opts ) = @_;
+
+	my @tables = defined( $opts{table} ) ? ( $opts{table} ) : ( 'suricata', 'sagan', 'cape' );
+	foreach my $table (@tables) {
+		if ( $table ne 'suricata' && $table ne 'sagan' && $table ne 'cape' ) {
+			die( '"' . $table . '" is not a known table type' );
+		}
+	}
+
+	my $minutes = defined( $opts{go_back_minutes} ) ? $opts{go_back_minutes} : 5;
+	if ( $minutes !~ /^[0-9]+$/ ) {
+		die( '"' . $minutes . '" for go_back_minutes is not numeric' );
+	}
+
+	my $dry = $opts{dry_run} ? 1 : 0;
+	my $by = defined( $opts{requested_by} ) && $opts{requested_by} ne '' ? $opts{requested_by} : 'auto';
+
+	my $dbh = $self->_escalation_dbh;
+
+	# name -> id map so escalate_to can use target names
+	my %target_id;
+	my $tsth = $dbh->prepare('select id, name from escalation_targets;');
+	$tsth->execute();
+	while ( my $row = $tsth->fetchrow_hashref ) {
+		$target_id{ $row->{name} } = $row->{id};
+	}
+
+	my @summaries;
+	foreach my $table (@tables) {
+		push(
+			@summaries,
+			$self->_auto_escalate_table(
+				dbh          => $dbh,
+				table        => $table,
+				minutes      => $minutes,
+				dry_run      => $dry,
+				requested_by => $by,
+				target_id    => \%target_id,
+			)
+		);
+	} ## end foreach my $table (@tables)
+
+	return \@summaries;
+} ## end sub auto_escalate
+
+# processes a single table for auto_escalate; see auto_escalate for the
+# option meanings
+sub _auto_escalate_table {
+	my ( $self, %opts ) = @_;
+
+	my $dbh         = $opts{dbh};
+	my $table       = $opts{table};
+	my $alert_table = $table . '_alerts';
+	my $time_column = $table eq 'cape' ? 'stop' : 'timestamp';
+
+	# enabled rules scoped to this table
+	my $rsth = $dbh->prepare(
+		'select * from auto_escalations where enabled = true and ? = ANY(tables) order by priority asc, id asc;');
+	$rsth->execute($table);
+	my @rules;
+	while ( my $row = $rsth->fetchrow_hashref ) {
+		$row->{rule} = $self->_auto_decode_rule( $row->{rule} );
+		push( @rules, $row );
+	}
+
+	# candidate alerts: not yet considered, within the window
+	my $esth = $dbh->prepare( 'select * from '
+			. $alert_table
+			. ' where auto_escalated is null and '
+			. $time_column
+			. ' >= CURRENT_TIMESTAMP - interval \''
+			. ( $opts{minutes} + 0 )
+			. ' minutes\' order by id asc;' );
+	$esth->execute();
+	my @events;
+	while ( my $row = $esth->fetchrow_hashref ) {
+		push( @events, $row );
+	}
+
+	my $summary = {
+		table       => $table,
+		scanned     => scalar(@events),
+		rules       => scalar(@rules),
+		matched     => 0,
+		dry_run     => $opts{dry_run},
+		escalations => [],
+	};
+
+	if ( !@rules || !@events ) {
+		$self->_auto_mark( \@events, $dbh, $alert_table ) if !$opts{dry_run};
+		return $summary;
+	}
+
+	my $matches = Lilith::AutoEscalate->evaluate( rules => \@rules, events => \@events );
+
+	foreach my $match ( @{$matches} ) {
+		my $rule  = $match->{rule};
+		my $event = $match->{event};
+		$summary->{matched}++;
+
+		# gather targets and note across this rule's actions
+		my @wanted;
+		my $note;
+		foreach my $action ( @{ $rule->{rule}{actions} } ) {
+			push( @wanted, @{ $action->{escalate_to} } );
+			if ( !defined($note) && defined( $action->{note} ) && $action->{note} ne '' ) {
+				$note = $action->{note};
+			}
+		}
+		if ( !defined($note) ) {
+			$note = 'auto escalation rule "' . $rule->{name} . '"';
+		}
+
+		# resolve target names/ids, dropping unknown names
+		my @ids;
+		my @unknown;
+		foreach my $token (@wanted) {
+			if ( $token =~ /^[0-9]+$/ ) {
+				push( @ids, $token );
+			} elsif ( defined( $opts{target_id}{$token} ) ) {
+				push( @ids, $opts{target_id}{$token} );
+			} else {
+				push( @unknown, $token );
+			}
+		}
+		my %seen;
+		@ids = grep { !$seen{$_}++ } @ids;
+
+		my $entry = {
+			rule_id         => $rule->{id},
+			rule_name       => $rule->{name},
+			alert_id        => $event->{id},
+			target_ids      => \@ids,
+			unknown_targets => \@unknown,
+		};
+
+		if ( !@ids ) {
+			$entry->{status} = 'no-targets';
+		} elsif ( $opts{dry_run} ) {
+			$entry->{status} = 'dry-run';
+		} else {
+			my $results;
+			eval {
+				$results = $self->escalate(
+					table        => $table,
+					id           => $event->{id},
+					target_ids   => \@ids,
+					note         => $note,
+					requested_by => $opts{requested_by} . ':' . $rule->{name},
+				);
+			};
+			if ($@) {
+				$entry->{status} = 'error';
+				$entry->{error}  = $@;
+			} else {
+				$entry->{status}  = 'escalated';
+				$entry->{results} = $results;
+
+				my $usth
+					= $dbh->prepare(
+					'update auto_escalations set last_matched = now(), match_count = match_count + 1 where id = ?;');
+				$usth->execute( $rule->{id} );
+			}
+		} ## end else [ if ( !@ids ) ]
+
+		push( @{ $summary->{escalations} }, $entry );
+	} ## end foreach my $match ( @{$matches...})
+
+	$self->_auto_mark( \@events, $dbh, $alert_table ) if !$opts{dry_run};
+
+	return $summary;
+} ## end sub _auto_escalate_table
+
+# stamps every scanned alert with auto_escalated = now() so it is not
+# reconsidered on the next run
+sub _auto_mark {
+	my ( $self, $events, $dbh, $alert_table ) = @_;
+
+	return if !@{$events};
+
+	my @ids = map { $_->{id} } @{$events};
+
+	my $sth = $dbh->prepare( 'update ' . $alert_table . ' set auto_escalated = now() where id = ANY(?::bigint[]);' );
+	$sth->execute( $self->_pg_text_array( \@ids ) );
+
+	return 1;
+} ## end sub _auto_mark
+
+# decodes a auto_escalations rule column into a hash ref
+sub _auto_decode_rule {
+	my ( $self, $rule ) = @_;
+
+	return $rule if ref($rule) eq 'HASH';
+
+	my $decoded;
+	if ( defined($rule) ) {
+		eval { $decoded = decode_json($rule); };
+	}
+
+	return ref($decoded) eq 'HASH' ? $decoded : {};
+} ## end sub _auto_decode_rule
+
+# decodes a tables column into a array ref, accepting either a expanded
+# array ref (DBD::Pg default) or a raw PostgreSQL array literal
+sub _auto_decode_tables {
+	my ( $self, $tables ) = @_;
+
+	return $tables if ref($tables) eq 'ARRAY';
+
+	if ( defined($tables) && !ref($tables) ) {
+		my $inner = $tables;
+		$inner =~ s/^\{//;
+		$inner =~ s/\}$//;
+		return [] if $inner eq '';
+		my @parts = map {
+			my $part = $_;
+			$part =~ s/^"//;
+			$part =~ s/"$//;
+			$part;
+		} split( /,/, $inner );
+		return \@parts;
+	} ## end if ( defined($tables) &&...)
+
+	return [];
+} ## end sub _auto_decode_tables
+
+# validates a tables list against the known table types, defaulting to all
+# three when none are given; returns a de-duped array ref
+sub _auto_check_tables {
+	my ( $self, $tables ) = @_;
+
+	my %valid = ( suricata => 1, sagan => 1, cape => 1 );
+
+	if ( ref($tables) ne 'ARRAY' || !@{$tables} ) {
+		return [ 'suricata', 'sagan', 'cape' ];
+	}
+
+	my %seen;
+	my @out;
+	foreach my $table ( @{$tables} ) {
+		if ( !defined($table) || !$valid{$table} ) {
+			die( '"'
+					. ( defined($table) ? $table : 'undef' )
+					. '" is not a known table type; valid: suricata, sagan, cape' );
+		}
+		push( @out, $table ) if !$seen{$table}++;
+	}
+
+	return \@out;
+} ## end sub _auto_check_tables
+
+# builds a PostgreSQL array literal from a array ref, quoting each element
+sub _pg_text_array {
+	my ( $self, $list ) = @_;
+
+	my @items = map {
+		my $item = defined($_) ? $_ : '';
+		$item =~ s/(["\\])/\\$1/g;
+		'"' . $item . '"';
+	} @{$list};
+
+	return '{' . join( ',', @items ) . '}';
+} ## end sub _pg_text_array
 
 sub _escalation_dbh {
 	my ($self) = @_;

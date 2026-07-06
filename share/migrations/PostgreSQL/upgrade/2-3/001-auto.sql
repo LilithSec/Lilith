@@ -51,3 +51,34 @@ ALTER TABLE suricata_alerts ADD COLUMN escalations bigint[];
 ALTER TABLE sagan_alerts ADD COLUMN escalations bigint[];
 
 ALTER TABLE cape_alerts ADD COLUMN escalations bigint[];
+
+-- auto_escalations holds rules evaluated against newly ingested alerts by
+-- auto_escalate(). 'rule' is the match/actions DSL as JSONB, compiled into a
+-- Rule::Engine ruleset at evaluation time. 'tables' scopes which alert tables
+-- a rule applies to, 'priority' orders evaluation (lower first), and
+-- 'stop_on_match' keeps later rules from firing on an alert an earlier rule
+-- already matched.
+
+CREATE TABLE auto_escalations (
+    id bigserial NOT NULL,
+    name varchar(255) NOT NULL UNIQUE,
+    enabled boolean NOT NULL DEFAULT TRUE,
+    priority integer NOT NULL DEFAULT 100,
+    tables varchar(64)[] NOT NULL DEFAULT '{suricata,sagan,cape}',
+    rule jsonb NOT NULL DEFAULT '{}',
+    stop_on_match boolean NOT NULL DEFAULT FALSE,
+    description varchar(2048),
+    last_matched TIMESTAMP WITH TIME ZONE,
+    match_count bigint NOT NULL DEFAULT 0,
+    updated TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    PRIMARY KEY(id)
+);
+
+-- Records when auto_escalate() last considered an alert row, so each is
+-- evaluated exactly once regardless of whether any rule matched.
+
+ALTER TABLE suricata_alerts ADD COLUMN auto_escalated TIMESTAMP WITH TIME ZONE;
+
+ALTER TABLE sagan_alerts ADD COLUMN auto_escalated TIMESTAMP WITH TIME ZONE;
+
+ALTER TABLE cape_alerts ADD COLUMN auto_escalated TIMESTAMP WITH TIME ZONE;
