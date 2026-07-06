@@ -153,6 +153,11 @@ __PACKAGE__->table("suricata_alerts");
   data_type: 'jsonb'
   is_nullable: 1
 
+=head2 escalations
+
+  data_type: 'bigint[]'
+  is_nullable: 1
+
 =cut
 
 __PACKAGE__->add_columns(
@@ -209,6 +214,8 @@ __PACKAGE__->add_columns(
   { data_type => "bigint", is_nullable => 1 },
   "raw",
   { data_type => "jsonb", is_nullable => 1 },
+  "escalations",
+  { data_type => "bigint[]", is_nullable => 1 },
 );
 
 =head1 PRIMARY KEY

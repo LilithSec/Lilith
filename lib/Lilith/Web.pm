@@ -58,12 +58,20 @@ sub startup {
 	die "Error parsing toml '$config_file': $err\n" unless $toml;
 
 	my $lilith = Lilith->new(
-		dsn  => $toml->{dsn},
-		user => $toml->{user},
-		pass => $toml->{pass},
+		dsn                        => $toml->{dsn},
+		user                       => $toml->{user},
+		pass                       => $toml->{pass},
+		escalation_type_namespaces => (
+			ref $toml->{escalation_type_namespaces} eq 'ARRAY' ? $toml->{escalation_type_namespaces} : []
+		),
 	);
 
 	$self->helper( lilith => sub {$lilith} );
+
+	# Whether the escalation system is available in the web UI. Off by
+	# default as the escalation endpoints can push data at outside services
+	# and change escalation target config.
+	$self->helper( escalation_enable => sub { $toml->{escalation_enable} ? 1 : 0 } );
 
 	my $dnstracer_flags = [];
 	if ( ref $toml->{dnstracer_flags} eq 'ARRAY' ) {
@@ -316,6 +324,14 @@ sub startup {
 	$r->get('/api/virani/cached/:remote')->to('api#virani_cached_list');
 	$r->get('/api/virani/cached/:remote/pcap/:id')->to('api#virani_cached_pcap');
 	$r->get('/api/virani/cached/:remote/meta/:id')->to('api#virani_cached_meta');
+	$r->get('/escalation')->to('escalation#index');
+	$r->get('/api/escalation/types')->to('escalation#types');
+	$r->get('/api/escalation/targets')->to('escalation#targets');
+	$r->post('/api/escalation/targets')->to('escalation#target_save');
+	$r->post('/api/escalation/targets/:id/delete')->to('escalation#target_delete');
+	$r->post('/api/escalation/targets/:id/test')->to('escalation#target_test');
+	$r->post('/api/escalation/escalate')->to('escalation#escalate');
+	$r->get('/api/escalation/history/:table/:id')->to('escalation#history');
 }
 
 1;

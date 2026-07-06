@@ -1,6 +1,8 @@
 % # Results fragment — shared by the full search page and the partial (auto-refresh)
 % # render. Expects $results (arrayref), $table, $offset, $limit set in the stash.
+% # $escalated (hashref of row id => escalation count) is optional.
 % my $count = scalar @$results;
+% my $escalated = stash('escalated') || {};
 <div id="search-results">
   <div class="d-flex align-items-center mb-2 gap-3">
     <span class="text-muted small"><%= $count %> result<%= $count == 1 ? '' : 's' %></span>
@@ -33,7 +35,7 @@
       <tbody>
         % for my $row (@$results) {
         <tr>
-          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
+          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a><% if (my $ec = $escalated->{$row->{id}}) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $ec %> time<%= $ec == 1 ? '' : 's' %>">E</span><% } %></td>
           <td><%= $row->{timestamp} // '' %></td>
           <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
           <td class="col-host" style="display:none"><% if (my $i = $row->{host}) { %><a href="#" class="host-filter" data-host="<%= $i %>"><%= $i %></a><% } %></td>
@@ -67,7 +69,7 @@
       <tbody>
         % for my $row (@$results) {
         <tr>
-          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
+          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a><% if (my $ec = $escalated->{$row->{id}}) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $ec %> time<%= $ec == 1 ? '' : 's' %>">E</span><% } %></td>
           <td><%= $row->{timestamp} // '' %></td>
           <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
           <td class="col-host" style="display:none"><% if (my $i = $row->{instance_host}) { %><a href="#" class="instance-host-filter" data-instance-host="<%= $i %>"><%= $i %></a><% } %></td>
@@ -100,7 +102,7 @@
       <tbody>
         % for my $row (@$results) {
         <tr>
-          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
+          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a><% if (my $ec = $escalated->{$row->{id}}) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $ec %> time<%= $ec == 1 ? '' : 's' %>">E</span><% } %></td>
           <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
           <td class="col-host" style="display:none"><% if (my $i = $row->{instance_host}) { %><a href="#" class="instance-host-filter" data-instance-host="<%= $i %>"><%= $i %></a><% } %></td>
           <td><%= $row->{target}    // '' %></td>

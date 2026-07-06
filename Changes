@@ -1,6 +1,38 @@
 Revision history for Lilith
 
 4.0.0	unreleased
+		 - Add a escalation system to the web frontend. Escalation targets
+		   are stored in SQL (schema version 3, new escalation_targets and
+		   escalations tables) and each has a pluggable type; a type is a
+		   module under Lilith::Escalate::Type:: (Webhook, Email, and
+		   Syslog ship with the dist) and extra namespaces may be added
+		   via escalation_type_namespaces in the config. The web UI gets a
+		   /escalation management page (targets are created/edited via a
+		   form generated from the type's config_fields spec, with a per
+		   target test button), an Escalate button + escalation history on
+		   the event view, and a "E" badge on escalated events in search
+		   results. Every escalation attempt is recorded with its status
+		   and the raw JSON payload actually sent, including attempts
+		   refused before a send (unknown or disabled target), and the
+		   target's name is snapshotted per attempt so history stays
+		   readable after a target is deleted. The alert tables gain a
+		   escalations bigint[] column holding the escalation IDs for
+		   each row, appended in the same transaction as the escalations
+		   insert, so anything reading the alert tables can trivially
+		   see if/how many times a alert has been escalated without
+		   querying the escalations table. All of it is gated
+		   behind escalation_enable (off by default) and the sends run in
+		   a subprocess so the web server's event loop is not blocked.
+		 - lilith CLI: new escalation actions. esc escalates a event to
+		   targets given by ID or name (--to, --note, --by; exits
+		   non-zero if any target failed), esc_history prints the
+		   escalations for a event, esc_types lists the installed types
+		   with their config fields, and esc_targets /esc_target_get /
+		   esc_target_create / esc_target_update / esc_target_delete /
+		   esc_target_test manage targets, with config given as repeated
+		   --set key=value items. The escalation actions are not gated
+		   by escalation_enable, as that exists for the unauthenticated
+		   web UI; the CLI already holds the DB credentials.
 		 - EVE instances are now defined under the [eves.*] table, e.g.
 		   [eves.suricata-eve], instead of as plain top-level tables. Old
 		   top-level instance tables are ignored, with a warning.

@@ -99,8 +99,21 @@ sub index {
 		$error = $@ if $@;
 	}
 
+	# Escalation counts for badging escalated events, read straight off each
+	# row's escalations array (maintained by Lilith::escalate), so no extra
+	# query is needed.
+	my $escalated = {};
+	if ( $self->escalation_enable && ref $results eq 'ARRAY' ) {
+		foreach my $row (@$results) {
+			if ( ref $row->{escalations} eq 'ARRAY' && @{ $row->{escalations} } ) {
+				$escalated->{ $row->{id} } = scalar @{ $row->{escalations} };
+			}
+		}
+	}
+
 	$self->stash(
 		results         => $results,
+		escalated       => $escalated,
 		error           => $error,
 		table           => $table,
 		go_back_minutes => $go_back_minutes,

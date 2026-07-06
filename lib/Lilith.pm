@@ -3,13 +3,15 @@ package Lilith;
 use 5.006;
 use strict;
 use warnings;
-use POE            qw(Wheel::FollowTail);
-use JSON           qw( decode_json );
-use Sys::Hostname  qw( hostname );
-use DBI            ();
-use Digest::SHA    qw(sha256_base64);
-use Sys::Syslog    qw( closelog openlog syslog );
-use Lilith::Schema ();
+use POE              qw(Wheel::FollowTail);
+use JSON             qw( decode_json encode_json );
+use Sys::Hostname    qw( hostname );
+use DBI              ();
+use Digest::SHA      qw(sha256_base64);
+use Sys::Syslog      qw( closelog openlog syslog );
+use POSIX            qw( strftime );
+use Lilith::Schema   ();
+use Lilith::Escalate ();
 
 =head1 NAME
 
@@ -106,6 +108,11 @@ The args taken by this are as below.
                             extend for Sagan.
       Default :: undef
 
+    - escalation_type_namespaces :: Array of additional namespaces to
+                                    search for escalation type modules,
+                                    searched after Lilith::Escalate::Type.
+      Default :: []
+
 =cut
 
 sub new {
@@ -149,7 +156,13 @@ sub new {
 		$opts{sagan_class_ignore} = \@empty_array;
 	}
 
+	if ( ref( $opts{escalation_type_namespaces} ) ne 'ARRAY' ) {
+		my @empty_array;
+		$opts{escalation_type_namespaces} = \@empty_array;
+	}
+
 	my $self = {
+		escalation_type_namespaces => $opts{escalation_type_namespaces},
 		sid_ignore            => $opts{sid_ignore},
 		suricata_sid_ignore   => $opts{suricata_sid_ignore},
 		sagan_sid_ignore      => $opts{sagan_sid_ignore},
@@ -1179,6 +1192,493 @@ sub search {
 
 	return \@fetch_results;
 } ## end sub search
+
+=head2 escalation_types
+
+Returns a array ref of the names of the available escalation types,
+including any found under the additional namespaces passed to new.
+
+    my $types = $lilith->escalation_types;
+
+=cut
+
+sub escalation_types {
+	my ($self) = @_;
+
+	return Lilith::Escalate->types( $self->{escalation_type_namespaces} );
+}
+
+=head2 escalation_type_info
+
+Returns a hash ref describing a escalation type; its name, description,
+and config fields. Dies if the type can not be resolved.
+
+    my $info = $lilith->escalation_type_info('Webhook');
+
+=cut
+
+sub escalation_type_info {
+	my ( $self, $type ) = @_;
+
+	return Lilith::Escalate->type_info( $type, $self->{escalation_type_namespaces} );
+}
+
+=head2 escalation_targets
+
+Returns a array ref of every escalation target, sorted by name, with
+the config decoded into a hash ref.
+
+    my $targets = $lilith->escalation_targets;
+
+=cut
+
+sub escalation_targets {
+	my ($self) = @_;
+
+	my $dbh = $self->_escalation_dbh;
+
+	my $sth = $dbh->prepare('select * from escalation_targets order by name;');
+	$sth->execute();
+
+	my @targets;
+	while ( my $row = $sth->fetchrow_hashref ) {
+		$row->{config} = $self->_escalation_decode_config( $row->{config} );
+		push( @targets, $row );
+	}
+
+	return \@targets;
+} ## end sub escalation_targets
+
+=head2 escalation_target_get
+
+Fetches a single escalation target by ID, with the config decoded into
+a hash ref. Dies if the ID is not numeric or no such target exists.
+
+    my $target = $lilith->escalation_target_get(3);
+
+=cut
+
+sub escalation_target_get {
+	my ( $self, $id ) = @_;
+
+	if ( !defined($id) || $id !~ /^[0-9]+$/ ) {
+		die('escalation target id is required and must be numeric');
+	}
+
+	my $dbh = $self->_escalation_dbh;
+
+	my $sth = $dbh->prepare('select * from escalation_targets where id = ?;');
+	$sth->execute($id);
+
+	my $row = $sth->fetchrow_hashref;
+	if ( !$row ) {
+		die( 'no escalation target with the id "' . $id . '"' );
+	}
+
+	$row->{config} = $self->_escalation_decode_config( $row->{config} );
+
+	return $row;
+} ## end sub escalation_target_get
+
+=head2 escalation_target_create
+
+Creates a new escalation target and returns its ID. The type must
+resolve to a escalation type module and the config must pass that
+module's check_config.
+
+    my $id = $lilith->escalation_target_create(
+                                               name        => 'soc-hook',
+                                               type        => 'Webhook',
+                                               config      => { url => 'https://soc.foo.bar/hook' },
+                                               description => 'SOC webhook',
+                                               enabled     => 1,
+                                              );
+
+=cut
+
+sub escalation_target_create {
+	my ( $self, %opts ) = @_;
+
+	if ( !defined( $opts{name} ) || $opts{name} eq '' ) {
+		die('"name" is required');
+	}
+
+	if ( ref( $opts{config} ) ne 'HASH' ) {
+		$opts{config} = {};
+	}
+
+	my $module = Lilith::Escalate->type_module( $opts{type}, $self->{escalation_type_namespaces} );
+	if ( $module->can('check_config') ) {
+		$module->check_config( $opts{config} );
+	}
+
+	my $enabled = ( !defined( $opts{enabled} ) || $opts{enabled} ) ? 1 : 0;
+
+	my $dbh = $self->_escalation_dbh;
+
+	my $sth
+		= $dbh->prepare( 'insert into escalation_targets ( name, type, config, enabled, description )'
+			. ' VALUES ( ?, ?, ?, ?, ? ) RETURNING id;' );
+	$sth->execute( $opts{name}, $opts{type}, encode_json( $opts{config} ), $enabled, $opts{description} );
+
+	my ($id) = $sth->fetchrow_array;
+
+	return $id;
+} ## end sub escalation_target_create
+
+=head2 escalation_target_update
+
+Updates a escalation target. Any of name, type, config, description,
+or enabled may be given; unspecified items keep their current value.
+The resulting type/config combination is revalidated.
+
+    $lilith->escalation_target_update(
+                                      id      => 3,
+                                      enabled => 0,
+                                     );
+
+=cut
+
+sub escalation_target_update {
+	my ( $self, %opts ) = @_;
+
+	my $existing = $self->escalation_target_get( $opts{id} );
+
+	my $name        = defined( $opts{name} ) && $opts{name} ne '' ? $opts{name} : $existing->{name};
+	my $type        = defined( $opts{type} ) && $opts{type} ne '' ? $opts{type} : $existing->{type};
+	my $config      = ref( $opts{config} ) eq 'HASH' ? $opts{config} : $existing->{config};
+	my $description = exists( $opts{description} ) ? $opts{description} : $existing->{description};
+	my $enabled     = exists( $opts{enabled} ) ? ( $opts{enabled} ? 1 : 0 ) : ( $existing->{enabled} ? 1 : 0 );
+
+	my $module = Lilith::Escalate->type_module( $type, $self->{escalation_type_namespaces} );
+	if ( $module->can('check_config') ) {
+		$module->check_config($config);
+	}
+
+	my $dbh = $self->_escalation_dbh;
+
+	my $sth
+		= $dbh->prepare( 'update escalation_targets set name = ?, type = ?, config = ?, enabled = ?,'
+			. ' description = ?, updated = now() where id = ?;' );
+	$sth->execute( $name, $type, encode_json($config), $enabled, $description, $opts{id} );
+
+	return 1;
+} ## end sub escalation_target_update
+
+=head2 escalation_target_delete
+
+Deletes a escalation target by ID. Past escalations to it are kept,
+with their target_id nulled via the FK.
+
+    $lilith->escalation_target_delete(3);
+
+=cut
+
+sub escalation_target_delete {
+	my ( $self, $id ) = @_;
+
+	if ( !defined($id) || $id !~ /^[0-9]+$/ ) {
+		die('escalation target id is required and must be numeric');
+	}
+
+	my $dbh = $self->_escalation_dbh;
+
+	my $sth = $dbh->prepare('delete from escalation_targets where id = ?;');
+	$sth->execute($id);
+
+	return 1;
+} ## end sub escalation_target_delete
+
+=head2 escalate
+
+Escalates a event to one or more escalation targets, recording each
+attempt in the escalations table along with the payload the type
+actually sent. Attempts refused before a send (a unknown or disabled
+target) are recorded as failed too, with target_id null when there is
+no valid target row to reference; the target's name is snapshotted
+into target_name when known so history stays readable after a target
+is deleted. Each recorded escalation ID is also appended to the alert
+row's escalations array, in the same transaction as the insert, so
+anything reading the alert tables can see whether/how many times a
+alert has been escalated without querying the escalations table.
+Returns a array ref with one hash ref per target, each having the
+keys target_id, target_name, escalation_id, status, and error.
+
+    my $results = $lilith->escalate(
+                                    table        => 'suricata',
+                                    id           => 42,
+                                    target_ids   => [ 1, 2 ],
+                                    note         => 'C2 traffic to a known bad host',
+                                    requested_by => 'kitsune',
+                                   );
+
+=cut
+
+sub escalate {
+	my ( $self, %opts ) = @_;
+
+	if ( !defined( $opts{table} ) ) {
+		$opts{table} = 'suricata';
+	}
+	if ( $opts{table} ne 'suricata' && $opts{table} ne 'sagan' && $opts{table} ne 'cape' ) {
+		die( '"' . $opts{table} . '" is not a known table type' );
+	}
+
+	if ( !defined( $opts{id} ) || $opts{id} !~ /^[0-9]+$/ ) {
+		die('"id" is required and must be numeric');
+	}
+
+	if ( ref( $opts{target_ids} ) ne 'ARRAY' || !@{ $opts{target_ids} } ) {
+		die('"target_ids" is required and must be a non-empty array');
+	}
+	foreach my $target_id ( @{ $opts{target_ids} } ) {
+		if ( !defined($target_id) || $target_id !~ /^[0-9]+$/ ) {
+			die('every item of "target_ids" must be numeric');
+		}
+	}
+
+	# use a large go_back_minutes to bypass the time window when fetching
+	# a specific event by ID
+	my $found = $self->search(
+		table           => $opts{table},
+		id              => [ $opts{id} ],
+		go_back_minutes => 525600,
+		limit           => 1,
+	);
+	my $event = $found->[0];
+	if ( !$event ) {
+		die( 'no event with the id "' . $opts{id} . '" found in the ' . $opts{table} . ' table' );
+	}
+
+	my $dbh = $self->_escalation_dbh;
+
+	my $alert_table = $opts{table} . '_alerts';
+
+	# Records one escalation attempt: inserts the escalations row and appends
+	# its ID to the alert row's escalations array in one transaction, so the
+	# two can not drift. Committed before any send happens so a alert row
+	# lock is never held across a slow outbound send.
+	my $record = sub {
+		my ( $row_target_id, $target_name, $status, $error ) = @_;
+
+		my $escalation_id;
+		$dbh->begin_work;
+		eval {
+			my $insert
+				= $dbh->prepare(
+				'insert into escalations ( table_name, alert_id, event_id, target_id, target_name, status, note, requested_by, error )'
+					. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ? ) RETURNING id;' );
+			$insert->execute( $opts{table}, $event->{id}, $event->{event_id},
+				$row_target_id, $target_name, $status, $opts{note}, $opts{requested_by}, $error );
+			($escalation_id) = $insert->fetchrow_array;
+
+			my $append
+				= $dbh->prepare( 'update '
+					. $alert_table
+					. ' set escalations = array_append( coalesce( escalations, \'{}\'::bigint[] ), ? ) where id = ?;' );
+			$append->execute( $escalation_id, $event->{id} );
+
+			$dbh->commit;
+		};
+		if ($@) {
+			my $why = $@;
+			eval { $dbh->rollback; };
+			die($why);
+		}
+
+		return $escalation_id;
+	};
+
+	my @results;
+	foreach my $target_id ( @{ $opts{target_ids} } ) {
+		my $sth = $dbh->prepare('select * from escalation_targets where id = ?;');
+		$sth->execute($target_id);
+		my $target = $sth->fetchrow_hashref;
+
+		# a missing or disabled target is refused before any send, but the
+		# attempt is still recorded; target_id is null for a missing target
+		# as there is no valid row for the FK to reference
+		if ( !$target || !$target->{enabled} ) {
+			my $error
+				= !$target
+				? 'no escalation target with the id "' . $target_id . '"'
+				: 'escalation target "' . $target->{name} . '" is disabled';
+			my $escalation_id = $record->(
+				( $target ? $target_id       : undef ),
+				( $target ? $target->{name} : undef ),
+				'failed', $error
+			);
+			push(
+				@results,
+				{
+					target_id     => $target_id,
+					target_name   => ( $target ? $target->{name} : undef ),
+					escalation_id => $escalation_id,
+					status        => 'failed',
+					error         => $error,
+				}
+			);
+			next;
+		} ## end if ( !$target || !$target->{enabled} )
+
+		my $escalation_id = $record->( $target_id, $target->{name}, 'pending', undef );
+
+		my $payload;
+		eval {
+			my $module = Lilith::Escalate->type_module( $target->{type}, $self->{escalation_type_namespaces} );
+			$payload = $module->escalate(
+				event        => $event,
+				table        => $opts{table},
+				config       => $self->_escalation_decode_config( $target->{config} ),
+				note         => $opts{note},
+				requested_by => $opts{requested_by},
+				target_name  => $target->{name},
+			);
+		};
+		my $error  = $@ ? $@ : undef;
+		my $status = $error ? 'failed' : 'sent';
+
+		my $raw_json;
+		if ( defined($payload) ) {
+			eval { $raw_json = encode_json($payload); };
+		}
+
+		my $update = $dbh->prepare('update escalations set status = ?, error = ?, raw = ? where id = ?;');
+		$update->execute( $status, $error, $raw_json, $escalation_id );
+
+		push(
+			@results,
+			{
+				target_id     => $target_id,
+				target_name   => $target->{name},
+				escalation_id => $escalation_id,
+				status        => $status,
+				error         => $error,
+			}
+		);
+	} ## end foreach my $target_id ( @{ $opts{target_ids} ...})
+
+	return \@results;
+} ## end sub escalate
+
+=head2 escalation_test
+
+Sends a synthetic test event to a escalation target without recording
+anything in the escalations table. Returns the payload the type sent.
+Dies on failure.
+
+    my $payload = $lilith->escalation_test(id => 3);
+
+=cut
+
+sub escalation_test {
+	my ( $self, %opts ) = @_;
+
+	my $target = $self->escalation_target_get( $opts{id} );
+
+	my $event = {
+		id             => 0,
+		event_id       => 'lilith-escalation-test',
+		instance       => 'lilith-test',
+		host           => hostname,
+		timestamp      => strftime( '%Y-%m-%dT%H:%M:%SZ', gmtime ),
+		src_ip         => '192.0.2.1',
+		src_port       => 11111,
+		dest_ip        => '192.0.2.2',
+		dest_port      => 443,
+		proto          => 'TCP',
+		classification => 'Test Escalation',
+		signature      => 'Lilith escalation test',
+		raw            => { test => 1 },
+	};
+
+	my $module = Lilith::Escalate->type_module( $target->{type}, $self->{escalation_type_namespaces} );
+
+	return $module->escalate(
+		event       => $event,
+		table       => 'test',
+		config      => $target->{config},
+		note        => 'This is a test escalation from Lilith.',
+		target_name => $target->{name},
+		test        => 1,
+	);
+} ## end sub escalation_test
+
+=head2 escalations_for
+
+Returns the escalations recorded for a event as a array ref of hash
+refs, newest first, each joined with the target's current type as
+target_type. target_name is the name snapshotted at attempt time,
+falling back to the target's current name for rows predating the
+snapshot column.
+
+    my $escalations = $lilith->escalations_for(
+                                               table => 'suricata',
+                                               id    => 42,
+                                              );
+
+=cut
+
+sub escalations_for {
+	my ( $self, %opts ) = @_;
+
+	if ( !defined( $opts{table} ) ) {
+		$opts{table} = 'suricata';
+	}
+	if ( $opts{table} ne 'suricata' && $opts{table} ne 'sagan' && $opts{table} ne 'cape' ) {
+		die( '"' . $opts{table} . '" is not a known table type' );
+	}
+
+	if ( !defined( $opts{id} ) || $opts{id} !~ /^[0-9]+$/ ) {
+		die('"id" is required and must be numeric');
+	}
+
+	my $dbh = $self->_escalation_dbh;
+
+	my $sth
+		= $dbh->prepare( 'select e.*, t.name as target_current_name, t.type as target_type from escalations e'
+			. ' left join escalation_targets t on e.target_id = t.id'
+			. ' where e.table_name = ? and e.alert_id = ? order by e.timestamp desc, e.id desc;' );
+	$sth->execute( $opts{table}, $opts{id} );
+
+	my @escalations;
+	while ( my $row = $sth->fetchrow_hashref ) {
+		if ( !defined( $row->{target_name} ) ) {
+			$row->{target_name} = $row->{target_current_name};
+		}
+		delete( $row->{target_current_name} );
+		push( @escalations, $row );
+	}
+
+	return \@escalations;
+} ## end sub escalations_for
+
+sub _escalation_dbh {
+	my ($self) = @_;
+
+	my $dbh;
+	eval { $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } ); };
+	if ( $@ || !$dbh ) {
+		die( 'DBI->connect_cached failure... ' . $@ );
+	}
+
+	return $dbh;
+}
+
+sub _escalation_decode_config {
+	my ( $self, $config ) = @_;
+
+	if ( ref $config eq 'HASH' ) {
+		return $config;
+	}
+
+	my $decoded;
+	if ( defined($config) ) {
+		eval { $decoded = decode_json($config); };
+	}
+
+	return ref $decoded eq 'HASH' ? $decoded : {};
+}
 
 =head1 AUTHOR
 

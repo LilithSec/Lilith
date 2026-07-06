@@ -32,6 +32,28 @@ lilith [B<-c> <config>] B<-a> search [B<--output> <return>] [B<-t> <table>]
 [B<--malscore> <malscore>] [B<--size> <size>] [B<--target> <target>]
 [B<--task> <task>]
 
+lilith [B<-c> <config>] B<-a> esc [B<-t> <table>] B<--id> <row_id> B<--to> <targets>
+[B<--note> <note>] [B<--by> <who>] [B<--output> <return>] [B<--pretty>]
+
+lilith [B<-c> <config>] B<-a> esc_history [B<-t> <table>] B<--id> <row_id>
+[B<--output> <return>] [B<--raw>] [B<--pretty>]
+
+lilith [B<-c> <config>] B<-a> esc_types [B<--output> <return>] [B<--pretty>]
+
+lilith [B<-c> <config>] B<-a> esc_targets [B<--output> <return>] [B<--pretty>]
+
+lilith [B<-c> <config>] B<-a> esc_target_get <B<--tid> <id>|B<--name> <name>> [B<--pretty>]
+
+lilith [B<-c> <config>] B<-a> esc_target_create B<--name> <name> B<--type> <type>
+[B<--set> <key=value>] [B<--desc> <desc>] [B<--disable>]
+
+lilith [B<-c> <config>] B<-a> esc_target_update <B<--tid> <id>|B<--name> <name>>
+[B<--set> <key=value>] [B<--desc> <desc>] [B<--enable>] [B<--disable>]
+
+lilith [B<-c> <config>] B<-a> esc_target_delete <B<--tid> <id>|B<--name> <name>>
+
+lilith [B<-c> <config>] B<-a> esc_target_test <B<--tid> <id>|B<--name> <name>> [B<--pretty>]
+
 =head1 DESCRIPTION
 
 This script runs various actions for Lilith, including search and the daemon.
@@ -381,6 +403,119 @@ The host the sample was submitted from.
     - Default :: undef
     - Type :: string
 
+=head2 esc
+
+Escalates a event to one or more escalation targets. The table is picked
+via -t and the event via --id. Every attempt is recorded in the
+escalations table and the event's escalations array. Exits non-zero if
+any target failed.
+
+=head3 --id <row_id>
+
+The row ID of the event to escalate.
+
+=head3 --to <targets>
+
+Comma separated list of escalation targets to escalate to. Each item may
+be either a target ID or a target name.
+
+=head3 --note <note>
+
+A optional note to record with the escalation.
+
+    - Default :: undef
+
+=head3 --by <who>
+
+Who requested the escalation, recorded as requested_by.
+
+    - Default :: the current user
+
+=head3 --output <return>
+
+The output format, either table or json.
+
+    - Default :: table
+
+=head2 esc_history
+
+Prints the escalations recorded for a event, newest first. The table is
+picked via -t and the event via --id. With --output json the raw payload
+of each escalation is included, decoded unless --raw is given.
+
+=head2 esc_types
+
+Lists the available escalation types along with the config fields each
+one takes, for use with --set. --output json prints the full type info.
+
+=head2 esc_targets
+
+Lists the configured escalation targets. --output json includes the
+config of each.
+
+=head2 esc_target_get
+
+Prints a single escalation target as JSON, including its config. The
+target is picked via --tid or --name.
+
+=head3 --tid <id>
+
+The escalation target ID.
+
+=head3 --name <name>
+
+The escalation target name.
+
+=head2 esc_target_create
+
+Creates a new escalation target and prints its ID.
+
+=head3 --name <name>
+
+The name for the new target. Required.
+
+=head3 --type <type>
+
+The escalation type, as listed by esc_types. Required.
+
+=head3 --set <key=value>
+
+A config item for the type. May be given multiple times. The keys a type
+takes are listed by esc_types.
+
+=head3 --desc <desc>
+
+A optional description.
+
+=head3 --disable
+
+Create the target disabled.
+
+=head2 esc_target_update
+
+Updates a escalation target, picked via --tid or --name. Only the items
+specified change. --set items are merged over the current config; a
+empty value, e.g. --set apikey=, removes that key so the type default
+applies. When the target is picked via --tid, --name renames it.
+
+=head3 --enable
+
+Enable the target.
+
+=head3 --disable
+
+Disable the target.
+
+=head2 esc_target_delete
+
+Deletes a escalation target, picked via --tid or --name. Escalations
+recorded to it are kept, with the name they were recorded under.
+
+=head2 esc_target_test
+
+Sends a synthetic test event to a escalation target, picked via --tid or
+--name, and prints the payload sent as JSON.
+
 =head1 ENVIROMENTAL VARIABLES
 
 =head2 Lilith_color_enable
@@ -555,6 +690,101 @@ sub eve_instances {
 	return %files;
 } ## end sub eve_instances
 
+# Init a Text::ANSITable with the standard Lilith styling and the passed
+# columns.
+sub esc_table {
+	my (@columns) = @_;
+
+	my $tb = Text::ANSITable->new;
+	$tb->border_style( $ENV{Lilith_table_border} );
+	$tb->color_theme( $ENV{Lilith_table_color} );
+
+	my $header_int = 0;
+	foreach my $header (@columns) {
+		$tb->set_column_style( $header_int, pad => ( ( $header_int % 2 ) != 0 ? 1 : 0 ) );
+		$header_int++;
+	}
+	$tb->columns( \@columns );
+
+	return $tb;
+} ## end sub esc_table
+
+# Parse repeated --set key=value items into a config hash ref, dieing on
+# anything malformed.
+sub esc_parse_set {
+	my (@set) = @_;
+
+	my %config;
+	foreach my $item (@set) {
+		if ( $item =~ /^([A-Za-z0-9_]+)=(.*)$/s ) {
+			$config{$1} = $2;
+		} else {
+			die( '"' . $item . '" for --set is not in the form key=value' );
+		}
+	}
+
+	return \%config;
+} ## end sub esc_parse_set
+
+# Look up a escalation target, by --tid when given and by --name otherwise.
+sub esc_lookup_target {
+	my ( $lilith, $tid, $name ) = @_;
+
+	if ( defined($tid) && $tid ne '' ) {
+		if ( $tid !~ /^[0-9]+$/ ) {
+			die( '"' . $tid . '" for --tid is not numeric' );
+		}
+		return $lilith->escalation_target_get($tid);
+	}
+
+	if ( defined($name) && $name ne '' ) {
+		my $targets = $lilith->escalation_targets;
+		my ($match) = grep { $_->{name} eq $name } @{$targets};
+		if ( !$match ) {
+			die( 'no escalation target named "'
+					. $name . '"'
+					. ( @{$targets} ? '; known: ' . join( ', ', map { $_->{name} } @{$targets} ) : '' ) );
+		}
+		return $match;
+	} ## end if ( defined($name) && $name ne '' )
+
+	die('either --tid or --name is required for picking the escalation target');
+} ## end sub esc_lookup_target
+
+# Resolve the comma separated --to list into a array ref of escalation
+# target IDs. All numeric items are taken as IDs; anything else is matched
+# against target names.
+sub esc_resolve_targets {
+	my ( $lilith, $to ) = @_;
+
+	my @tokens = grep { $_ ne '' } split( /\s*,\s*/, defined($to) ? $to : '' );
+	if ( !@tokens ) {
+		die('--to is required and must be a comma separated list of escalation target IDs or names');
+	}
+
+	my $targets;
+	my @ids;
+	foreach my $token (@tokens) {
+		if ( $token =~ /^[0-9]+$/ ) {
+			push( @ids, $token );
+			next;
+		}
+
+		if ( !defined($targets) ) {
+			$targets = $lilith->escalation_targets;
+		}
+		my ($match) = grep { $_->{name} eq $token } @{$targets};
+		if ( !$match ) {
+			die( 'no escalation target named "'
+					. $token . '"'
+					. ( @{$targets} ? '; known: ' . join( ', ', map { $_->{name} } @{$targets} ) : '' ) );
+		}
+		push( @ids, $match->{id} );
+	} ## end foreach my $token (@tokens)
+
+	return \@ids;
+} ## end sub esc_resolve_targets
+
 sub help {
 	&version;
 
@@ -623,6 +853,16 @@ my @malscore;
 my @size;
 my $target;
 my @task;
+my $esc_tid;
+my $esc_name;
+my $esc_type;
+my $esc_desc;
+my $esc_enable;
+my $esc_disable;
+my @esc_set;
+my $esc_to;
+my $esc_note;
+my $esc_by;
 Getopt::Long::Configure('no_ignore_case');
 Getopt::Long::Configure('bundling');
 GetOptions(
@@ -681,6 +921,16 @@ GetOptions(
 	'size=s'           => \@size,
 	'target=s'         => \$target,
 	'task=s'           => \@task,
+	'tid=s'            => \$esc_tid,
+	'name=s'           => \$esc_name,
+	'type=s'           => \$esc_type,
+	'desc=s'           => \$esc_desc,
+	'enable'           => \$esc_enable,
+	'disable'          => \$esc_disable,
+	'set=s'            => \@esc_set,
+	'to=s'             => \$esc_to,
+	'note=s'           => \$esc_note,
+	'by=s'             => \$esc_by,
 );
 
 @class = split( /\s*,\s*/, join( ',', @class ) );
@@ -770,16 +1020,17 @@ unless ($toml) {
 }
 
 my $lilith = Lilith->new(
-	dsn                   => $toml->{dsn},
-	user                  => $toml->{user},
-	pass                  => $toml->{pass},
-	debug                 => $debug,
-	class_ignore          => $toml->{class_ignore},
-	sid_ignore            => $toml->{sid_ignore},
-	suricata_class_ignore => $toml->{suricata_class_ignore},
-	suricata_sid_ignore   => $toml->{suricata_sid_ignore},
-	sagan_class_ignore    => $toml->{sagan_class_ignore},
-	sagan_sid_ignore      => $toml->{sagan_sid_ignore},
+	dsn                        => $toml->{dsn},
+	user                       => $toml->{user},
+	pass                       => $toml->{pass},
+	debug                      => $debug,
+	class_ignore               => $toml->{class_ignore},
+	sid_ignore                 => $toml->{sid_ignore},
+	suricata_class_ignore      => $toml->{suricata_class_ignore},
+	suricata_sid_ignore        => $toml->{suricata_sid_ignore},
+	sagan_class_ignore         => $toml->{sagan_class_ignore},
+	sagan_sid_ignore           => $toml->{sagan_sid_ignore},
+	escalation_type_namespaces => $toml->{escalation_type_namespaces},
 );
 
 # dump self if asked
@@ -1110,6 +1361,9 @@ if ( $action eq 'search' ) {
 					$row->{$column} =~ s/\-(ids|pie|lae)$/-$color3$1$color1/;
 					$row->{$column} =~ s/\-([A-Za-z0-9\-]+)\-/-$color4$1$color1/;
 					push( @new_line, $row->{$column} );
+				} elsif ( defined( $row->{$column} ) && ref( $row->{$column} ) eq 'ARRAY' ) {
+					# PG array columns, e.g. escalations, come back as array refs
+					push( @new_line, join( ',', @{ $row->{$column} } ) );
 				} elsif ( defined( $row->{$column} ) ) {
 					push( @new_line, $row->{$column} );
 				} else {
@@ -1284,6 +1538,351 @@ if ( $action eq 'get_short_class_snmp_list' ) {
 
 	exit 0;
 }
+
+#
+# lists the available escalation types and their config fields
+#
+
+if ( $action eq 'esc_types' ) {
+	my $types = $lilith->escalation_types;
+
+	if ( $search_output eq 'json' ) {
+		my @infos = map { $lilith->escalation_type_info($_) } @{$types};
+		my $json = JSON->new;
+		if ($pretty) {
+			$json->canonical(1);
+			$json->pretty(1);
+		}
+		print $json->encode( \@infos );
+		if ( !$pretty ) {
+			print "\n";
+		}
+		exit 0;
+	} ## end if ( $search_output eq 'json' )
+
+	foreach my $type ( @{$types} ) {
+		my $info = $lilith->escalation_type_info($type);
+		print $type . ' :: ' . $info->{description} . "\n";
+
+		my $tb = esc_table( 'Field', 'Label', 'Type', 'Req', 'Default' );
+		my @td;
+		foreach my $field ( @{ $info->{fields} } ) {
+			push(
+				@td,
+				[
+					$field->{name},
+					defined( $field->{label} ) ? $field->{label} : '',
+					defined( $field->{type} )  ? $field->{type}  : '',
+					$field->{required}         ? '1'             : '0',
+					defined( $field->{default} ) ? $field->{default} : '',
+				]
+			);
+		} ## end foreach my $field ( @{ $info->{fields} } )
+		$tb->add_rows( \@td );
+		print $tb->draw . "\n";
+	} ## end foreach my $type ( @{$types} )
+
+	exit 0;
+} ## end if ( $action eq 'esc_types' )
+
+#
+# lists the configured escalation targets
+#
+
+if ( $action eq 'esc_targets' ) {
+	my $targets = $lilith->escalation_targets;
+
+	if ( $search_output eq 'json' ) {
+		my $json = JSON->new;
+		if ($pretty) {
+			$json->canonical(1);
+			$json->pretty(1);
+		}
+		print $json->encode($targets);
+		if ( !$pretty ) {
+			print "\n";
+		}
+		exit 0;
+	} ## end if ( $search_output eq 'json' )
+
+	my $tb = esc_table( 'ID', 'Name', 'Type', 'Enabled', 'Description', 'Updated' );
+	my @td;
+	foreach my $item ( @{$targets} ) {
+		push(
+			@td,
+			[
+				$item->{id},
+				$item->{name},
+				$item->{type},
+				( $item->{enabled} ? '1' : '0' ),
+				defined( $item->{description} ) ? $item->{description} : '',
+				defined( $item->{updated} )     ? $item->{updated}     : '',
+			]
+		);
+	} ## end foreach my $item ( @{$targets} )
+	$tb->add_rows( \@td );
+	print $tb->draw;
+
+	exit 0;
+} ## end if ( $action eq 'esc_targets' )
+
+#
+# prints a single escalation target as JSON
+#
+
+if ( $action eq 'esc_target_get' ) {
+	my $target = esc_lookup_target( $lilith, $esc_tid, $esc_name );
+
+	my $json = JSON->new;
+	if ($pretty) {
+		$json->canonical(1);
+		$json->pretty(1);
+	}
+	print $json->encode($target);
+	if ( !$pretty ) {
+		print "\n";
+	}
+
+	exit 0;
+} ## end if ( $action eq 'esc_target_get' )
+
+#
+# creates a escalation target
+#
+
+if ( $action eq 'esc_target_create' ) {
+	if ( !defined($esc_name) || $esc_name eq '' ) {
+		die('--name is required for creating a escalation target');
+	}
+	if ( !defined($esc_type) || $esc_type eq '' ) {
+		die('--type is required for creating a escalation target');
+	}
+
+	my $config = esc_parse_set(@esc_set);
+
+	# empty values make no sense on create; drop them so type defaults apply
+	foreach my $key ( keys( %{$config} ) ) {
+		if ( $config->{$key} eq '' ) {
+			delete( $config->{$key} );
+		}
+	}
+
+	my $new_id = $lilith->escalation_target_create(
+		name        => $esc_name,
+		type        => $esc_type,
+		config      => $config,
+		description => $esc_desc,
+		enabled     => ( $esc_disable ? 0 : 1 ),
+	);
+
+	print 'created escalation target ' . $new_id . "\n";
+
+	exit 0;
+} ## end if ( $action eq 'esc_target_create' )
+
+#
+# updates a escalation target
+#
+
+if ( $action eq 'esc_target_update' ) {
+	if ( $esc_enable && $esc_disable ) {
+		die('--enable and --disable are mutually exclusive');
+	}
+
+	my $existing = esc_lookup_target( $lilith, $esc_tid, $esc_name );
+
+	my %update = ( id => $existing->{id} );
+
+	# --set items are merged over the current config; a empty value removes
+	# that key so the type default applies again
+	if (@esc_set) {
+		my $set    = esc_parse_set(@esc_set);
+		my $config = { %{ $existing->{config} } };
+		foreach my $key ( keys( %{$set} ) ) {
+			if ( $set->{$key} eq '' ) {
+				delete( $config->{$key} );
+			} else {
+				$config->{$key} = $set->{$key};
+			}
+		}
+		$update{config} = $config;
+	} ## end if (@esc_set)
+
+	# when picked via --tid, --name is the new name
+	if ( defined($esc_tid) && $esc_tid ne '' && defined($esc_name) && $esc_name ne '' ) {
+		$update{name} = $esc_name;
+	}
+	if ( defined($esc_desc) ) {
+		$update{description} = $esc_desc;
+	}
+	if ($esc_enable) {
+		$update{enabled} = 1;
+	}
+	if ($esc_disable) {
+		$update{enabled} = 0;
+	}
+
+	$lilith->escalation_target_update(%update);
+
+	print 'updated escalation target ' . $existing->{id} . "\n";
+
+	exit 0;
+} ## end if ( $action eq 'esc_target_update' )
+
+#
+# deletes a escalation target
+#
+
+if ( $action eq 'esc_target_delete' ) {
+	my $existing = esc_lookup_target( $lilith, $esc_tid, $esc_name );
+
+	$lilith->escalation_target_delete( $existing->{id} );
+
+	print 'deleted escalation target ' . $existing->{id} . ', "' . $existing->{name} . '"' . "\n";
+
+	exit 0;
+}
+
+#
+# sends a synthetic test event to a escalation target
+#
+
+if ( $action eq 'esc_target_test' ) {
+	my $existing = esc_lookup_target( $lilith, $esc_tid, $esc_name );
+
+	my $payload = $lilith->escalation_test( id => $existing->{id} );
+
+	my $json = JSON->new;
+	if ($pretty) {
+		$json->canonical(1);
+		$json->pretty(1);
+	}
+	print $json->encode($payload);
+	if ( !$pretty ) {
+		print "\n";
+	}
+
+	exit 0;
+} ## end if ( $action eq 'esc_target_test' )
+
+#
+# escalates a event
+#
+
+if ( $action eq 'esc' ) {
+	if ( !defined( $id[0] ) ) {
+		die('--id is required for escalating a event');
+	}
+
+	my $target_ids = esc_resolve_targets( $lilith, $esc_to );
+
+	if ( !defined($esc_by) || $esc_by eq '' ) {
+		$esc_by = getlogin || getpwuid($<) || 'unknown';
+	}
+
+	my $results = $lilith->escalate(
+		table        => $table,
+		id           => $id[0],
+		target_ids   => $target_ids,
+		note         => $esc_note,
+		requested_by => $esc_by,
+	);
+
+	my $failed = scalar( grep { $_->{status} ne 'sent' } @{$results} );
+
+	if ( $search_output eq 'json' ) {
+		my $json = JSON->new;
+		if ($pretty) {
+			$json->canonical(1);
+			$json->pretty(1);
+		}
+		print $json->encode($results);
+		if ( !$pretty ) {
+			print "\n";
+		}
+		exit( $failed ? 1 : 0 );
+	} ## end if ( $search_output eq 'json' )
+
+	my $tb = esc_table( 'Target', 'Status', 'Escalation ID', 'Error' );
+	my @td;
+	foreach my $result ( @{$results} ) {
+		push(
+			@td,
+			[
+				defined( $result->{target_name} ) ? $result->{target_name} : ( 'id ' . $result->{target_id} ),
+				$result->{status},
+				defined( $result->{escalation_id} ) ? $result->{escalation_id} : '',
+				defined( $result->{error} )         ? $result->{error}         : '',
+			]
+		);
+	} ## end foreach my $result ( @{$results} )
+	$tb->add_rows( \@td );
+	print $tb->draw;
+
+	exit( $failed ? 1 : 0 );
+} ## end if ( $action eq 'esc' )
+
+#
+# prints the escalations recorded for a event
+#
+
+if ( $action eq 'esc_history' ) {
+	if ( !defined( $id[0] ) ) {
+		die('--id is required for fetching the escalations for a event');
+	}
+
+	my $escalations = $lilith->escalations_for(
+		table => $table,
+		id    => $id[0],
+	);
+
+	if ( $search_output eq 'json' ) {
+		# mirror the event action; the raw is decoded unless --raw is given
+		if ( !$decode_raw ) {
+			foreach my $escalation ( @{$escalations} ) {
+				if ( defined( $escalation->{raw} ) && !ref( $escalation->{raw} ) ) {
+					my $decoded;
+					eval { $decoded = decode_json( $escalation->{raw} ) };
+					if ( !$@ && ref($decoded) ) {
+						$escalation->{raw} = $decoded;
+					}
+				}
+			}
+		} ## end if ( !$decode_raw )
+
+		my $json = JSON->new;
+		if ($pretty) {
+			$json->canonical(1);
+			$json->pretty(1);
+		}
+		print $json->encode($escalations);
+		if ( !$pretty ) {
+			print "\n";
+		}
+		exit 0;
+	} ## end if ( $search_output eq 'json' )
+
+	my $tb = esc_table( 'ID', 'Time', 'Target', 'Status', 'By', 'Note', 'Error' );
+	my @td;
+	foreach my $escalation ( @{$escalations} ) {
+		push(
+			@td,
+			[
+				$escalation->{id},
+				defined( $escalation->{timestamp} )    ? $escalation->{timestamp}    : '',
+				defined( $escalation->{target_name} )  ? $escalation->{target_name}  : '',
+				$escalation->{status},
+				defined( $escalation->{requested_by} ) ? $escalation->{requested_by} : '',
+				defined( $escalation->{note} )         ? $escalation->{note}         : '',
+				defined( $escalation->{error} )        ? $escalation->{error}        : '',
+			]
+		);
+	} ## end foreach my $escalation ( @{$escalations} )
+	$tb->add_rows( \@td );
+	print $tb->draw;
+
+	exit 0;
+} ## end if ( $action eq 'esc_history' )
 
 #
 # means we did not match anything

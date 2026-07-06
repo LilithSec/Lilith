@@ -55,6 +55,10 @@
         </div>
       </div>
       % }
+      % if ($self->escalation_enable) {
+      <button type="button" class="btn btn-sm btn-danger" id="escalate-btn"
+              data-bs-toggle="modal" data-bs-target="#escalate-modal">Escalate</button>
+      % }
       <a href="/search?table=<%= $table %>&search=1" class="btn btn-sm btn-outline-secondary">&larr; Back</a>
     </div>
   </div>
@@ -79,7 +83,7 @@
         <tr>
           <th style="width:180px" class="text-muted ps-3"><%= $key %></th>
           <td class="font-monospace">
-            <%= $event->{$key} // '' %>
+            <%= ref $event->{$key} eq 'ARRAY' ? join(', ', @{$event->{$key}}) : $event->{$key} // '' %>
             % if (($key eq 'src_ip' || $key eq 'dest_ip') && $event->{$key}) {
             <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn ms-1"
                     data-ip="<%= $event->{$key} %>" style="font-size:0.65rem;line-height:1.2">?</button>
@@ -1394,6 +1398,53 @@
 </div>
 % }
 
+% if ($self->escalation_enable) {
+<!-- Escalation history for this event -->
+<div class="card border-secondary mt-3" id="escalation-history">
+  <div class="card-header py-1 small text-muted d-flex justify-content-between align-items-center">
+    <span>Escalations</span>
+    <span id="esc-history-status" class="text-muted"></span>
+  </div>
+  <div class="p-2" id="esc-history-body">
+    <span class="text-muted small">Loading…</span>
+  </div>
+</div>
+
+<!-- Escalate modal -->
+<div class="modal fade" id="escalate-modal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content bg-dark text-light border-secondary">
+      <div class="modal-header py-2 border-secondary">
+        <h6 class="modal-title">Escalate Event #<%= $id %> (<%= $cap_table %>)</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label small text-muted mb-1">Targets</label>
+          <div id="esc-targets" class="border border-secondary rounded p-2">
+            <span class="text-muted small">Loading…</span>
+          </div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small text-muted mb-1">Note</label>
+          <textarea id="esc-note" class="form-control form-control-sm" rows="2"></textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small text-muted mb-1">Requested by</label>
+          <input type="text" id="esc-requested-by" class="form-control form-control-sm">
+        </div>
+        <div id="esc-error" class="text-warning small" style="display:none"></div>
+        <div id="esc-results" class="small mt-2" style="display:none"></div>
+      </div>
+      <div class="modal-footer py-2 border-secondary">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-sm btn-danger" id="esc-send-btn">Escalate</button>
+      </div>
+    </div>
+  </div>
+</div>
+% }
+
 % }
 
 <!-- Domain Info Modal -->
@@ -1585,3 +1636,202 @@ document.addEventListener('DOMContentLoaded', function() {
   })();
 });
 </script>
+
+% if ($self->escalation_enable && $event) {
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var escTable = '<%= $table %>';
+  var escId    = '<%= $id %>';
+
+  function statusBadge(status) {
+    var cls = { sent: 'bg-success', failed: 'bg-danger', pending: 'bg-secondary' }[status] || 'bg-secondary';
+    var b = document.createElement('span');
+    b.className = 'badge ' + cls;
+    b.textContent = status;
+    return b;
+  }
+
+  // Escalation history — one row per recorded escalation, with the raw
+  // payload behind an expando.
+  function loadHistory() {
+    var body     = document.getElementById('esc-history-body');
+    var statusEl = document.getElementById('esc-history-status');
+    fetch('/api/escalation/history/' + encodeURIComponent(escTable) + '/' + encodeURIComponent(escId))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var rows = data.escalations || [];
+        statusEl.textContent = rows.length + ' escalation' + (rows.length === 1 ? '' : 's');
+        body.innerHTML = '';
+        if (data.error) {
+          var err = document.createElement('span');
+          err.className = 'text-warning small';
+          err.textContent = data.error;
+          body.appendChild(err);
+          return;
+        }
+        if (!rows.length) {
+          var none = document.createElement('span');
+          none.className = 'text-muted small';
+          none.textContent = 'This event has not been escalated.';
+          body.appendChild(none);
+          return;
+        }
+        var table = document.createElement('table');
+        table.className = 'table table-dark table-sm table-bordered mb-0';
+        var thead = document.createElement('thead');
+        thead.className = 'table-secondary';
+        thead.innerHTML = '<tr><th>Time</th><th>Target</th><th>Status</th><th>Requested By</th>'
+          + '<th>Note</th><th>Error</th><th>Raw</th></tr>';
+        table.appendChild(thead);
+        var tbody = document.createElement('tbody');
+        rows.forEach(function(row) {
+          var tr = document.createElement('tr');
+          function cell(text) {
+            var td = document.createElement('td');
+            td.textContent = (text == null ? '' : text);
+            return td;
+          }
+          tr.appendChild(cell(row.timestamp));
+          // target_name is snapshotted at attempt time; a null target_id
+          // alongside a name means the target has since been deleted
+          var targetLabel = row.target_name || '(unknown target)';
+          if (row.target_name && !row.target_id) { targetLabel += ' (deleted)'; }
+          tr.appendChild(cell(targetLabel));
+          var st = document.createElement('td');
+          st.appendChild(statusBadge(row.status));
+          tr.appendChild(st);
+          tr.appendChild(cell(row.requested_by));
+          tr.appendChild(cell(row.note));
+          var errTd = cell(row.error);
+          errTd.className = row.error ? 'text-warning small' : '';
+          tr.appendChild(errTd);
+          var rawTd = document.createElement('td');
+          if (row.raw) {
+            var details = document.createElement('details');
+            var summary = document.createElement('summary');
+            summary.className = 'text-muted small';
+            summary.textContent = 'raw';
+            var pre = document.createElement('pre');
+            pre.className = 'small mb-0';
+            pre.style.whiteSpace = 'pre-wrap';
+            pre.style.maxHeight = '300px';
+            pre.style.overflowY = 'auto';
+            pre.textContent = JSON.stringify(row.raw, null, 2);
+            details.appendChild(summary);
+            details.appendChild(pre);
+            rawTd.appendChild(details);
+          }
+          tr.appendChild(rawTd);
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        var wrap = document.createElement('div');
+        wrap.className = 'table-responsive';
+        wrap.appendChild(table);
+        body.appendChild(wrap);
+      })
+      .catch(function(e) {
+        body.innerHTML = '';
+        var err = document.createElement('span');
+        err.className = 'text-warning small';
+        err.textContent = 'Failed to load escalations: ' + e;
+        body.appendChild(err);
+      });
+  }
+  loadHistory();
+
+  // Escalate modal — target list is fetched when the modal opens so it is
+  // always current.
+  var modalEl = document.getElementById('escalate-modal');
+  modalEl.addEventListener('show.bs.modal', function() {
+    var box = document.getElementById('esc-targets');
+    document.getElementById('esc-error').style.display   = 'none';
+    document.getElementById('esc-results').style.display = 'none';
+    box.innerHTML = '<span class="text-muted small">Loading…</span>';
+    fetch('/api/escalation/targets')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var targets = (data.targets || []).filter(function(t) { return t.enabled; });
+        box.innerHTML = '';
+        if (!targets.length) {
+          box.innerHTML = '<span class="text-muted small">No enabled escalation targets configured.'
+            + ' Add one on the <a href="/escalation" class="text-danger">Escalation</a> page.</span>';
+          return;
+        }
+        targets.forEach(function(t) {
+          var wrap = document.createElement('div');
+          wrap.className = 'form-check';
+          var input = document.createElement('input');
+          input.className = 'form-check-input esc-target-check';
+          input.type = 'checkbox';
+          input.value = t.id;
+          input.id = 'esc-target-' + t.id;
+          var label = document.createElement('label');
+          label.className = 'form-check-label small';
+          label.htmlFor = input.id;
+          label.textContent = t.name + ' (' + t.type + ')' + (t.description ? ' — ' + t.description : '');
+          wrap.appendChild(input);
+          wrap.appendChild(label);
+          box.appendChild(wrap);
+        });
+      })
+      .catch(function(e) {
+        box.innerHTML = '<span class="text-warning small">Failed to load targets: ' + e + '</span>';
+      });
+  });
+
+  document.getElementById('esc-send-btn').addEventListener('click', function() {
+    var errEl     = document.getElementById('esc-error');
+    var resultsEl = document.getElementById('esc-results');
+    errEl.style.display = 'none';
+    var ids = [];
+    document.querySelectorAll('.esc-target-check:checked').forEach(function(el) { ids.push(el.value); });
+    if (!ids.length) {
+      errEl.textContent = 'Select at least one target.';
+      errEl.style.display = '';
+      return;
+    }
+    var btn = this;
+    btn.disabled = true;
+    fetch('/api/escalation/escalate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        table:        escTable,
+        id:           escId,
+        target_ids:   ids,
+        note:         document.getElementById('esc-note').value,
+        requested_by: document.getElementById('esc-requested-by').value
+      })
+    })
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      .then(function(res) {
+        btn.disabled = false;
+        if (!res.ok || res.data.error) {
+          errEl.textContent = res.data.error || 'escalation failed';
+          errEl.style.display = '';
+          return;
+        }
+        resultsEl.innerHTML = '';
+        (res.data.results || []).forEach(function(result) {
+          var line = document.createElement('div');
+          line.appendChild(statusBadge(result.status));
+          var text = document.createElement('span');
+          text.className = 'ms-1';
+          text.textContent = ' ' + (result.target_name || ('target #' + result.target_id))
+            + (result.error ? ' — ' + result.error : '');
+          line.appendChild(text);
+          resultsEl.appendChild(line);
+        });
+        resultsEl.style.display = '';
+        loadHistory();
+      })
+      .catch(function(e) {
+        btn.disabled = false;
+        errEl.textContent = 'escalation failed: ' + e;
+        errEl.style.display = '';
+      });
+  });
+});
+</script>
+% }

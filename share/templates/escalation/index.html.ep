@@ -1,0 +1,340 @@
+% layout 'default';
+% title 'Escalation Targets';
+
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/search" class="text-danger">Search</a></li>
+    <li class="breadcrumb-item active">Escalation Targets</li>
+  </ol>
+</nav>
+
+% if ($error) {
+<div class="alert alert-danger py-2">
+  <strong>Error:</strong> <%= $error %>
+</div>
+% }
+
+<div class="card border-secondary mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Escalation Targets</span>
+    <button type="button" class="btn btn-sm btn-danger" id="target-add-btn">Add Target</button>
+  </div>
+  <div class="p-2">
+    <div id="esc-action-status" class="small mb-2" style="display:none"></div>
+    % if (@$targets) {
+    <div class="table-responsive">
+      <table class="table table-dark table-sm table-hover table-bordered mb-0" id="esc-targets-table">
+        <thead class="table-secondary">
+          <tr><th>ID</th><th>Name</th><th>Type</th><th>Enabled</th><th>Description</th><th>Updated</th><th></th></tr>
+        </thead>
+        <tbody>
+          % for my $t (@$targets) {
+          <tr data-target-id="<%= $t->{id} %>">
+            <td><%= $t->{id} %></td>
+            <td><%= $t->{name} %></td>
+            <td><%= $t->{type} %></td>
+            <td>
+              % if ($t->{enabled}) {
+              <span class="badge bg-success">enabled</span>
+              % } else {
+              <span class="badge bg-secondary">disabled</span>
+              % }
+            </td>
+            <td><%= $t->{description} // '' %></td>
+            <td class="text-muted small"><%= $t->{updated} // '' %></td>
+            <td class="text-nowrap">
+              <button type="button" class="btn btn-sm btn-outline-secondary py-0 target-edit-btn"
+                      data-target-id="<%= $t->{id} %>">Edit</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary py-0 target-test-btn"
+                      data-target-id="<%= $t->{id} %>">Test</button>
+              <button type="button" class="btn btn-sm btn-outline-danger py-0 target-delete-btn"
+                      data-target-id="<%= $t->{id} %>" data-target-name="<%= $t->{name} %>">Delete</button>
+            </td>
+          </tr>
+          % }
+        </tbody>
+      </table>
+    </div>
+    % } else {
+    <div class="alert alert-secondary py-2 mb-0">No escalation targets configured yet.</div>
+    % }
+  </div>
+</div>
+
+<!-- Target add/edit modal — the config form is built from the type's
+     config_fields spec, so new escalation types need no template changes. -->
+<div class="modal fade" id="target-modal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content bg-dark text-light border-secondary">
+      <div class="modal-header py-2 border-secondary">
+        <h6 class="modal-title" id="target-modal-title">Add Escalation Target</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="target-id" value="">
+        <div class="row g-2 mb-2">
+          <div class="col-md-6">
+            <label class="form-label small text-muted mb-1">Name</label>
+            <input type="text" id="target-name" class="form-control form-control-sm">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small text-muted mb-1">Type</label>
+            <select id="target-type" class="form-select form-select-sm"></select>
+          </div>
+          <div class="col-md-2 d-flex align-items-end">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="target-enabled" checked>
+              <label class="form-check-label small" for="target-enabled">Enabled</label>
+            </div>
+          </div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small text-muted mb-1">Description</label>
+          <input type="text" id="target-description" class="form-control form-control-sm">
+        </div>
+        <div class="text-muted small mb-1" id="target-type-desc"></div>
+        <div id="target-config-fields" class="row g-2 mb-2"></div>
+        <div id="target-error" class="text-warning small" style="display:none"></div>
+      </div>
+      <div class="modal-footer py-2 border-secondary">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-sm btn-danger" id="target-save-btn">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Test result modal -->
+<div class="modal fade" id="test-result-modal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content bg-dark text-light border-secondary">
+      <div class="modal-header py-2 border-secondary">
+        <h6 class="modal-title" id="test-result-title">Test Escalation</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="test-result-loading" class="text-center text-muted py-3">Sending test escalation…</div>
+        <div id="test-result-content" style="display:none">
+          <div id="test-result-error" class="text-warning small mb-2" style="display:none"></div>
+          <div id="test-result-payload-wrap" style="display:none">
+            <span class="text-muted small fw-semibold">Payload sent</span>
+            <pre id="test-result-payload" class="small mt-1 mb-0"
+                 style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var ESC_TARGETS = <%== $targets_json %>;
+var ESC_TYPES   = <%== $types_json %>;
+
+document.addEventListener('DOMContentLoaded', function() {
+  var targetModal = new bootstrap.Modal(document.getElementById('target-modal'));
+  var testModal   = new bootstrap.Modal(document.getElementById('test-result-modal'));
+  var typeEl      = document.getElementById('target-type');
+  var fieldsEl    = document.getElementById('target-config-fields');
+  var statusEl    = document.getElementById('esc-action-status');
+
+  function status(msg, ok) {
+    statusEl.textContent = msg;
+    statusEl.className = 'small mb-2 ' + (ok ? 'text-success' : 'text-warning');
+    statusEl.style.display = '';
+  }
+
+  function typeInfo(name) {
+    for (var i = 0; i < ESC_TYPES.length; i++) {
+      if (ESC_TYPES[i].type === name) { return ESC_TYPES[i]; }
+    }
+    return null;
+  }
+
+  function findTarget(id) {
+    for (var i = 0; i < ESC_TARGETS.length; i++) {
+      if (String(ESC_TARGETS[i].id) === String(id)) { return ESC_TARGETS[i]; }
+    }
+    return null;
+  }
+
+  // populate the type select
+  ESC_TYPES.forEach(function(t) {
+    var opt = document.createElement('option');
+    opt.value = t.type;
+    opt.textContent = t.type;
+    typeEl.appendChild(opt);
+  });
+
+  // Build the config inputs for a type from its config_fields spec. For an
+  // edit, current values are filled in; a secret that is already set shows a
+  // "(unchanged)" placeholder and an empty value, which the server treats as
+  // "keep what is stored".
+  function buildConfigForm(typeName, target) {
+    fieldsEl.innerHTML = '';
+    var info = typeInfo(typeName);
+    document.getElementById('target-type-desc').textContent = info ? info.description : '';
+    if (!info) { return; }
+    var config     = (target && target.config)      || {};
+    var secretsSet = (target && target.secrets_set) || [];
+    info.fields.forEach(function(f) {
+      var col = document.createElement('div');
+      col.className = 'col-md-6';
+      var label = document.createElement('label');
+      label.className = 'form-label small text-muted mb-1';
+      label.textContent = f.label + (f.required ? ' *' : '');
+      col.appendChild(label);
+      var input;
+      if (f.type === 'boolean') {
+        var wrap = document.createElement('div');
+        wrap.className = 'form-check';
+        input = document.createElement('input');
+        input.type = 'checkbox';
+        input.className = 'form-check-input';
+        input.checked = config[f.name] !== undefined ? !!config[f.name] : !!f.default;
+        wrap.appendChild(input);
+        col.appendChild(wrap);
+      } else {
+        input = document.createElement('input');
+        input.type = (f.type === 'secret') ? 'password' : 'text';
+        if (f.type === 'integer') { input.inputMode = 'numeric'; }
+        input.className = 'form-control form-control-sm';
+        if (f.type === 'secret') {
+          input.autocomplete = 'new-password';
+          if (secretsSet.indexOf(f.name) !== -1) { input.placeholder = '(unchanged)'; }
+        } else if (config[f.name] !== undefined && config[f.name] !== null) {
+          input.value = config[f.name];
+        } else if (f.default !== undefined && f.default !== null) {
+          input.placeholder = 'default: ' + f.default;
+        }
+        col.appendChild(input);
+      }
+      input.dataset.configName = f.name;
+      input.dataset.configType = f.type;
+      fieldsEl.appendChild(col);
+    });
+  }
+
+  typeEl.addEventListener('change', function() {
+    buildConfigForm(this.value, null);
+  });
+
+  function openModal(target) {
+    document.getElementById('target-error').style.display = 'none';
+    document.getElementById('target-id').value          = target ? target.id : '';
+    document.getElementById('target-name').value        = target ? target.name : '';
+    document.getElementById('target-description').value = target ? (target.description || '') : '';
+    document.getElementById('target-enabled').checked   = target ? !!target.enabled : true;
+    document.getElementById('target-modal-title').textContent
+      = target ? ('Edit Escalation Target — ' + target.name) : 'Add Escalation Target';
+    if (target) { typeEl.value = target.type; }
+    else if (ESC_TYPES.length) { typeEl.value = ESC_TYPES[0].type; }
+    typeEl.disabled = !!target;
+    buildConfigForm(typeEl.value, target);
+    targetModal.show();
+  }
+
+  document.getElementById('target-add-btn').addEventListener('click', function() {
+    openModal(null);
+  });
+  document.querySelectorAll('.target-edit-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      openModal(findTarget(this.dataset.targetId));
+    });
+  });
+
+  document.getElementById('target-save-btn').addEventListener('click', function() {
+    var errEl  = document.getElementById('target-error');
+    errEl.style.display = 'none';
+    var config = {};
+    fieldsEl.querySelectorAll('[data-config-name]').forEach(function(input) {
+      var name = input.dataset.configName;
+      if (input.dataset.configType === 'boolean') {
+        config[name] = input.checked ? 1 : 0;
+      } else if (input.value !== '') {
+        config[name] = input.value;
+      }
+    });
+    var body = {
+      id:          document.getElementById('target-id').value,
+      name:        document.getElementById('target-name').value.trim(),
+      type:        typeEl.value,
+      config:      config,
+      description: document.getElementById('target-description').value,
+      enabled:     document.getElementById('target-enabled').checked ? 1 : 0
+    };
+    fetch('/api/escalation/targets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      .then(function(res) {
+        if (!res.ok || res.data.error) {
+          errEl.textContent = res.data.error || 'save failed';
+          errEl.style.display = '';
+          return;
+        }
+        window.location.reload();
+      })
+      .catch(function(e) {
+        errEl.textContent = 'save failed: ' + e;
+        errEl.style.display = '';
+      });
+  });
+
+  document.querySelectorAll('.target-delete-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var id = this.dataset.targetId;
+      if (!window.confirm('Delete escalation target "' + this.dataset.targetName + '"?')) { return; }
+      fetch('/api/escalation/targets/' + encodeURIComponent(id) + '/delete', { method: 'POST' })
+        .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+        .then(function(res) {
+          if (!res.ok || res.data.error) {
+            status(res.data.error || 'delete failed', false);
+            return;
+          }
+          window.location.reload();
+        })
+        .catch(function(e) { status('delete failed: ' + e, false); });
+    });
+  });
+
+  document.querySelectorAll('.target-test-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var id     = this.dataset.targetId;
+      var target = findTarget(id);
+      document.getElementById('test-result-title').textContent
+        = 'Test Escalation — ' + (target ? target.name : id);
+      document.getElementById('test-result-loading').style.display = '';
+      document.getElementById('test-result-content').style.display = 'none';
+      testModal.show();
+      fetch('/api/escalation/targets/' + encodeURIComponent(id) + '/test', { method: 'POST' })
+        .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+        .then(function(res) {
+          var errEl   = document.getElementById('test-result-error');
+          var payWrap = document.getElementById('test-result-payload-wrap');
+          if (!res.ok || res.data.error) {
+            errEl.textContent = res.data.error || 'test failed';
+            errEl.style.display = '';
+            payWrap.style.display = 'none';
+          } else {
+            errEl.style.display = 'none';
+            document.getElementById('test-result-payload').textContent
+              = JSON.stringify(res.data.payload, null, 2);
+            payWrap.style.display = '';
+          }
+          document.getElementById('test-result-loading').style.display = 'none';
+          document.getElementById('test-result-content').style.display = '';
+        })
+        .catch(function(e) {
+          var errEl = document.getElementById('test-result-error');
+          errEl.textContent = 'test failed: ' + e;
+          errEl.style.display = '';
+          document.getElementById('test-result-loading').style.display = 'none';
+          document.getElementById('test-result-content').style.display = '';
+        });
+    });
+  });
+});
+</script>

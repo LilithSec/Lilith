@@ -120,6 +120,11 @@
         </div>
       </div>
 
+      % if ($self->escalation_enable) {
+      <!-- Escalation target management -->
+      <a class="btn btn-sm btn-outline-secondary" href="/escalation" id="nav-escalation">Escalation</a>
+      % }
+
       % if ($self->virani_enabled) {
       <!-- Virani -->
       <div class="dropdown">

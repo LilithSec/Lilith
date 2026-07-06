@@ -190,6 +190,57 @@ queried live from the selected remote), and a dropdown also offers a ready-made
 Note: this exposes packet captures to anyone who can reach the web UI — put it
 behind `allowed_referers` and/or a reverse proxy with authentication.
 
+### Escalations
+
+The web frontend can escalate events to configured destinations. It is
+enabled via the config file.
+
+```toml
+escalation_enable = true
+
+# optional; additional namespaces to search for site supplied escalation
+# type modules, searched after Lilith::Escalate::Type
+escalation_type_namespaces = [ "My::Escalate" ]
+```
+
+Escalation targets are stored in SQL (the `escalation_targets` table) and
+managed on the **Escalation** page in the navbar. Each target has a name, a
+type, and a per-type config; the config form is generated from the type's
+own field spec, so newly installed types show up without any UI changes,
+and each target has a **Test** button that sends a synthetic event at it.
+
+A type is a module under the `Lilith::Escalate::Type::` namespace (see the
+[Lilith::Escalate](https://metacpan.org/pod/Lilith::Escalate) POD for the
+small interface a type implements). The dist ships with:
+
+| Type    | Description                                                                        |
+|---------|------------------------------------------------------------------------------------|
+| Webhook | POSTs the event as JSON to a URL, optionally with a `Authorization: Bearer` key.    |
+| Email   | Sends a plain text summary of the event via SMTP (STARTTLS and AUTH supported).     |
+| Syslog  | Logs a one line summary of the event to syslog.                                     |
+
+The event view gains a **Escalate** button, which sends the event to one or
+more targets along with a note and who requested it, plus a escalation
+history section. Every attempt is recorded in the `escalations` table with
+its status (`sent`/`failed`), any error, and the raw JSON of what was
+actually sent, which the history section can expand per row — including
+attempts refused before a send (a unknown or disabled target). The target's
+name is snapshotted per attempt, so history remains readable after a target
+is deleted. Escalated events are badged with a red **E** in search results.
+
+Each alert table (`suricata_alerts`, `sagan_alerts`, `cape_alerts`) also has
+a `escalations bigint[]` column holding the escalation IDs recorded for that
+row, appended in the same transaction as the `escalations` insert. Anything
+reading the alert tables can therefore trivially see whether a alert has
+been escalated and how many times (the array length) without touching the
+`escalations` table, and has the IDs in hand when more detail is wanted. The
+`escalations` table remains the source of truth.
+
+Escalations are sent from the web server (in a subprocess, so the event
+loop is not blocked). Like PCAP retrieval, the endpoints are unauthenticated
+— leave `escalation_enable` off unless the UI sits behind `allowed_referers`
+and/or a reverse proxy with authentication.
+
 ## Options
 
 ### SYNOPSIS
@@ -551,6 +602,102 @@ The host the sample was submitted from.
 
     - Default :: undef
     - Type :: string
+
+#### esc
+
+Escalates a event to one or more escalation targets. The table is picked via
+`-t` and the event via `--id`. Exits non-zero if any target failed.
+
+    lilith -a esc --id 42 --to soc-hook,mail-oncall --note 'C2 traffic'
+
+##### --id row_id
+
+The row ID of the event to escalate.
+
+##### --to targets
+
+Comma separated list of escalation targets, each either a target ID or name.
+
+##### --note note
+
+A optional note to record with the escalation.
+
+##### --by who
+
+Who requested the escalation. Defaults to the current user.
+
+##### --output return
+
+`table` or `json`.
+
+#### esc_history
+
+Prints the escalations recorded for a event, newest first, picked via `-t`
+and `--id`. With `--output json` the raw payloads are included, decoded
+unless `--raw` is given.
+
+#### esc_types
+
+Lists the available escalation types and the config fields each takes, for
+use with `--set`. `--output json` prints the full type info.
+
+#### esc_targets
+
+Lists the configured escalation targets. `--output json` includes each
+target's config.
+
+#### esc_target_get
+
+Prints a single escalation target as JSON, including its config. Picked via
+`--tid <id>` or `--name <name>`.
+
+#### esc_target_create
+
+Creates a escalation target and prints its ID.
+
+    lilith -a esc_target_create --name soc-hook --type Webhook \
+        --set url=https://soc.example/hook --set apikey=xyz
+
+##### --name name
+
+The name for the new target. Required.
+
+##### --type type
+
+The escalation type, as listed by `esc_types`. Required.
+
+##### --set key=value
+
+A config item for the type. May be given multiple times.
+
+##### --desc desc
+
+A optional description.
+
+##### --disable
+
+Create the target disabled.
+
+#### esc_target_update
+
+Updates a escalation target, picked via `--tid` or `--name`; only the items
+specified change. `--set` items merge over the current config, and a empty
+value (`--set apikey=`) removes that key. When picked via `--tid`, `--name`
+renames the target. `--enable` / `--disable` flip the enabled flag.
+
+#### esc_target_delete
+
+Deletes a escalation target, picked via `--tid` or `--name`. Recorded
+escalations to it are kept.
+
+#### esc_target_test
+
+Sends a synthetic test event to a escalation target, picked via `--tid` or
+`--name`, and prints the payload sent as JSON.
+
+Note: unlike the web UI, the escalation actions are not gated by
+`escalation_enable` — that gate exists for the unauthenticated web frontend,
+while the CLI already holds the DB credentials from the config file.
 
 ## ENVIROMENTAL VARIABLES
 
