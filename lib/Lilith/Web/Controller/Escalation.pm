@@ -327,8 +327,10 @@ sub escalate {
 		sub {
 			my ( $subprocess, $sp_err, $esc_err, $results ) = @_;
 			if ($sp_err) {
-				return $self->render( json => { error => 'escalate subprocess failed: ' . $sp_err },
-					status => 500 );
+				return $self->render(
+					json   => { error => 'escalate subprocess failed: ' . $sp_err },
+					status => 500
+				);
 			}
 			if ($esc_err) {
 				( my $why = $esc_err ) =~ s/\s+\z//;

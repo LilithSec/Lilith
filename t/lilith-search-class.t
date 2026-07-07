@@ -35,9 +35,9 @@ my $captured_search;
 	}
 }
 
-no warnings 'redefine';
+no warnings qw(redefine once);
 *Lilith::Schema::connect = sub { return bless {}, 'Lilith::Test::MockSchema' };
-use warnings 'redefine';
+use warnings qw(redefine once);
 
 my $lilith = Lilith->new( dsn => 'dbi:Pg:dbname=test' );
 
