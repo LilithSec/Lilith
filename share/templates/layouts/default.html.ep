@@ -121,8 +121,20 @@
       </div>
 
       % if ($self->escalation_enable) {
-      <!-- Escalation target management -->
+      <!-- Escalation target management: a plain link to the read only view when
+           management is off, a View/Edit dropdown when editing is enabled -->
+      % if ($self->escalation_manage_enable) {
+      <div class="dropdown">
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                id="nav-escalation-toggle" data-bs-toggle="dropdown" aria-expanded="false">Escalation</button>
+        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="nav-escalation-toggle">
+          <li><a class="dropdown-item" href="/escalation"      id="nav-escalation-view">View</a></li>
+          <li><a class="dropdown-item" href="/escalation/edit" id="nav-escalation-edit">Edit</a></li>
+        </ul>
+      </div>
+      % } else {
       <a class="btn btn-sm btn-outline-secondary" href="/escalation" id="nav-escalation">Escalation</a>
+      % }
       <!-- Auto escalation rule management -->
       <a class="btn btn-sm btn-outline-secondary" href="/auto_escalation" id="nav-auto-escalation">Auto-Esc</a>
       % }

@@ -45,9 +45,21 @@ methods.
 
     - config_fields :: A array ref of hash refs describing the config
       items the type takes. Each item has the keys 'name', 'label',
-      'type' (string/secret/integer/boolean), and optionally
-      'required' and 'default'. The web UI renders the config form
-      for a target from this, so new types require no UI changes.
+      'type', and optionally 'required' and 'default'. The web UI
+      renders the config form for a target from this, so new types
+      require no UI changes. The supported types are:
+
+        - string  :: a single line of text.
+        - secret  :: like string, but write only; never returned to
+          the browser and kept as stored when left blank on a update.
+        - integer :: a string constrained to digits in the UI.
+        - boolean :: a checkbox, stored as 1 or 0.
+        - enum    :: a drop down. The item also carries an 'options'
+          array ref of the allowed string values.
+        - list    :: a repeatable set of rows, stored as a array ref.
+          With no 'columns' it is a list of strings; with a 'columns'
+          array ref of { name, placeholder, pattern } descriptors each
+          row is a hash ref keyed by the column names.
 
     - check_config :: Validates a config hash ref for the type,
       dieing with a message if it is not usable.

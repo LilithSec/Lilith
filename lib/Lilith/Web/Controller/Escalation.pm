@@ -14,9 +14,11 @@ Lilith::Web::Controller::Escalation - Escalation controller for Lilith::Web.
 Management page and JSON API for the escalation system. Escalation
 targets live in the escalation_targets SQL table; their 'type' selects
 a L<Lilith::Escalate> type module and their 'config' is that module's
-config. Every action 404s unless escalation_enable is set in the
-config, as these endpoints can push data at outside services and
-change target config.
+config. The read tier (viewing targets, listing types, escalating an
+event, history) 404s unless escalation_enable is set. The write tier
+(create/update/delete/test a target) additionally requires
+escalation_manage_enable, so a site can expose the target list without
+letting the web UI change where alerts are sent.
 
 Secret config fields (per the type's config_fields spec) are never
 sent to the browser; they are returned masked as empty strings with
@@ -25,16 +27,53 @@ a update means "keep the current value".
 
 =cut
 
+# read tier gate; returns 1 when the caller may proceed, else renders the
+# 404 and returns 0
+sub _require_view {
+	my $self = shift;
+
+	if ( !$self->escalation_enable ) {
+		$self->reply->not_found;
+		return 0;
+	}
+
+	return 1;
+} ## end sub _require_view
+
+# write tier gate; view must be allowed and management explicitly enabled.
+# Renders a 404 (view off) or 403 (management off) and returns 0 on refusal
+sub _require_manage {
+	my $self = shift;
+
+	return 0 unless $self->_require_view;
+
+	if ( !$self->escalation_manage_enable ) {
+		$self->render( json => { error => 'escalation target management is disabled' }, status => 403 );
+		return 0;
+	}
+
+	return 1;
+} ## end sub _require_manage
+
 =head2 index
 
-Renders the escalation target management page.
+Renders the escalation target page. The /escalation route is read only;
+the /escalation/edit route (mode => 'edit') exposes the add/edit/test/
+delete controls and 404s unless escalation_manage_enable is set.
 
 =cut
 
 sub index {
 	my $self = shift;
 
-	return $self->reply->not_found unless $self->escalation_enable;
+	return unless $self->_require_view;
+
+	# the edit page only exists when management is enabled; the read only view
+	# is always reachable with escalation_enable
+	my $can_edit = ( ( $self->stash('mode') // '' ) eq 'edit' ) ? 1 : 0;
+	if ( $can_edit && !$self->escalation_manage_enable ) {
+		return $self->reply->not_found;
+	}
 
 	my $targets = [];
 	my $types   = [];
@@ -47,6 +86,7 @@ sub index {
 	$error = $@ if $@ && !$error;
 
 	$self->stash(
+		can_edit     => $can_edit,
 		targets      => $targets,
 		error        => $error,
 		targets_json => to_json($targets),
@@ -65,7 +105,7 @@ UI changes.
 sub types {
 	my $self = shift;
 
-	return $self->reply->not_found unless $self->escalation_enable;
+	return unless $self->_require_view;
 
 	my $types;
 	eval { $types = $self->_type_infos; };
@@ -86,7 +126,7 @@ masked.
 sub targets {
 	my $self = shift;
 
-	return $self->reply->not_found unless $self->escalation_enable;
+	return unless $self->_require_view;
 
 	my $targets;
 	eval { $targets = $self->_masked_targets; };
@@ -109,7 +149,7 @@ value.
 sub target_save {
 	my $self = shift;
 
-	return $self->reply->not_found unless $self->escalation_enable;
+	return unless $self->_require_manage;
 
 	my $json = $self->req->json;
 	if ( ref $json ne 'HASH' ) {
@@ -131,7 +171,7 @@ sub target_save {
 
 			# a secret field the browser left blank means keep what is stored
 			my $existing = $self->lilith->escalation_target_get($id);
-			my $type = defined( $json->{type} ) && $json->{type} ne '' ? $json->{type} : $existing->{type};
+			my $type     = defined( $json->{type} ) && $json->{type} ne '' ? $json->{type} : $existing->{type};
 			foreach my $field ( @{ $self->lilith->escalation_type_info($type)->{fields} } ) {
 				next unless $field->{type} && $field->{type} eq 'secret';
 				my $name = $field->{name};
@@ -175,7 +215,7 @@ Deletes a escalation target by ID.
 sub target_delete {
 	my $self = shift;
 
-	return $self->reply->not_found unless $self->escalation_enable;
+	return unless $self->_require_manage;
 
 	my $id = $self->param('id');
 	unless ( defined $id && $id =~ /^[0-9]+$/ ) {
@@ -201,7 +241,7 @@ send runs in a subprocess so the event loop stays responsive.
 sub target_test {
 	my $self = shift;
 
-	return $self->reply->not_found unless $self->escalation_enable;
+	return unless $self->_require_manage;
 
 	my $id = $self->param('id');
 	unless ( defined $id && $id =~ /^[0-9]+$/ ) {
@@ -241,7 +281,7 @@ blocking sends run in a subprocess so the event loop stays responsive.
 sub escalate {
 	my $self = shift;
 
-	return $self->reply->not_found unless $self->escalation_enable;
+	return unless $self->_require_view;
 
 	my $json = $self->req->json;
 	if ( ref $json ne 'HASH' ) {
@@ -287,7 +327,8 @@ sub escalate {
 		sub {
 			my ( $subprocess, $sp_err, $esc_err, $results ) = @_;
 			if ($sp_err) {
-				return $self->render( json => { error => 'escalate subprocess failed: ' . $sp_err }, status => 500 );
+				return $self->render( json => { error => 'escalate subprocess failed: ' . $sp_err },
+					status => 500 );
 			}
 			if ($esc_err) {
 				( my $why = $esc_err ) =~ s/\s+\z//;
@@ -309,7 +350,7 @@ with the raw payload decoded.
 sub history {
 	my $self = shift;
 
-	return $self->reply->not_found unless $self->escalation_enable;
+	return unless $self->_require_view;
 
 	my $table = $self->param('table');
 	unless ( defined $table && $table =~ /^(?:suricata|sagan|cape)$/ ) {
@@ -364,7 +405,7 @@ sub _masked_targets {
 					push( @secrets_set, $name );
 				}
 			}
-		}
+		} ## end if ( ref $fields eq 'ARRAY' )
 		$target->{secrets_set} = \@secrets_set;
 		$target->{enabled}     = $target->{enabled} ? 1 : 0;
 	} ## end foreach my $target (@$targets)
@@ -389,6 +430,6 @@ sub _type_infos {
 	}
 
 	return \@infos;
-}
+} ## end sub _type_infos
 
 1;

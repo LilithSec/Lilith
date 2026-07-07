@@ -44,16 +44,23 @@ The config items this type takes.
 
 sub config_fields {
 	return [
-		{ name => 'host',           label => 'SMTP Host',      type => 'string',  required => 1 },
-		{ name => 'port',           label => 'SMTP Port',      type => 'integer', required => 0, default => 25 },
-		{ name => 'starttls',       label => 'STARTTLS',       type => 'boolean', required => 0, default => 0 },
-		{ name => 'user',           label => 'SMTP User',      type => 'string',  required => 0 },
-		{ name => 'pass',           label => 'SMTP Pass',      type => 'secret',  required => 0 },
-		{ name => 'from',           label => 'From',           type => 'string',  required => 1 },
-		{ name => 'to',             label => 'To (comma sep)', type => 'string',  required => 1 },
-		{ name => 'subject_prefix', label => 'Subject Prefix', type => 'string',  required => 0, default => '[lilith]' },
+		{ name => 'host',       label => 'SMTP Host',       type => 'string',  required => 1 },
+		{ name => 'port',       label => 'SMTP Port',       type => 'integer', required => 0, default => 25 },
+		{ name => 'starttls',   label => 'STARTTLS',        type => 'boolean', required => 0, default => 0 },
+		{ name => 'ssl_verify', label => 'Verify TLS Cert', type => 'boolean', required => 0, default => 1 },
+		{ name => 'user',       label => 'SMTP User',       type => 'string',  required => 0 },
+		{ name => 'pass',       label => 'SMTP Pass',       type => 'secret',  required => 0 },
+		{ name => 'from',       label => 'From',            type => 'string',  required => 1 },
+		{ name => 'to',         label => 'To (comma sep)',  type => 'string',  required => 1 },
+		{
+			name     => 'subject_prefix',
+			label    => 'Subject Prefix',
+			type     => 'string',
+			required => 0,
+			default  => '[lilith]'
+		},
 	];
-}
+} ## end sub config_fields
 
 =head2 check_config
 
@@ -108,15 +115,16 @@ sub escalate {
 
 	my @to = grep { $_ ne '' } split( /\s*,\s*/, $config->{to} );
 	if ( !@to ) {
-		die('"to" contains no usable addresses' . "\n");
+		die( '"to" contains no usable addresses' . "\n" );
 	}
 
 	my $subject
-		= ( defined( $config->{subject_prefix} ) && $config->{subject_prefix} ne '' ? $config->{subject_prefix} : '[lilith]' )
+		= ( defined( $config->{subject_prefix} )
+			&& $config->{subject_prefix} ne '' ? $config->{subject_prefix} : '[lilith]' )
 		. ( $args{test} ? ' test' : '' )
 		. ' escalation '
-		. ( defined( $args{table} )       ? $args{table}             : '' )
-		. ( defined( $event->{id} )       ? ' #' . $event->{id}      : '' )
+		. ( defined( $args{table} )        ? $args{table}               : '' )
+		. ( defined( $event->{id} )        ? ' #' . $event->{id}        : '' )
 		. ( defined( $event->{signature} ) ? ': ' . $event->{signature} : '' );
 
 	my $body = Lilith::Escalate->event_summary( $args{table}, $event );
@@ -157,12 +165,47 @@ sub escalate {
 	};
 
 	if ( $config->{starttls} ) {
-		$smtp->starttls or $fail->('STARTTLS');
-	}
+		my %ssl_args;
+		# ssl_verify defaults to on; disable peer verification for servers
+		# using a self signed cert or a name that does not match the host
+		if ( defined( $config->{ssl_verify} ) && !$config->{ssl_verify} ) {
+			require IO::Socket::SSL;
+			$ssl_args{SSL_verify_mode} = IO::Socket::SSL::SSL_VERIFY_NONE();
+		}
+		unless ( $smtp->starttls(%ssl_args) ) {
+			# the server's "220 Ready to start TLS" reply is the STARTTLS
+			# command succeeding; the actual TLS handshake failure lands in
+			# $@, so grab that before it or $smtp->message can be clobbered
+			my $err = $@;
+			$err = $smtp->message if !defined($err) || $err eq '';
+			$err =~ s/\s+\z// if defined $err;
+			$smtp->quit;
+
+			my $host = $config->{host};
+			my $port = ( defined( $config->{port} ) ? $config->{port} + 0 : 25 );
+			my $detail
+				= 'SMTP STARTTLS failed connecting to '
+				. $host . ':'
+				. $port
+				. ( defined($err) && $err ne '' ? ': ' . $err : '' );
+
+			# reconnect without verification purely to report what
+			# certificate the server actually presented, so a name mismatch
+			# is obvious from the escalation error without server side digging
+			my ( $cn, @sans ) = eval { $class->_peer_cert_names( $host, $port ) };
+			if ( ( defined($cn) && $cn ne '' ) || @sans ) {
+				$detail .= '; server presented certificate with';
+				$detail .= ' CN=' . $cn if defined($cn) && $cn ne '';
+				$detail .= ( defined($cn) && $cn ne '' ? ' and' : '' ) . ' subjectAltName=' . join( ',', @sans )
+					if @sans;
+			}
+			die( $detail . "\n" );
+		} ## end unless ( $smtp->starttls(%ssl_args) )
+	} ## end if ( $config->{starttls} )
 	if ( defined( $config->{user} ) && $config->{user} ne '' ) {
 		$smtp->auth( $config->{user}, defined( $config->{pass} ) ? $config->{pass} : '' ) or $fail->('AUTH');
 	}
-	$smtp->mail( $config->{from} ) or $fail->('MAIL FROM');
+	$smtp->mail( $config->{from} )     or $fail->('MAIL FROM');
 	$smtp->to( @to, { SkipBad => 0 } ) or $fail->('RCPT TO');
 	$smtp->data                        or $fail->('DATA');
 	$smtp->datasend($message)          or $fail->('DATA send');
@@ -177,6 +220,51 @@ sub escalate {
 		body    => $body,
 	};
 } ## end sub escalate
+
+=head2 _peer_cert_names
+
+Best effort diagnostic helper. Connects to the given host/port, performs
+STARTTLS with certificate verification disabled, and returns the presented
+certificate's common name followed by its subjectAltName entries. Returns an
+empty list if it cannot connect or negotiate TLS. Only used to make a
+verification failure legible in the escalation error.
+
+=cut
+
+sub _peer_cert_names {
+	my ( $class, $host, $port ) = @_;
+
+	require Net::SMTP;
+	require IO::Socket::SSL;
+
+	my $smtp = Net::SMTP->new(
+		$host,
+		Port    => $port,
+		Hello   => hostname,
+		Timeout => 10,
+	);
+	return unless $smtp;
+
+	unless ( $smtp->starttls( SSL_verify_mode => IO::Socket::SSL::SSL_VERIFY_NONE() ) ) {
+		$smtp->quit;
+		return;
+	}
+
+	my $cn        = eval { $smtp->peer_certificate('commonName') };
+	my @san_pairs = eval { $smtp->peer_certificate('subjectAltNames') };
+	$smtp->quit;
+
+	# subjectAltNames comes back as a flat list of (type, value) pairs;
+	# type 2 is a dNSName and type 7 is an iPAddress
+	my @sans;
+	while (@san_pairs) {
+		my ( $type, $value ) = splice( @san_pairs, 0, 2 );
+		next unless defined($value) && $value ne '';
+		push( @sans, ( defined($type) && $type == 7 ? 'IP:' : '' ) . $value );
+	}
+
+	return ( $cn, @sans );
+} ## end sub _peer_cert_names
 
 =head1 AUTHOR
 

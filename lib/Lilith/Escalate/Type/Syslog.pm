@@ -4,6 +4,7 @@ use 5.006;
 use strict;
 use warnings;
 use Sys::Syslog qw( closelog openlog syslog );
+use JSON        qw( decode_json );
 
 =head1 NAME
 
@@ -30,6 +31,20 @@ my %facilities = map { $_ => 1 } qw(
 	local4 local5 local6 local7 lpr mail news syslog user uucp
 );
 
+# the fields pulled off the event by default; expressed as JSONPath so a site
+# can trim or extend them per target from the web UI. 'id' is always logged
+# separately so a event can be identified even if these are cleared.
+my @default_json_paths = (
+	{ key => 'event_id',  path => '$.event_id' },
+	{ key => 'instance',  path => '$.instance' },
+	{ key => 'src_ip',    path => '$.src_ip' },
+	{ key => 'src_port',  path => '$.src_port' },
+	{ key => 'dest_ip',   path => '$.dest_ip' },
+	{ key => 'dest_port', path => '$.dest_port' },
+	{ key => 'class',     path => '$.classification' },
+	{ key => 'signature', path => '$.signature' },
+);
+
 =head1 METHODS
 
 =head2 description
@@ -50,11 +65,42 @@ The config items this type takes.
 
 sub config_fields {
 	return [
-		{ name => 'priority', label => 'Priority', type => 'string', required => 0, default => 'alert' },
-		{ name => 'facility', label => 'Facility', type => 'string', required => 0, default => 'daemon' },
-		{ name => 'ident',    label => 'Ident',    type => 'string', required => 0, default => 'lilith' },
+		{
+			name     => 'priority',
+			label    => 'Priority',
+			type     => 'enum',
+			required => 0,
+			default  => 'alert',
+			options  => [qw( emerg alert crit err warning notice info debug )],
+		},
+		{
+			name     => 'facility',
+			label    => 'Facility',
+			type     => 'enum',
+			required => 0,
+			default  => 'daemon',
+			options  => [ sort keys %facilities ],
+		},
+		{ name => 'ident', label => 'Ident', type => 'string', required => 0, default => 'lilith' },
+		{
+			name     => 'json_paths',
+			label    => 'JSONPath fields',
+			type     => 'list',
+			required => 0,
+			default  => [
+				map {
+					{ %{$_} }
+				} @default_json_paths
+			],
+			help => 'JSONPath expressions pulled from the event and appended to the log line as key="value";'
+				. ' multiple matches for one path are joined with commas',
+			columns => [
+				{ name => 'key',  placeholder => 'field name', pattern => '^[A-Za-z0-9._-]+$' },
+				{ name => 'path', placeholder => 'JSONPath e.g. $.raw.alert.signature' },
+			],
+		},
 	];
-}
+} ## end sub config_fields
 
 =head2 check_config
 
@@ -81,6 +127,38 @@ sub check_config {
 		die( '"' . $config->{ident} . '" is not a usable syslog ident' . "\n" );
 	}
 
+	if ( defined( $config->{json_paths} ) ) {
+		if ( ref( $config->{json_paths} ) ne 'ARRAY' ) {
+			die("\"json_paths\" must be a list\n");
+		}
+		require JSON::Path;
+		foreach my $spec ( @{ $config->{json_paths} } ) {
+			if ( ref($spec) ne 'HASH' ) {
+				die("each json_paths entry must be a key/path object\n");
+			}
+
+			# a blank path is a empty row and simply ignored at escalate time
+			next if !defined( $spec->{path} ) || $spec->{path} eq '';
+
+			if ( defined( $spec->{key} ) && $spec->{key} ne '' && $spec->{key} !~ /^[A-Za-z0-9._-]+$/ ) {
+				die( '"' . $spec->{key} . '" is not a usable json_paths field name' . "\n" );
+			}
+
+			# JSON::Path parses lazily, so actually evaluate against a empty
+			# document to surface a malformed expression here instead of at
+			# escalate time; warnings from odd but harmless paths are muffled
+			my $ok = eval {
+				local $SIG{__WARN__} = sub { };
+				JSON::Path->new( $spec->{path} )->values( {} );
+				1;
+			};
+			if ( !$ok ) {
+				( my $err = $@ ) =~ s/\s+\z//;
+				die( '"' . $spec->{path} . '" is not a usable JSONPath: ' . $err . "\n" );
+			}
+		} ## end foreach my $spec ( @{ $config->{json_paths} } )
+	} ## end if ( defined( $config->{json_paths} ) )
+
 	return 1;
 } ## end sub check_config
 
@@ -100,12 +178,10 @@ sub escalate {
 	my $event = $args{event};
 
 	my $message = 'escalation table=' . ( defined( $args{table} ) ? $args{table} : '' );
-	foreach my $key (qw( id event_id instance src_ip src_port dest_ip dest_port classification signature )) {
-		if ( defined( $event->{$key} ) && !ref( $event->{$key} ) ) {
-			my $value = $event->{$key};
-			$value =~ s/\"/\\\"/g;
-			$message = $message . ' ' . $key . '="' . $value . '"';
-		}
+	if ( defined( $event->{id} ) && !ref( $event->{id} ) ) {
+		my $value = $event->{id};
+		$value =~ s/\"/\\\"/g;
+		$message = $message . ' id="' . $value . '"';
 	}
 	foreach my $key (qw( note requested_by target_name )) {
 		if ( defined( $args{$key} ) && $args{$key} ne '' ) {
@@ -117,6 +193,36 @@ sub escalate {
 	if ( $args{test} ) {
 		$message = $message . ' test="1"';
 	}
+
+	# pull the configured JSONPath fields off the event and append them as
+	# key="value" pairs; the raw is decoded first so both row columns
+	# ($.src_ip) and nested detector fields ($.raw.alert.signature) resolve.
+	# A target with no json_paths of its own gets the defaults, matching what
+	# was previously hard coded, while an explicitly empty list opts out
+	my $json_paths = defined( $config->{json_paths} ) ? $config->{json_paths} : \@default_json_paths;
+	if ( ref($json_paths) eq 'ARRAY' && @{$json_paths} ) {
+		require JSON::Path;
+		my $doc = $event;
+		if ( defined( $event->{raw} ) && !ref( $event->{raw} ) ) {
+			my $decoded = eval { decode_json( $event->{raw} ) };
+			$doc = { %{$event}, raw => $decoded } if ref $decoded;
+		}
+		foreach my $spec ( @{$json_paths} ) {
+			next unless ref($spec) eq 'HASH' && defined( $spec->{path} ) && $spec->{path} ne '';
+			my $key    = ( defined( $spec->{key} ) && $spec->{key} ne '' ) ? $spec->{key} : 'jsonpath';
+			my @values = eval {
+				local $SIG{__WARN__} = sub { };
+				JSON::Path->new( $spec->{path} )->values($doc);
+			};
+
+			# a path can match more than one scalar; join them into a single
+			# key="a,b,c" value and skip the field entirely when nothing matched
+			my @scalars = grep { !ref($_) && defined($_) } @values;
+			next unless @scalars;
+			my $joined = join( ',', map { ( my $s = $_ ) =~ s/\"/\\\"/g; $s } @scalars );
+			$message = $message . ' ' . $key . '="' . $joined . '"';
+		} ## end foreach my $spec ( @{$json_paths} )
+	} ## end if ( ref($json_paths) eq 'ARRAY' && @{$json_paths...})
 
 	my $ident    = defined( $config->{ident} )    ? $config->{ident}    : 'lilith';
 	my $facility = defined( $config->{facility} ) ? $config->{facility} : 'daemon';

@@ -1,10 +1,10 @@
 % layout 'default';
-% title 'Escalation Targets';
+% title $can_edit ? 'Edit Escalation Targets' : 'Escalation Targets';
 
 <nav aria-label="breadcrumb" class="mb-3">
   <ol class="breadcrumb">
     <li class="breadcrumb-item"><a href="/search" class="text-danger">Search</a></li>
-    <li class="breadcrumb-item active">Escalation Targets</li>
+    <li class="breadcrumb-item active"><%= $can_edit ? 'Edit Escalation Targets' : 'Escalation Targets' %></li>
   </ol>
 </nav>
 
@@ -17,7 +17,11 @@
 <div class="card border-secondary mb-3">
   <div class="card-header d-flex justify-content-between align-items-center">
     <span>Escalation Targets</span>
+    % if ($can_edit) {
     <button type="button" class="btn btn-sm btn-danger" id="target-add-btn">Add Target</button>
+    % } elsif ($self->escalation_manage_enable) {
+    <a class="btn btn-sm btn-outline-secondary" href="/escalation/edit">Edit</a>
+    % }
   </div>
   <div class="p-2">
     <div id="esc-action-status" class="small mb-2" style="display:none"></div>
@@ -25,7 +29,12 @@
     <div class="table-responsive">
       <table class="table table-dark table-sm table-hover table-bordered mb-0" id="esc-targets-table">
         <thead class="table-secondary">
-          <tr><th>ID</th><th>Name</th><th>Type</th><th>Enabled</th><th>Description</th><th>Updated</th><th></th></tr>
+          <tr>
+            <th>ID</th><th>Name</th><th>Type</th><th>Enabled</th><th>Description</th><th>Updated</th>
+            % if ($can_edit) {
+            <th></th>
+            % }
+          </tr>
         </thead>
         <tbody>
           % for my $t (@$targets) {
@@ -42,6 +51,7 @@
             </td>
             <td><%= $t->{description} // '' %></td>
             <td class="text-muted small"><%= $t->{updated} // '' %></td>
+            % if ($can_edit) {
             <td class="text-nowrap">
               <button type="button" class="btn btn-sm btn-outline-secondary py-0 target-edit-btn"
                       data-target-id="<%= $t->{id} %>">Edit</button>
@@ -50,6 +60,7 @@
               <button type="button" class="btn btn-sm btn-outline-danger py-0 target-delete-btn"
                       data-target-id="<%= $t->{id} %>" data-target-name="<%= $t->{name} %>">Delete</button>
             </td>
+            % }
           </tr>
           % }
         </tbody>
@@ -61,6 +72,7 @@
   </div>
 </div>
 
+% if ($can_edit) {
 <!-- Target add/edit modal — the config form is built from the type's
      config_fields spec, so new escalation types need no template changes. -->
 <div class="modal fade" id="target-modal" tabindex="-1">
@@ -166,6 +178,62 @@ document.addEventListener('DOMContentLoaded', function() {
     typeEl.appendChild(opt);
   });
 
+  // Build a repeatable "list" config field. Returns the container element,
+  // which carries the data-config-name/type dataset. Each value is a row
+  // tagged data-config-list-row; a field with a "columns" spec renders one
+  // data-config-list-col input per column, otherwise a single
+  // data-config-list-item input. An empty spare row and an add button let
+  // the user grow the list.
+  function buildListField(f, values) {
+    var container = document.createElement('div');
+    var rows = document.createElement('div');
+    rows.className = 'd-flex flex-column gap-2';
+    container.appendChild(rows);
+
+    function addRow(val) {
+      var row = document.createElement('div');
+      row.className = 'input-group input-group-sm';
+      row.dataset.configListRow = '1';
+      if (f.columns) {
+        f.columns.forEach(function(c) {
+          var inp = document.createElement('input');
+          inp.type = 'text';
+          inp.className = 'form-control';
+          inp.placeholder = c.placeholder || c.name;
+          inp.dataset.configListCol = c.name;
+          if (val && val[c.name] !== undefined && val[c.name] !== null) { inp.value = val[c.name]; }
+          row.appendChild(inp);
+        });
+      } else {
+        var single = document.createElement('input');
+        single.type = 'text';
+        single.className = 'form-control';
+        single.dataset.configListItem = '1';
+        if (typeof val === 'string') { single.value = val; }
+        row.appendChild(single);
+      }
+      var rm = document.createElement('button');
+      rm.type = 'button';
+      rm.className = 'btn btn-outline-danger';
+      rm.textContent = '✕';
+      rm.addEventListener('click', function() { rows.removeChild(row); });
+      row.appendChild(rm);
+      rows.appendChild(row);
+    }
+
+    (Array.isArray(values) ? values : []).forEach(addRow);
+    addRow();   // one empty spare row to type into
+
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'btn btn-sm btn-outline-secondary mt-2';
+    add.textContent = '+ Add';
+    add.addEventListener('click', function() { addRow(); });
+    container.appendChild(add);
+
+    return container;
+  }
+
   // Build the config inputs for a type from its config_fields spec. For an
   // edit, current values are filled in; a secret that is already set shows a
   // "(unchanged)" placeholder and an empty value, which the server treats as
@@ -194,6 +262,26 @@ document.addEventListener('DOMContentLoaded', function() {
         input.checked = config[f.name] !== undefined ? !!config[f.name] : !!f.default;
         wrap.appendChild(input);
         col.appendChild(wrap);
+      } else if (f.type === 'enum') {
+        input = document.createElement('select');
+        input.className = 'form-select form-select-sm';
+        (f.options || []).forEach(function(opt) {
+          var o = document.createElement('option');
+          o.value = opt;
+          o.textContent = opt;
+          input.appendChild(o);
+        });
+        var cur = (config[f.name] !== undefined && config[f.name] !== null) ? config[f.name]
+                : (f.default !== undefined && f.default !== null ? f.default : '');
+        if (cur !== '') { input.value = cur; }
+        col.appendChild(input);
+      } else if (f.type === 'list') {
+        col.className = 'col-12';
+        // a new target has no stored value, so seed the rows from the field
+        // default; an existing target uses its own value, even when empty
+        var listVals = (config[f.name] !== undefined) ? config[f.name] : f.default;
+        input = buildListField(f, listVals);
+        col.appendChild(input);
       } else {
         input = document.createElement('input');
         input.type = (f.type === 'secret') ? 'password' : 'text';
@@ -208,6 +296,12 @@ document.addEventListener('DOMContentLoaded', function() {
           input.placeholder = 'default: ' + f.default;
         }
         col.appendChild(input);
+      }
+      if (f.help) {
+        var help = document.createElement('div');
+        help.className = 'form-text small';
+        help.textContent = f.help;
+        col.appendChild(help);
       }
       input.dataset.configName = f.name;
       input.dataset.configType = f.type;
@@ -251,6 +345,26 @@ document.addEventListener('DOMContentLoaded', function() {
       var name = input.dataset.configName;
       if (input.dataset.configType === 'boolean') {
         config[name] = input.checked ? 1 : 0;
+      } else if (input.dataset.configType === 'list') {
+        var items = [];
+        input.querySelectorAll('[data-config-list-row]').forEach(function(row) {
+          var cols = row.querySelectorAll('[data-config-list-col]');
+          if (cols.length) {
+            var obj = {}, any = false;
+            cols.forEach(function(c) {
+              var v = c.value.trim();
+              obj[c.dataset.configListCol] = v;
+              if (v !== '') { any = true; }
+            });
+            if (any) { items.push(obj); }
+          } else {
+            var single = row.querySelector('[data-config-list-item]');
+            if (single && single.value.trim() !== '') { items.push(single.value.trim()); }
+          }
+        });
+        // always send the list, even when empty, so a cleared list is a
+        // deliberate opt out rather than falling back to the field default
+        config[name] = items;
       } else if (input.value !== '') {
         config[name] = input.value;
       }
@@ -338,3 +452,4 @@ document.addEventListener('DOMContentLoaded', function() {
   });
 });
 </script>
+% }

@@ -61,17 +61,24 @@ sub startup {
 		dsn                        => $toml->{dsn},
 		user                       => $toml->{user},
 		pass                       => $toml->{pass},
-		escalation_type_namespaces => (
-			ref $toml->{escalation_type_namespaces} eq 'ARRAY' ? $toml->{escalation_type_namespaces} : []
-		),
+		escalation_type_namespaces =>
+			( ref $toml->{escalation_type_namespaces} eq 'ARRAY' ? $toml->{escalation_type_namespaces} : [] ),
 	);
 
-	$self->helper( lilith => sub {$lilith} );
+	$self->helper( lilith => sub { $lilith } );
 
 	# Whether the escalation system is available in the web UI. Off by
 	# default as the escalation endpoints can push data at outside services
 	# and change escalation target config.
 	$self->helper( escalation_enable => sub { $toml->{escalation_enable} ? 1 : 0 } );
+
+	# Whether escalation targets may be created/edited/deleted/tested from the
+	# web UI. Off by default and separate from escalation_enable: viewing the
+	# configured targets is read only, while editing them changes where alerts
+	# are sent and can push test data at outside services. The /escalation view
+	# and its read endpoints are gated by escalation_enable; the /escalation/edit
+	# page and the mutating target endpoints additionally require this.
+	$self->helper( escalation_manage_enable => sub { $toml->{escalation_manage_enable} ? 1 : 0 } );
 
 	# Whether auto escalation rules may be created/edited/deleted from the web
 	# UI. Off by default and separate from escalation_enable: a saved+enabled
@@ -85,8 +92,8 @@ sub startup {
 	if ( ref $toml->{dnstracer_flags} eq 'ARRAY' ) {
 		$dnstracer_flags = $toml->{dnstracer_flags};
 	}
-	$self->helper( dnstracer_flags  => sub {$dnstracer_flags} );
-	$self->helper( dnstracer_enable => sub { $toml->{dnstracer_enable} ? 1 : 0 } );
+	$self->helper( dnstracer_flags  => sub { $dnstracer_flags } );
+	$self->helper( dnstracer_enable => sub { $toml->{dnstracer_enable}       ? 1                           : 0 } );
 	$self->helper( dns_bg_timeout   => sub { defined $toml->{dns_bg_timeout} ? $toml->{dns_bg_timeout} + 0 : 3 } );
 
 	# Optional in-memory cache for /api/domaininfo results. Enabled with
@@ -106,7 +113,7 @@ sub startup {
 	# platform's GeoIP directory is used if it exists.  The web UI's IP info
 	# modal merges records from every database that opened.  Databases are opened
 	# once at startup so lookups stay cheap.
-	my $geoip_dir = ( $^O eq 'freebsd' ) ? '/usr/local/share/GeoIP' : '/usr/share/GeoIP';
+	my $geoip_dir  = ( $^O eq 'freebsd' ) ? '/usr/local/share/GeoIP' : '/usr/share/GeoIP';
 	my @geoip_defs = (
 		{ key => 'geoip_ip_city',    file => 'GeoLite2-City.mmdb' },
 		{ key => 'geoip_ip_country', file => 'GeoLite2-Country.mmdb' },
@@ -115,7 +122,7 @@ sub startup {
 	my @mmdbs;
 	for my $def (@geoip_defs) {
 		my $configured = ( defined $toml->{ $def->{key} } && !ref $toml->{ $def->{key} } );
-		my $path = $configured ? $toml->{ $def->{key} } : $geoip_dir . '/' . $def->{file};
+		my $path       = $configured ? $toml->{ $def->{key} } : $geoip_dir . '/' . $def->{file};
 
 		# A missing default is normal (the DB simply is not installed); only an
 		# explicitly configured path that is absent is worth a warning.
@@ -132,7 +139,7 @@ sub startup {
 		} else {
 			warn 'Lilith::Web: failed to open MMDB "' . $path . '"' . ( $@ ? ": $@" : "\n" );
 		}
-	}
+	} ## end for my $def (@geoip_defs)
 	$self->helper( geoip_mmdbs => sub { \@mmdbs } );
 
 	# Country + top subdivision (state/province) codes for an IP from a single
@@ -174,7 +181,7 @@ sub startup {
 					}
 				}
 				last if $country ne '' && $subdivision ne '';
-			}
+			} ## end for my $db (@mmdbs)
 
 			my $geo = { country => $country, subdivision => $subdivision };
 			$cache->{$ip} = $geo if $cache;
@@ -228,7 +235,8 @@ sub startup {
 					url             => $cfg->{url},
 					apikey          => $cfg->{apikey},
 					timeout         => ( defined $cfg->{timeout} ? $cfg->{timeout} + 0 : 60 ),
-					verify_hostname => ( defined $cfg->{verify_hostname} ? ( $cfg->{verify_hostname} ? 1 : 0 ) : 1 ),
+					verify_hostname =>
+						( defined $cfg->{verify_hostname} ? ( $cfg->{verify_hostname} ? 1 : 0 ) : 1 ),
 				);
 			};
 			if ($@) {
@@ -310,7 +318,7 @@ sub startup {
 				);
 			}
 		);
-	}
+	} ## end if (@allowed_referers)
 
 	# Point Mojolicious at share/templates and share/public so the app works
 	# both when installed (File::ShareDir path) and when run from the repo.
@@ -333,6 +341,7 @@ sub startup {
 	$r->get('/api/virani/cached/:remote/pcap/:id')->to('api#virani_cached_pcap');
 	$r->get('/api/virani/cached/:remote/meta/:id')->to('api#virani_cached_meta');
 	$r->get('/escalation')->to('escalation#index');
+	$r->get('/escalation/edit')->to( 'escalation#index', mode => 'edit' );
 	$r->get('/api/escalation/types')->to('escalation#types');
 	$r->get('/api/escalation/targets')->to('escalation#targets');
 	$r->post('/api/escalation/targets')->to('escalation#target_save');
@@ -346,7 +355,7 @@ sub startup {
 	$r->post('/api/auto_escalation/rules/:id/delete')->to('auto_escalation#delete');
 	$r->post('/api/auto_escalation/rules/:id/toggle')->to('auto_escalation#toggle');
 	$r->post('/api/auto_escalation/preview')->to('auto_escalation#preview');
-}
+} ## end sub startup
 
 1;
 
