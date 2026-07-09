@@ -4,21 +4,9 @@ use strict;
 use warnings;
 use Test::More;
 
-# eve_instances() lives in the src_bin/lilith script (not a module), so pull the
-# sub out and eval it here to test its behavior in isolation.
-my $script = do {
-    local $/;
-    open( my $fh, '<', 'src_bin/lilith' ) or BAIL_OUT("cannot read src_bin/lilith: $!");
-    <$fh>;
-};
-
-my ($sub_src) = $script =~ /(sub eve_instances \{.*?\n\} \#\# end sub eve_instances)/s;
-ok( $sub_src, 'found eve_instances in src_bin/lilith' ) or BAIL_OUT('eve_instances not found');
-
-## no critic (ProhibitStringyEval)
-eval $sub_src;
-## use critic
-is( $@, '', 'eve_instances compiles' );
+# eve_instances() now lives in Lilith::CLI::Util (it was previously a plain sub
+# in the src_bin/lilith script, string-eval'd out of it here).
+use Lilith::CLI::Util qw( eve_instances );
 
 # ---------------------------------------------------------------------------
 # Instances are read from [eves.*] and keyed by the sub-table name.

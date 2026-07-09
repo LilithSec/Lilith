@@ -22,6 +22,7 @@ my %WriteMakefileArgs = (
 		'Test::More' => '0',
 	},
 	PREREQ_PM => {
+		'App::Cmd'               => '0.331',
 		'DBI'                    => '1.643',
 		'DBIx::Class'            => '0',
 		'DBIx::Class::Migration' => '0',

@@ -81,13 +81,13 @@ dbic-migration --schema_class Lilith::Schema -P $password -U $user --dsn $dsn in
 If using snmpd.
 
 ```
-extend lilith /usr/local/bin/lilith -a extend
+extend lilith /usr/local/bin/lilith extend
 ```
 
 ### Scheduling automatic escalation
 
 If you use auto escalation rules (see the `auto_escalate` and `ae_*`
-actions), run `lilith -a auto_escalate` periodically so new alerts are
+actions), run `lilith auto_escalate` periodically so new alerts are
 evaluated against the rules. Two ready made units ship under `init/`:
 
 ```
@@ -106,7 +106,7 @@ cp init/lilith-auto-escalate.cron /etc/cron.d/lilith-auto-escalate
 Both run every five minutes with `-m 60`. The `-m` window only bounds how
 far back each run scans for alerts it has not considered yet; the
 per-alert `auto_escalated` marker is what prevents an alert from being
-escalated twice. Use `--dry-run` first (`lilith -a auto_escalate
+escalated twice. Use `--dry-run` first (`lilith auto_escalate
 --dry-run`) to see what would fire without sending anything.
 
 ### Upgrading
@@ -169,7 +169,7 @@ eve="/var/log/sagan/alert.json"
 ```
 
 Note: previously instances were plain top-level tables (e.g. `[suricata-eve]`).
-Those are now ignored — nest them under `[eves.NAME]`. `lilith -a run` will warn
+Those are now ignored — nest them under `[eves.NAME]`. `lilith run` will warn
 about any stray top-level table it finds.
 
 ### Remote Virani instances
@@ -273,51 +273,66 @@ and/or a reverse proxy with authentication.
 
 ### SYNOPSIS
 
+Each action is a subcommand. Global options (`--config`, `--debug`,
+`--version`) come before the subcommand. Run `lilith commands` to list every
+subcommand and `lilith help <command>` for a command's options.
+
 ```
-lilith [B<-c> <config>] B<-a> run
+lilith [--config <config>] <command> [<options>]
 
-lilith [B<-c> <config>] B<-a> class_map
+lilith [--config <config>] run [--daemonize] [--user <user>] [--group <group>]
 
-lilith [B<-c> <config>] B<-a> dump_self
+lilith [--config <config>] class_map
 
-lilith [B<-c> <config>] B<-a> event [B<-t> <table>] B<--id> <row_id> [B<--raw>]
-[[B<--pcap> <output file>] [B<--virani> <remote>] [B<--buffer> <buffer secodns>]]
+lilith [--config <config>] dump_self
 
-lilith [B<-c> <config>] B<-a> event [B<-t> <table>] B<--event> <event_id> [B<--raw>]
-[[B<--pcap> <output file>] [B<--virani> <remote>] [B<--buffer> <buffer secodns>]
+lilith [--config <config>] event [-t <table>] --id <row_id> [--raw]
+[[--pcap <output file>] [--virani <remote>] [--buffer <buffer seconds>]]
 
-lilith [B<-c> <config>] B<-a> extend [B<-Z>] [B<-m> <minutes>]
+lilith [--config <config>] event [-t <table>] --event <event_id> [--raw]
+[[--pcap <output file>] [--virani <remote>] [--buffer <buffer seconds>]]
 
-lilith [B<-c> <config>] B<-a> get_short_class_snmp_list
+lilith [--config <config>] extend [-Z] [-m <minutes>]
 
-lilith [B<-c> <config>] B<-a> search [B<--output> <return>] [B<-t> <table>]
-[B<-m> <minutes>] [B<--order> <clm>] [B<--limit> <int>] [B<--offset> <int>]
-[B<--orderdir> <dir>] [B<--si> <src_ip>] [B<--di> <<dst_ip>] [B<--ip> <ip>]
-[B<--sp> <<src_port>] [B<--dp> <<dst_port>] [B<--port> <<port>] [B<--host> <host>]
-[B<--ih> <host>] [B<-i> <instance>] [B<-c> <class>] [B<-s> <sig>] [B<--if> <if>]
-[B<--ap> <proto>] [B<--gid> <gid>] [B<--sid> <sid>] [B<--rev> <rev>]
-[B<--subip> <subip>] [B<--subhost> <subhost>] [B<--slug> <slug>] [B<--pkg> <pkg>]
-[B<--malscore> <malscore>] [B<--size> <size>] [B<--target> <target>]
-[B<--task> <task>]
+lilith [--config <config>] get_short_class_snmp_list
+
+lilith [--config <config>] search [--output <return>] [-t <table>]
+[-m <minutes>] [--order <clm>] [--limit <int>] [--offset <int>]
+[--orderdir <dir>] [--si <src_ip>] [--di <dst_ip>] [--ip <ip>]
+[--sp <src_port>] [--dp <dst_port>] [-p <port>] [--host <host>]
+[--ih <host>] [-i <instance>] [-c <class>] [-s <sig>] [--if <if>]
+[--ap <proto>] [--gid <gid>] [--sid <sid>] [--rev <rev>]
+[--subip <subip>] [--subhost <subhost>] [--slug <slug>] [--pkg <pkg>]
+[--malscore <malscore>] [--size <size>] [--target <target>]
+[--task <task>]
 ```
 
-### GENERAL SWITCHES
+Note: prior to 3.x the action was selected with a `-a` flag (`lilith run`).
+That flag has been removed in favor of the subcommand form (`lilith run`).
 
-#### -a action
+### GLOBAL SWITCHES
 
-The action to perform.
+These come before the subcommand, e.g. `lilith --config /etc/lilith.toml run`.
 
-    - Default :: search
-
-#### -c config
+#### --config config
 
 The config file to use.
 
     - Default :: /usr/local/etc/lilith.toml
 
+#### --debug
+
+Enable debug output.
+
+#### --version, -v
+
+Print the version and exit.
+
+### COMMAND SWITCHES
+
 #### -t table
 
-Table to operate on.
+Table to operate on, for the commands that take one.
 
     - Default :: suricata
 
@@ -636,7 +651,7 @@ The host the sample was submitted from.
 Escalates a event to one or more escalation targets. The table is picked via
 `-t` and the event via `--id`. Exits non-zero if any target failed.
 
-    lilith -a esc --id 42 --to soc-hook,mail-oncall --note 'C2 traffic'
+    lilith esc --id 42 --to soc-hook,mail-oncall --note 'C2 traffic'
 
 ##### --id row_id
 
@@ -683,7 +698,7 @@ Prints a single escalation target as JSON, including its config. Picked via
 
 Creates a escalation target and prints its ID.
 
-    lilith -a esc_target_create --name soc-hook --type Webhook \
+    lilith esc_target_create --name soc-hook --type Webhook \
         --set url=https://soc.example/hook --set apikey=xyz
 
 ##### --name name

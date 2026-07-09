@@ -32,7 +32,7 @@ pidfile="/var/run/${name}/pid"
 command="/usr/local/bin/${name}"
 command_interpreter="/usr/local/bin/perl"
 pidfile="/var/run/${name}/pid"
-command_args="-a run --daemonize --user ${lilith_user} --group ${lilith_group}"
+command_args="run --daemonize --user ${lilith_user} --group ${lilith_group}"
 start_precmd="${name}_precmd"
 
 lilith_precmd()

@@ -6,6 +6,7 @@
 # run scans; the per-alert auto_escalated marker is what prevents an alert
 # from being escalated twice, so a generous window is safe and mostly
 # matters for CAPE alerts whose 'stop' time can lag ingestion. Add
-# `-c /path/to/lilith.toml` for a non default config file.
+# `--config /path/to/lilith.toml` (before the subcommand) for a non default
+# config file.
 
-*/5 * * * * lilith /usr/local/bin/lilith -a auto_escalate -m 60
+*/5 * * * * lilith /usr/local/bin/lilith auto_escalate -m 60

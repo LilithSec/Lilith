@@ -30,6 +30,6 @@ Type=oneshot
 User=lilith
 Group=lilith
 Nice=10
-ExecStart=/usr/local/bin/lilith -a auto_escalate -m 60
+ExecStart=/usr/local/bin/lilith auto_escalate -m 60
 # to use a non default config file, comment the line above and use:
-#ExecStart=/usr/local/bin/lilith -c /usr/local/etc/lilith.toml -a auto_escalate -m 60
+#ExecStart=/usr/local/bin/lilith --config /usr/local/etc/lilith.toml auto_escalate -m 60

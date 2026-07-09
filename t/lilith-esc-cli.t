@@ -4,24 +4,9 @@ use strict;
 use warnings;
 use Test::More;
 
-# The escalation CLI helpers live in the src_bin/lilith script (not a
-# module), so pull the subs out and eval them here to test their behavior
-# in isolation.
-my $script = do {
-    local $/;
-    open( my $fh, '<', 'src_bin/lilith' ) or BAIL_OUT("cannot read src_bin/lilith: $!");
-    <$fh>;
-};
-
-foreach my $name (qw( esc_parse_set esc_lookup_target esc_resolve_targets )) {
-    my ($sub_src) = $script =~ /(sub $name \{.*?\n\} \#\# end sub $name)/s;
-    ok( $sub_src, "found $name in src_bin/lilith" ) or BAIL_OUT("$name not found");
-
-    ## no critic (ProhibitStringyEval)
-    eval $sub_src;
-    ## use critic
-    is( $@, '', "$name compiles" );
-}
+# The escalation CLI helpers now live in Lilith::CLI::Util (they were
+# previously plain subs in the src_bin/lilith script, string-eval'd out here).
+use Lilith::CLI::Util qw( esc_parse_set esc_lookup_target esc_resolve_targets );
 
 # A minimal stand-in for the Lilith object; only the methods the helpers
 # call are implemented.
