@@ -85,6 +85,11 @@
                      title="Keep the filter area collapsed until the Filters button is clicked">Auto-FC</label>
             </div>
             <div class="form-check mb-0">
+              <input class="form-check-input" type="checkbox" id="show-city" checked>
+              <label class="form-check-label small" for="show-city"
+                     title="Show the GeoIP city next to the country flag for each IP">City</label>
+            </div>
+            <div class="form-check mb-0">
               <input class="form-check-input" type="checkbox" id="auto-refresh">
               <label class="form-check-label small" for="auto-refresh">Auto-refresh</label>
             </div>
@@ -411,6 +416,13 @@ function applyHostCol(show) {
   });
 }
 
+// Toggle the GeoIP city label shown next to each IP's country flag.
+function applyGeoCity(show) {
+  document.querySelectorAll('#search-results .geoip-city').forEach(function(el) {
+    el.style.display = show ? '' : 'none';
+  });
+}
+
 // Bind a class of clickable result cells to a filter input + submit.
 function bindFilter(selector, inputId, dataKey) {
   document.querySelectorAll(selector).forEach(function(el) {
@@ -467,6 +479,9 @@ function initSort() {
 function initResults() {
   var hostCb = document.getElementById('show-host-col');
   applyHostCol(hostCb && hostCb.checked);
+
+  var cityCb = document.getElementById('show-city');
+  applyGeoCity(!cityCb || cityCb.checked);
 
   bindFilter('.host-filter',          'host-input',          'host');
   bindFilter('.instance-host-filter', 'instance-host-input', 'instanceHost');
@@ -554,6 +569,17 @@ document.addEventListener('DOMContentLoaded', function() {
   hostCb.addEventListener('change', function() {
     localStorage.setItem('showHostCol', this.checked);
     applyHostCol(this.checked);
+  });
+
+  // GeoIP city: show the city label next to each IP's country flag. Defaults on
+  // when the user has not made an explicit choice.
+  var cityCb        = document.getElementById('show-city');
+  var storedCity    = localStorage.getItem('showGeoCity');
+  cityCb.checked = ( storedCity === null ) ? true : ( storedCity === 'true' );
+  applyGeoCity(cityCb.checked);
+  cityCb.addEventListener('change', function() {
+    localStorage.setItem('showGeoCity', this.checked);
+    applyGeoCity(this.checked);
   });
 
   // Auto-FC: keep the filter panel collapsed on load (overriding the server's

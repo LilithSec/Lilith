@@ -88,7 +88,7 @@
             <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn ms-1"
                     data-ip="<%= $event->{$key} %>" style="font-size:0.65rem;line-height:1.2">?</button>
             % if (my $cc = $self->ip_country($event->{$key})) {
-            <span class="text-muted small" title="<%= $cc %>"><%= $self->country_flag($cc) %> <%= $cc %><% if (my $sub = $self->ip_subdivision($event->{$key})) { %>/<%= $sub %><% } %></span>
+            <span class="text-muted small" title="<%= $cc %>"><%= $self->country_flag($cc) %> <%= $cc %><% if (my $sub = $self->ip_subdivision($event->{$key})) { %>/<%= $sub %><% } %><% if (my $city = $self->ip_city($event->{$key})) { %> <%= $city %><% } %></span>
             % }
             % }
           </td>

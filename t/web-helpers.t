@@ -306,6 +306,41 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 }
 
 # ---------------------------------------------------------------------------
+# 10b. ip_city helper — English city name from the City database
+# ---------------------------------------------------------------------------
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $app = Test::Mojo->new('Lilith::Web')->app;
+
+    is( $app->ip_city('not-an-ip'), '', 'ip_city rejects malformed input' );
+    is( $app->ip_city(undef),       '', 'ip_city handles undef' );
+
+  SKIP: {
+        skip 'no MMDB installed on this host to iterate over', 3
+            unless @{ $app->geoip_mmdbs };
+
+        my $record;
+        no warnings qw(redefine once);
+        local *IP::Geolocation::MMDB::record_for_address = sub { return $record };
+        use warnings qw(redefine once);
+
+        $record = { city => { names => { en => 'Austin' } } };
+        is( $app->ip_city('1.2.3.4'), 'Austin', 'returns the English city name' );
+
+        $record = { country => { iso_code => 'US' } };
+        is( $app->ip_city('1.2.3.4'), '', 'empty when the record has no city' );
+
+        $record = { city => { names => {} } };
+        is( $app->ip_city('1.2.3.4'), '', 'empty when the city has no English name' );
+    }
+}
+
+# ---------------------------------------------------------------------------
 # 11.  ip_geo helper — combined country + subdivision, with per-request memoization
 # ---------------------------------------------------------------------------
 
@@ -317,22 +352,27 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
     local $ENV{LILITH_CONFIG} = $cf;
     my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is_deeply( $app->ip_geo('not-an-ip'), { country => '', subdivision => '' },
-        'ip_geo returns empty pair for malformed input' );
+    is_deeply( $app->ip_geo('not-an-ip'), { country => '', subdivision => '', city => '' },
+        'ip_geo returns empty triple for malformed input' );
 
   SKIP: {
         skip 'no MMDB installed on this host to iterate over', 3
             unless @{ $app->geoip_mmdbs };
 
-        my $record = { country => { iso_code => 'us' }, subdivisions => [ { iso_code => 'ca' } ] };
-        my $calls  = 0;
-        my $orig   = IP::Geolocation::MMDB->can('record_for_address');
+        my $record = {
+            country      => { iso_code => 'us' },
+            subdivisions => [ { iso_code => 'ca' } ],
+            city         => { names => { en => 'Mountain View' } },
+        };
+        my $calls = 0;
+        my $orig  = IP::Geolocation::MMDB->can('record_for_address');
         no warnings qw(redefine once);
         local *IP::Geolocation::MMDB::record_for_address = sub { $calls++; return $record };
         use warnings qw(redefine once);
 
-        is_deeply( $app->ip_geo('1.2.3.4'), { country => 'US', subdivision => 'CA' },
-            'ip_geo returns both codes from one pass, upcased' );
+        is_deeply( $app->ip_geo('1.2.3.4'),
+            { country => 'US', subdivision => 'CA', city => 'Mountain View' },
+            'ip_geo returns country, subdivision, and city from one pass, upcased where applicable' );
 
         # per-request memoization: repeated IPs on the same controller only hit
         # the databases on the first lookup

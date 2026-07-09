@@ -142,18 +142,20 @@ sub startup {
 	} ## end for my $def (@geoip_defs)
 	$self->helper( geoip_mmdbs => sub { \@mmdbs } );
 
-	# Country + top subdivision (state/province) codes for an IP from a single
-	# pass over the databases -- one record_for_address per DB instead of one per
-	# field. Country falls back from the physical 'country' to
+	# Country + top subdivision (state/province) codes plus city name for an IP
+	# from a single pass over the databases -- one record_for_address per DB
+	# instead of one per field. Country falls back from the physical 'country' to
 	# 'registered_country' / 'represented_country' so anycast and hosting IPs
 	# (which often carry only a registered country, e.g. Cloudflare) still
-	# resolve. Results are memoized per request so repeated IPs across many rows
-	# only hit the databases once. Returns { country => 'US', subdivision => 'TX' }
-	# with empty strings for anything unknown.
+	# resolve. City only comes from the City database (registered/represented
+	# records carry no city). Results are memoized per request so repeated IPs
+	# across many rows only hit the databases once. Returns
+	# { country => 'US', subdivision => 'TX', city => 'Austin' } with empty
+	# strings for anything unknown.
 	$self->helper(
 		ip_geo => sub {
 			my ( $c, $ip ) = @_;
-			my $empty = { country => '', subdivision => '' };
+			my $empty = { country => '', subdivision => '', city => '' };
 			return $empty unless defined $ip && $ip =~ /^[0-9a-fA-F:.]+$/;
 
 			my $cache;
@@ -164,6 +166,7 @@ sub startup {
 
 			my $country     = '';
 			my $subdivision = '';
+			my $city        = '';
 			for my $db (@mmdbs) {
 				my $record = eval { $db->record_for_address($ip) };
 				next unless ref $record eq 'HASH';
@@ -180,19 +183,25 @@ sub startup {
 						$subdivision = uc $code if defined $code && $code ne '';
 					}
 				}
-				last if $country ne '' && $subdivision ne '';
+				if ( $city eq '' && ref $record->{city} eq 'HASH' ) {
+					my $names = $record->{city}{names};
+					my $name  = ref $names eq 'HASH' ? $names->{en} : undef;
+					$city = $name if defined $name && $name ne '';
+				}
+				last if $country ne '' && $subdivision ne '' && $city ne '';
 			} ## end for my $db (@mmdbs)
 
-			my $geo = { country => $country, subdivision => $subdivision };
+			my $geo = { country => $country, subdivision => $subdivision, city => $city };
 			$cache->{$ip} = $geo if $cache;
 			return $geo;
 		}
 	);
 
-	# Thin wrappers kept for template/readability convenience; both share the one
+	# Thin wrappers kept for template/readability convenience; all share the one
 	# ip_geo lookup above.
 	$self->helper( ip_country     => sub { $_[0]->ip_geo( $_[1] )->{country} } );
 	$self->helper( ip_subdivision => sub { $_[0]->ip_geo( $_[1] )->{subdivision} } );
+	$self->helper( ip_city        => sub { $_[0]->ip_geo( $_[1] )->{city} } );
 
 	# Regional-indicator emoji flag for a two-letter country code, e.g. 'US' ->
 	# the flag. Returns '' for anything that is not two ASCII letters.

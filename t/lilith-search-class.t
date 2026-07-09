@@ -134,6 +134,21 @@ $lilith->search( table => 'suricata', class => [ 'Misc Attack', 'Exploit Attempt
 is( scalar( @{ $captured_search->{'-and'} } ), 2, 'class clauses are pushed alongside the port -and clause' );
 
 # ---------------------------------------------------------------------------
+# cape has no classification column, so a class filter must be ignored for it
+# rather than producing a "column classification does not exist" error. The web
+# UI injects a default "!Generic Protocol Command Decode" on fresh loads, which
+# previously broke every cape search.
+# ---------------------------------------------------------------------------
+
+$captured_search = undef;
+$lilith->search( table => 'cape', class => ['!Generic Protocol Command Decode'] );
+ok( !exists( $captured_search->{'-and'} ), 'cape search adds no classification clause' );
+
+$captured_search = undef;
+$lilith->search( table => 'cape', class => [ 'Misc Attack', '!Generic Protocol Command Decode' ] );
+ok( !exists( $captured_search->{'-and'} ), 'cape search ignores positive and negated class items alike' );
+
+# ---------------------------------------------------------------------------
 # numeric items (dest_port / src_port / ...)
 # ---------------------------------------------------------------------------
 

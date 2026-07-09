@@ -1113,7 +1113,10 @@ sub search {
 	# handle string items
 	#
 
-	if ( defined( $opts{class} ) ) {
+	# CapeAlert has no classification column, so any class filter -- including the
+	# web UI's default "Generic Protocol Command Decode" exclusion -- does not
+	# apply to it and would otherwise produce a "column does not exist" error.
+	if ( defined( $opts{class} ) && $table ne 'CapeAlert' ) {
 		my @class_args = ref $opts{class} eq 'ARRAY' ? @{ $opts{class} } : ( $opts{class} );
 
 		# positive items are ORed together, negated items are ANDed
