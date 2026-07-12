@@ -111,6 +111,11 @@ Revision history for Lilith
 		   source/destination columns and items; a negated value is ANDed
 		   so it is excluded from both sides.
 
+		 - Add a docs/ dir (architecture, install, configuration, usage,
+		   escalation, security, examples) matching the rest of the
+		   LilithSec household, and rework the README to a short intro
+		   that points at docs/index.md.
+
 3.0.0	2026-06-25/01:00
 		 - use DBIx::Class::Migration
 		 - use dbic-migration for migration DB schema versioning and updating

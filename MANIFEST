@@ -1,4 +1,12 @@
 Changes
+docs/architecture.md
+docs/configuration.md
+docs/escalation.md
+docs/examples.md
+docs/index.md
+docs/install.md
+docs/security.md
+docs/usage.md
 lib/Lilith.pm
 lib/Lilith/AutoEscalate.pm
 lib/Lilith/CLI.pm
