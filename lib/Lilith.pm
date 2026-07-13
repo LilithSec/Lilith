@@ -391,8 +391,8 @@ sub run {
 							elsif ( $_[HEAP]{type} eq 'sagan' ) {
 								my $sth
 									= $dbh->prepare( 'insert into sagan_alerts'
-										. ' ( instance, instance_host, timestamp, event_id, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, facility, host, level, priority, program, proto, xff, stream, classification, signature, gid, sid, rev, raw) '
-										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );'
+										. ' ( instance, instance_host, timestamp, event_id, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, facility, host, level, priority, program, xff, stream, classification, signature, gid, sid, rev, raw) '
+										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );'
 									);
 								$sth->execute(
 									$_[HEAP]{instance},           $_[HEAP]{host},
@@ -403,8 +403,8 @@ sub run {
 									$json->{proto},               $json->{facility},
 									$json->{host},                $json->{level},
 									$json->{priority},            $json->{program},
-									$json->{proto},               $json->{xff},
-									$json->{stream},              $json->{alert}{category},
+									$json->{xff},                 $json->{stream},
+									$json->{alert}{category},
 									$json->{alert}{signature},    $json->{alert}{gid},
 									$json->{alert}{signature_id}, $json->{alert}{rev},
 									$_[ARG0],

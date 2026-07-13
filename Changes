@@ -116,6 +116,11 @@ Revision history for Lilith
 		   LilithSec household, and rework the README to a short intro
 		   that points at docs/index.md.
 
+		 - Fix the sagan_alerts INSERT listing "proto" twice (with a
+		   matching duplicate bind), which PostgreSQL rejects with
+		   "column specified more than once"; the Sagan ingest path now
+		   inserts the correct 24 columns.
+
 3.0.0	2026-06-25/01:00
 		 - use DBIx::Class::Migration
 		 - use dbic-migration for migration DB schema versioning and updating
