@@ -2,7 +2,7 @@
 
 ## The web frontend is unauthenticated
 
-The big one. `lilith-web` has no login of its own — anyone who can reach it
+The big one. `mojo_lilith` has no login of its own — anyone who can reach it
 can search every alert, read every raw EVE record, and use whatever
 features are enabled. Treat reachability as authorization:
 
@@ -15,6 +15,31 @@ The referer check is a tripwire, not a lock — a `Referer` header is
 trivially forged by anything that is not a well behaved browser. It is
 useful against drive-by cross-site nonsense, not against an attacker with
 network reach. The reverse proxy is the real gate.
+
+## The EVE receiver writes to the database
+
+`mojo_lilith_receiver` is authenticated where the frontend is not — every
+push must carry a bearer token that names an enabled key in the
+`receiver_apikeys` table, and with no keys created it refuses everything.
+Keys are stored as their SHA-256, so a database leak does not hand out usable
+tokens; the plaintext is shown only once at `receiver_key_create` time. Still,
+an accepted request writes a row into the annals, so a leaked *token* lets an
+attacker inject alerts — give each sensor its own key so one can be revoked
+without disturbing the rest, and run the receiver over TLS (directly or behind
+a reverse proxy) so the token and the alert data are not exposed on the wire.
+
+A key can be scoped to a set of client IPs/subnets and to a set of instance
+names (with `*`/`?` wildcards), so a stolen sensor key is only useful from the
+sensor's network and only for its own instances. **The IP scope is only as
+trustworthy as the client address the receiver sees:** behind a reverse proxy
+set `MOJO_REVERSE_PROXY=1` so that address comes from `X-Forwarded-For` rather
+than being the proxy itself — otherwise every request shares the proxy's IP
+and per-IP scoping is meaningless. Only trust `X-Forwarded-For` from a proxy
+you control.
+
+The receiver only ever inserts the ingestable columns; `id`, `escalations`,
+and `auto_escalated` cannot be set by a caller, so a push can never forge an
+escalation state.
 
 ## The annals themselves are sensitive
 

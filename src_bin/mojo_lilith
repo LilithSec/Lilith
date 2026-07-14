@@ -2,15 +2,15 @@
 
 =head1 NAME
 
-lilith-web - Mojolicious web frontend for Lilith.
+mojo_lilith - Mojolicious web frontend for Lilith.
 
 =head1 SYNOPSIS
 
-lilith-web daemon
+mojo_lilith daemon
 
-lilith-web daemon -l http://*:8080
+mojo_lilith daemon -l http://*:8080
 
-LILITH_CONFIG=/etc/lilith.toml lilith-web daemon
+LILITH_CONFIG=/etc/lilith.toml mojo_lilith daemon
 
 =head1 DESCRIPTION
 

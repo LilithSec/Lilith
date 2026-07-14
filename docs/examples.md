@@ -1,7 +1,7 @@
 # Examples
 
 Copy-paste scenarios. All assume the database and schema are in place per
-[install.md](install.md).
+[install](install.md).
 
 ## A single Suricata sensor
 
@@ -105,7 +105,7 @@ lilith event --id 42 --pcap ./flow.pcap --buffer 120
 ## Escalation: a webhook and a standing order
 
 Create a target, test it, and set a rule that escalates any CAPE run with a
-malscore of 8 or more (see [escalation.md](escalation.md) for the DSL):
+malscore of 8 or more (see [escalation](escalation.md) for the DSL):
 
 ```shell
 lilith esc_target_create --name soc-hook --type Webhook \
@@ -121,10 +121,10 @@ lilith ae_create --name high-malscore --tables cape --rule '{
 lilith auto_escalate --dry-run
 ```
 
-Then put the timer in place (see [install.md](install.md)):
+Then put the timer in place (see [install](install.md)):
 
 ```shell
-cp init/lilith-auto-escalate.service init/lilith-auto-escalate.timer \
+cp rc/systemd/lilith-auto-escalate.service rc/systemd/lilith-auto-escalate.timer \
     /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now lilith-auto-escalate.timer
@@ -158,7 +158,7 @@ of its own, `lilith run` is not even needed there:
 
 ```shell
 lilith search -m 60 -i edge1-pie
-lilith-web daemon -l http://127.0.0.1:8080
+mojo_lilith daemon -l http://127.0.0.1:8080
 ```
 
 ## Feeding LibreNMS
@@ -175,10 +175,10 @@ keeping them out of the database.
 
 ## The web frontend, behind nginx
 
-`lilith-web` on localhost, nginx doing TLS and auth in front:
+`mojo_lilith` on localhost, nginx doing TLS and auth in front:
 
 ```shell
-LILITH_CONFIG=/usr/local/etc/lilith.toml lilith-web prefork -l http://127.0.0.1:8080
+LILITH_CONFIG=/usr/local/etc/lilith.toml mojo_lilith prefork -l http://127.0.0.1:8080
 ```
 
 ```nginx
@@ -206,4 +206,4 @@ escalation_manage_enable = true
 virani_search_enable = true
 ```
 
-Read [security.md](security.md) before doing this without the auth.
+Read [security](security.md) before doing this without the auth.

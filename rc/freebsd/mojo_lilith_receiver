@@ -1,0 +1,61 @@
+#!/bin/sh
+
+# PROVIDE: mojo_lilith_receiver
+# REQUIRE: LOGIN postgresql
+# KEYWORD: shutdown
+#
+#
+#
+# Add the following lines to /etc/rc.conf.local or /etc/rc.conf to enable the
+# Lilith EVE receiver:
+# mojo_lilith_receiver_enable (bool):   Set to "NO" by default.
+#                                       Set it to "YES" to enable it.
+# mojo_lilith_receiver_user (string):   Set to "lilith" by default.
+# mojo_lilith_receiver_listen (string): Set to "http://127.0.0.1:8081" by
+#                                       default. The URL(s) to listen on.
+# mojo_lilith_receiver_config (string): Set to "/usr/local/etc/lilith.toml" by
+#                                       default. Exported as LILITH_CONFIG.
+# mojo_lilith_receiver_flags (string):  Set to "" by default. Extra flags
+#                                       appended to the mojo command.
+#
+# The receiver authenticates every push against the receiver_apikeys table; if
+# it runs behind a TLS terminating proxy, add MOJO_REVERSE_PROXY=1 to the
+# environment (e.g. via mojo_lilith_receiver_env below) so per-key IP scoping
+# sees the real client address.
+
+. /etc/rc.subr
+
+name=mojo_lilith_receiver
+rcvar=${name}_enable
+
+load_rc_config $name
+
+# set defaults
+: ${mojo_lilith_receiver_enable:=NO}
+: ${mojo_lilith_receiver_user:="lilith"}
+: ${mojo_lilith_receiver_listen:="http://127.0.0.1:8081"}
+: ${mojo_lilith_receiver_config:="/usr/local/etc/lilith.toml"}
+: ${mojo_lilith_receiver_flags:=""}
+
+pidfile="/var/run/${name}/pid"
+
+# rc.subr exports ${name}_env into the command's environment
+mojo_lilith_receiver_env="LILITH_CONFIG=${mojo_lilith_receiver_config}"
+
+# Mojolicious apps run in the foreground; supervise with daemon(8), which drops
+# to the unprivileged user, restarts the worker if it dies, and owns the pid.
+command="/usr/sbin/daemon"
+command_args="-P ${pidfile} -r -f -u ${mojo_lilith_receiver_user} \
+    /usr/local/bin/${name} prefork -l ${mojo_lilith_receiver_listen} ${mojo_lilith_receiver_flags}"
+start_precmd="${name}_precmd"
+
+mojo_lilith_receiver_precmd()
+{
+    if [ ! -d "/var/run/${name}" ]; then
+        mkdir -p "/var/run/${name}"
+    fi
+    chown "${mojo_lilith_receiver_user}" "/var/run/${name}"
+}
+
+load_rc_config $name
+run_rc_command "$1"

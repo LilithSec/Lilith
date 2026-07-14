@@ -26,6 +26,37 @@ Version 3.0.0
 
 our $VERSION = '3.0.0';
 
+# Column order for each alert table, the single source of truth shared by
+# parse_eve() (which returns a hash keyed by these names) and run() (which
+# builds the INSERT and its bind list from them), so the two cannot drift.
+our %alert_columns = (
+	suricata => [
+		qw(
+			instance host timestamp flow_id event_id in_iface
+			src_ip src_port dest_ip dest_port proto app_proto
+			flow_pkts_toserver flow_bytes_toserver
+			flow_pkts_toclient flow_bytes_toclient flow_start
+			classification signature gid sid rev raw
+		)
+	],
+	sagan => [
+		qw(
+			instance instance_host timestamp event_id flow_id in_iface
+			src_ip src_port dest_ip dest_port proto facility host
+			level priority program xff stream
+			classification signature gid sid rev raw
+		)
+	],
+	cape => [
+		qw(
+			instance target instance_host task start stop malscore
+			subbed_from_ip subbed_from_host pkg md5 sha1 sha256 slug
+			url url_hostname proto src_ip src_port dest_ip dest_port size raw
+		)
+	],
+);
+
+
 =head1 SYNOPSIS
 
     my $toml_raw = read_file($config_file) or die 'Failed to read "' . $config_file . '"';
@@ -254,6 +285,505 @@ sub new {
 	return $self;
 } ## end sub new
 
+=head2 parse_eve
+
+Parse a decoded EVE record into a row hash for its alert table. Returns a hash
+ref keyed by column name (the same keys as C<@{ $Lilith::alert_columns{$type} }>),
+or undef if the record is not an C<alert> event and so should be skipped.
+
+    my $row = $lilith->parse_eve(
+        type     => 'suricata',
+        json     => $decoded,
+        instance => 'foo-pie',
+        host     => 'sensor1',
+        raw      => $raw_line,
+    );
+
+Arguments.
+
+    - type :: 'suricata', 'sagan', or 'cape'. Required.
+
+    - json :: The decoded EVE record, a hash ref. Required.
+
+    - instance :: Instance name recorded on the row.
+
+    - host :: Host the instance runs on. Stored as C<host> for Suricata and as
+      C<instance_host> for Sagan and CAPE.
+
+    - raw :: The raw EVE line, stored verbatim in the C<raw> column.
+
+For Suricata and Sagan an C<event_id> is derived as the SHA256 (base64) of
+instance + host + timestamp + flow_id + in_iface. L<App::Lilu> uses the same
+recipe, so a sensor running Lilu and Lilith itself compute the same handle for
+a given event.
+
+=cut
+
+sub parse_eve {
+	my ( $self, %opts ) = @_;
+
+	my $json = $opts{json};
+
+	# only alert events are stored; anything else is skipped
+	if (   !defined($json)
+		|| ref($json) ne 'HASH'
+		|| !defined( $json->{event_type} )
+		|| $json->{event_type} ne 'alert' )
+	{
+		return undef;
+	}
+
+	my $type     = $opts{type};
+	my $instance = $opts{instance};
+	my $host     = $opts{host};
+
+	# stable per-event handle; undef parts stringify to '' just as before
+	my $event_id = sha256_base64(
+		  ( defined($instance)            ? $instance            : '' )
+		. ( defined($host)                ? $host                : '' )
+		. ( defined( $json->{timestamp} ) ? $json->{timestamp}   : '' )
+		. ( defined( $json->{flow_id} )   ? $json->{flow_id}     : '' )
+		. ( defined( $json->{in_iface} )  ? $json->{in_iface}    : '' )
+	);
+
+	if ( defined($type) && $type eq 'suricata' ) {
+		return {
+			instance            => $instance,
+			host                => $host,
+			timestamp           => $json->{timestamp},
+			flow_id             => $json->{flow_id},
+			event_id            => $event_id,
+			in_iface            => $json->{in_iface},
+			src_ip              => $json->{src_ip},
+			src_port            => $json->{src_port},
+			dest_ip             => $json->{dest_ip},
+			dest_port           => $json->{dest_port},
+			proto               => $json->{proto},
+			app_proto           => $json->{app_proto},
+			flow_pkts_toserver  => $json->{flow}{pkts_toserver},
+			flow_bytes_toserver => $json->{flow}{bytes_toserver},
+			flow_pkts_toclient  => $json->{flow}{pkts_toclient},
+			flow_bytes_toclient => $json->{flow}{bytes_toclient},
+			flow_start          => $json->{flow}{start},
+			classification      => $json->{alert}{category},
+			signature           => $json->{alert}{signature},
+			gid                 => $json->{alert}{gid},
+			sid                 => $json->{alert}{signature_id},
+			rev                 => $json->{alert}{rev},
+			raw                 => $opts{raw},
+		};
+	} elsif ( defined($type) && $type eq 'sagan' ) {
+		return {
+			instance       => $instance,
+			instance_host  => $host,
+			timestamp      => $json->{timestamp},
+			event_id       => $event_id,
+			flow_id        => $json->{flow_id},
+			in_iface       => $json->{in_iface},
+			src_ip         => $json->{src_ip},
+			src_port       => $json->{src_port},
+			dest_ip        => $json->{dest_ip},
+			dest_port      => $json->{dest_port},
+			proto          => $json->{proto},
+			facility       => $json->{facility},
+			host           => $json->{host},
+			level          => $json->{level},
+			priority       => $json->{priority},
+			program        => $json->{program},
+			xff            => $json->{xff},
+			stream         => $json->{stream},
+			classification => $json->{alert}{category},
+			signature      => $json->{alert}{signature},
+			gid            => $json->{alert}{gid},
+			sid            => $json->{alert}{signature_id},
+			rev            => $json->{alert}{rev},
+			raw            => $opts{raw},
+		};
+	} elsif ( defined($type) && $type eq 'cape' ) {
+		return $self->_parse_cape( $json, $instance, $host, $opts{raw} );
+	}
+
+	return undef;
+} ## end sub parse_eve
+
+# Pull a CAPEv2 detonation record apart into its cape_alerts row. Kept out of
+# parse_eve only because the field-by-field fallbacks (cape_submit vs
+# suricata_extract_submit vs row) are long. Faithful to the original run() body.
+sub _parse_cape {
+	my ( $self, $json, $instance, $host, $raw ) = @_;
+
+	my $ces = ref( $json->{cape_submit} ) eq 'HASH'             ? $json->{cape_submit}             : {};
+	my $ses = ref( $json->{suricata_extract_submit} ) eq 'HASH' ? $json->{suricata_extract_submit} : {};
+
+	# the submitted sample's name: most specific source first, then basename
+	my $target;
+	if ( defined( $ces->{name} ) ) {
+		$target = $ces->{name};
+	} elsif ( defined( $ses->{name} ) ) {
+		$target = $ses->{name};
+	} else {
+		$target = $json->{row}{target};
+	}
+	if ( defined($target) ) {
+		$target =~ s/^.*\///;
+	}
+
+	# hashes: cape_submit first, else suricata_extract_submit
+	my $md5    = defined( $ces->{md5} )    ? $ces->{md5}    : $ses->{md5};
+	my $sha1   = defined( $ces->{sha1} )   ? $ces->{sha1}   : $ses->{sha1};
+	my $sha256 = defined( $ces->{sha256} ) ? $ces->{sha256} : $ses->{sha256};
+
+	# slug preference is the other way round: suricata_extract_submit first
+	my $slug = defined( $ses->{slug} ) ? $ses->{slug} : $ces->{slug};
+
+	my $size;
+	if ( defined( $ces->{size} ) ) {
+		$size = $ces->{size};
+	} elsif ( defined( $json->{fileinfo} ) && defined( $json->{fileinfo}{size} ) ) {
+		$size = $json->{fileinfo}{size};
+	}
+
+	return {
+		instance         => $instance,
+		target           => $target,
+		instance_host    => $host,
+		task             => $json->{row}{id},
+		start            => $json->{row}{started_on},
+		stop             => $json->{row}{completed_on},
+		malscore         => $json->{malscore},
+		subbed_from_ip   => $ces->{remote_ip},
+		subbed_from_host => $ses->{host},
+		pkg              => $json->{row}{package},
+		md5              => $md5,
+		sha1             => $sha1,
+		sha256           => $sha256,
+		slug             => $slug,
+		url              => ( defined( $json->{http} ) ? $json->{http}{url}      : undef ),
+		url_hostname     => ( defined( $json->{http} ) ? $json->{http}{hostname} : undef ),
+		proto            => $json->{proto},
+		src_ip           => $json->{src_ip},
+		src_port         => $json->{src_port},
+		dest_ip          => $json->{dest_ip},
+		dest_port        => $json->{dest_port},
+		size             => $size,
+		raw              => $raw,
+	};
+} ## end sub _parse_cape
+
+=head2 insert_alert
+
+Insert one parsed alert row into its table and return the new C<id>.
+
+    my $id = $lilith->insert_alert(
+        type => 'suricata',
+        row  => $row,          # as returned by parse_eve
+    );
+
+Arguments.
+
+    - type :: 'suricata', 'sagan', or 'cape'. Required.
+
+    - row :: Hash ref keyed by column name, the same keys as
+      C<@{ $Lilith::alert_columns{$type} }>. Missing columns insert as NULL;
+      keys outside the column set are ignored. Required.
+
+The column list and INSERT are built from C<%alert_columns> so callers (the
+local EVE tailer in L</run> and L<Lilith::Receiver>) cannot drift from the
+schema. Dies on DB failure.
+
+=cut
+
+sub insert_alert {
+	my ( $self, %opts ) = @_;
+
+	my $type = $opts{type};
+	die 'no type given'          unless defined $type;
+	die "unknown type '$type'"   unless $alert_columns{$type};
+	die 'row must be a hash ref' unless ref $opts{row} eq 'HASH';
+	my $row = $opts{row};
+
+	my $table
+		= $type eq 'suricata' ? 'suricata_alerts'
+		: $type eq 'sagan'    ? 'sagan_alerts'
+		:                       'cape_alerts';
+	my @cols = @{ $alert_columns{$type} };
+
+	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} );
+	my $sql
+		= 'insert into '
+		. $table . ' ( '
+		. join( ', ', @cols )
+		. ' ) VALUES ( '
+		. join( ', ', ('?') x scalar(@cols) )
+		. ' ) returning id;';
+	my $sth = $dbh->prepare($sql);
+	$sth->execute( map { $row->{$_} } @cols );
+	my ($id) = $sth->fetchrow_array;
+
+	return $id;
+} ## end sub insert_alert
+
+=head2 receiver_apikey_auth
+
+Look up a receiver API key by its bearer token and verify the client IP is
+permitted. Returns the key row (hash ref) on success, or undef when the key is
+unknown, disabled, or the IP is not contained by one of the key's
+C<allowed_ips>. The instance restriction is checked separately with
+L</receiver_apikey_instance_ok> once the pushed row's instance is known.
+
+    my $key = $lilith->receiver_apikey_auth( apikey => $token, ip => $client_ip );
+
+The IP containment runs in the database (C<< inet <<= any(cidr[]) >>) so subnet
+entries and IPv6 are handled correctly. A key with no C<allowed_ips> is not
+restricted by IP. On a successful lookup the key's C<last_used> is stamped on a
+best-effort basis.
+
+=cut
+
+sub receiver_apikey_auth {
+	my ( $self, %opts ) = @_;
+
+	return undef unless defined $opts{apikey} && $opts{apikey} ne '';
+
+	# Only bind a syntactically plausible IP; anything else binds as NULL so a
+	# key with an IP restriction fails closed instead of erroring on the cast.
+	my $ip = ( defined $opts{ip} && $opts{ip} =~ /\A[0-9a-fA-F:.]+\z/ ) ? $opts{ip} : undef;
+
+	my $dbh = $self->_escalation_dbh;
+	my $sth
+		= $dbh->prepare( 'select * from receiver_apikeys'
+			. ' where key_sha256 = ? and enabled'
+			. '   and ( allowed_ips is null or array_length(allowed_ips, 1) is null'
+			. '         or ?::inet <<= any(allowed_ips) );' );
+	$sth->execute( sha256_base64( $opts{apikey} ), $ip );
+	my $row = $sth->fetchrow_hashref;
+
+	return undef unless $row;
+
+	# best-effort usage stamp; never fail auth over it
+	eval { $dbh->do( 'update receiver_apikeys set last_used = now() where id = ?;', undef, $row->{id} ); };
+
+	return $row;
+} ## end sub receiver_apikey_auth
+
+=head2 receiver_apikey_instance_ok
+
+Whether a key row (as returned by L</receiver_apikey_auth>) permits writing the
+given instance. A key with no C<allowed_instances> permits any instance;
+otherwise the instance must match one of the patterns, where C<*> and C<?> are
+shell-style wildcards (C<foo-*> matches every instance beginning C<foo->). A
+pattern with no wildcards is an exact match.
+
+    if ( $lilith->receiver_apikey_instance_ok( $key, $instance ) ) { ... }
+
+=cut
+
+sub receiver_apikey_instance_ok {
+	my ( $self, $key, $instance ) = @_;
+
+	my $allowed = ref $key eq 'HASH' ? $key->{allowed_instances} : undef;
+	return 1 if ref $allowed ne 'ARRAY' || !@{$allowed};
+
+	return 0 unless defined $instance;
+
+	foreach my $pattern ( @{$allowed} ) {
+		next unless defined $pattern;
+		return 1 if $instance =~ $self->_instance_regex($pattern);
+	}
+
+	return 0;
+} ## end sub receiver_apikey_instance_ok
+
+# Compile a shell-style instance pattern ('*' and '?' wildcards) into an
+# anchored regex. Everything else matches literally, so a pattern with no
+# wildcards is an exact match -- the same behavior a plain instance name had
+# before wildcards were supported. Anchoring is what keeps 'foo' from matching
+# 'barfoo'.
+sub _instance_regex {
+	my ( $self, $pattern ) = @_;
+
+	my $re = quotemeta $pattern;
+	$re =~ s/\\\*/.*/g;
+	$re =~ s/\\\?/./g;
+
+	return qr/\A$re\z/;
+}
+
+=head2 receiver_apikey_create
+
+Create a receiver API key. Generates the bearer token, stores only its SHA-256,
+and returns C<< { id => $id, apikey => $token } >>. The plaintext token is
+returned only here and is not recoverable afterwards.
+
+    my $new = $lilith->receiver_apikey_create(
+        name              => 'sensor1',
+        allowed_ips       => [ '10.0.0.0/8', '192.168.1.5/32' ],  # optional
+        allowed_instances => [ 'foo-*' ],                         # optional
+        description       => '...',                               # optional
+        enabled           => 1,                                   # default 1
+    );
+
+C<allowed_ips> / C<allowed_instances> are array refs; omit or pass an empty ref
+to leave that axis unrestricted. Invalid CIDR values are rejected by the
+database.
+
+=cut
+
+sub receiver_apikey_create {
+	my ( $self, %opts ) = @_;
+
+	die('"name" is required') if !defined $opts{name} || $opts{name} eq '';
+
+	my $enabled   = ( !defined $opts{enabled} || $opts{enabled} ) ? 1 : 0;
+	my $ips       = $self->_receiver_array_or_null( $opts{allowed_ips} );
+	my $instances = $self->_receiver_array_or_null( $opts{allowed_instances} );
+
+	my $token = $self->_receiver_key_generate;
+
+	my $dbh = $self->_escalation_dbh;
+	my $sth
+		= $dbh->prepare( 'insert into receiver_apikeys'
+			. ' ( name, key_sha256, enabled, allowed_ips, allowed_instances, description )'
+			. ' VALUES ( ?, ?, ?, ?, ?, ? ) RETURNING id;' );
+	$sth->execute( $opts{name}, sha256_base64($token), $enabled, $ips, $instances, $opts{description} );
+
+	my ($id) = $sth->fetchrow_array;
+
+	return { id => $id, apikey => $token };
+} ## end sub receiver_apikey_create
+
+=head2 receiver_apikey_get
+
+Fetch one receiver API key row by numeric id. Dies if the id is missing,
+non-numeric, or unknown. The row carries only C<key_sha256>, never the token.
+
+    my $key = $lilith->receiver_apikey_get($id);
+
+=cut
+
+sub receiver_apikey_get {
+	my ( $self, $id ) = @_;
+
+	die('receiver api key id is required and must be numeric')
+		if !defined $id || $id !~ /^[0-9]+$/;
+
+	my $dbh = $self->_escalation_dbh;
+	my $sth = $dbh->prepare('select * from receiver_apikeys where id = ?;');
+	$sth->execute($id);
+
+	my $row = $sth->fetchrow_hashref;
+	die( 'no receiver api key with the id "' . $id . '"' ) if !$row;
+
+	return $row;
+} ## end sub receiver_apikey_get
+
+=head2 receiver_apikeys
+
+Return an array ref of every receiver API key row, ordered by name. Rows carry
+only C<key_sha256>, never the token.
+
+    my $keys = $lilith->receiver_apikeys;
+
+=cut
+
+sub receiver_apikeys {
+	my ($self) = @_;
+
+	my $dbh = $self->_escalation_dbh;
+	my $sth = $dbh->prepare('select * from receiver_apikeys order by name;');
+	$sth->execute();
+
+	my @keys;
+	while ( my $row = $sth->fetchrow_hashref ) {
+		push( @keys, $row );
+	}
+
+	return \@keys;
+} ## end sub receiver_apikeys
+
+=head2 receiver_apikey_update
+
+Update a receiver API key's metadata and restrictions. The token itself is never
+changed; rotate a key by deleting and recreating it.
+
+    $lilith->receiver_apikey_update(
+        id                => $id,
+        enabled           => 0,
+        allowed_ips       => [ '10.0.0.0/8' ],  # replaces; [] clears (any)
+        allowed_instances => [ 'foo-*' ],       # replaces; [] clears (any)
+    );
+
+Only the keys present in C<%opts> are changed; C<allowed_ips> /
+C<allowed_instances> are replaced when supplied (an empty array ref clears the
+restriction).
+
+=cut
+
+sub receiver_apikey_update {
+	my ( $self, %opts ) = @_;
+
+	my $existing = $self->receiver_apikey_get( $opts{id} );
+
+	my $name        = defined( $opts{name} ) && $opts{name} ne '' ? $opts{name} : $existing->{name};
+	my $enabled     = exists $opts{enabled}     ? ( $opts{enabled} ? 1 : 0 )    : ( $existing->{enabled} ? 1 : 0 );
+	my $description = exists $opts{description} ? $opts{description}            : $existing->{description};
+
+	my $ips
+		= exists $opts{allowed_ips}
+		? $self->_receiver_array_or_null( $opts{allowed_ips} )
+		: $self->_receiver_array_or_null( $existing->{allowed_ips} );
+	my $instances
+		= exists $opts{allowed_instances}
+		? $self->_receiver_array_or_null( $opts{allowed_instances} )
+		: $self->_receiver_array_or_null( $existing->{allowed_instances} );
+
+	my $dbh = $self->_escalation_dbh;
+	my $sth = $dbh->prepare( 'update receiver_apikeys set name = ?, enabled = ?, allowed_ips = ?,'
+			. ' allowed_instances = ?, description = ?, updated = now() where id = ?;' );
+	$sth->execute( $name, $enabled, $ips, $instances, $description, $opts{id} );
+
+	return 1;
+} ## end sub receiver_apikey_update
+
+=head2 receiver_apikey_delete
+
+Delete a receiver API key by numeric id.
+
+    $lilith->receiver_apikey_delete($id);
+
+=cut
+
+sub receiver_apikey_delete {
+	my ( $self, $id ) = @_;
+
+	die('receiver api key id is required and must be numeric')
+		if !defined $id || $id !~ /^[0-9]+$/;
+
+	my $dbh = $self->_escalation_dbh;
+	$dbh->prepare('delete from receiver_apikeys where id = ?;')->execute($id);
+
+	return 1;
+} ## end sub receiver_apikey_delete
+
+# Generate a fresh bearer token: 32 random bytes as 64 hex characters.
+sub _receiver_key_generate {
+	my ($self) = @_;
+
+	require Crypt::URandom;
+	return unpack( 'H*', Crypt::URandom::urandom(32) );
+}
+
+# Turn an array ref into a Postgres array literal for binding, or undef (=> SQL
+# NULL, meaning unrestricted) for an empty/undef list. Shared by the cidr[] and
+# varchar[] receiver columns -- both take the same {"a","b"} text form.
+sub _receiver_array_or_null {
+	my ( $self, $list ) = @_;
+
+	return undef if ref $list ne 'ARRAY' || !@{$list};
+
+	return $self->_pg_text_array($list);
+}
+
 =head2 run
 
 Start processing. This method is not expected to return.
@@ -342,206 +872,24 @@ sub run {
 						return;
 					}
 
-					my $dbh;
-					eval { $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} ); };
+					eval {
+						my $row = $self->parse_eve(
+							type     => $_[HEAP]{type},
+							json     => $json,
+							instance => $_[HEAP]{instance},
+							host     => $_[HEAP]{host},
+							raw      => $_[ARG0],
+						);
+						if ( defined($row) ) {
+							$self->insert_alert( type => $_[HEAP]{type}, row => $row );
+						}
+					};
 					if ($@) {
-						warn($@);
+						warn( 'SQL INSERT issue... ' . $@ );
 						openlog( 'lilith', undef, 'daemon' );
-						syslog( 'LOG_ERR', $@ );
+						syslog( 'LOG_ERR', 'SQL INSERT issue... ' . $@ );
 						closelog;
 					}
-
-					eval {
-						if (   defined($json)
-							&& defined( $json->{event_type} )
-							&& $json->{event_type} eq 'alert' )
-						{
-							# put the event ID together
-							my $event_id
-								= sha256_base64( $_[HEAP]{instance}
-									. $_[HEAP]{host}
-									. $json->{timestamp}
-									. $json->{flow_id}
-									. $json->{in_iface} );
-
-							# handle if suricata
-							if ( $_[HEAP]{type} eq 'suricata' ) {
-								my $sth
-									= $dbh->prepare( 'insert into suricata_alerts'
-										. ' ( instance, host, timestamp, flow_id, event_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, app_proto, flow_pkts_toserver, flow_bytes_toserver, flow_pkts_toclient, flow_bytes_toclient, flow_start, classification, signature, gid, sid, rev, raw ) '
-										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );'
-									);
-								$sth->execute(
-									$_[HEAP]{instance},           $_[HEAP]{host},
-									$json->{timestamp},           $json->{flow_id},
-									$event_id,                    $json->{in_iface},
-									$json->{src_ip},              $json->{src_port},
-									$json->{dest_ip},             $json->{dest_port},
-									$json->{proto},               $json->{app_proto},
-									$json->{flow}{pkts_toserver}, $json->{flow}{bytes_toserver},
-									$json->{flow}{pkts_toclient}, $json->{flow}{bytes_toclient},
-									$json->{flow}{start},         $json->{alert}{category},
-									$json->{alert}{signature},    $json->{alert}{gid},
-									$json->{alert}{signature_id}, $json->{alert}{rev},
-									$_[ARG0]
-								);
-							} ## end if ( $_[HEAP]{type} eq 'suricata' )
-
-							#handle if sagan
-							elsif ( $_[HEAP]{type} eq 'sagan' ) {
-								my $sth
-									= $dbh->prepare( 'insert into sagan_alerts'
-										. ' ( instance, instance_host, timestamp, event_id, flow_id, in_iface, src_ip, src_port, dest_ip, dest_port, proto, facility, host, level, priority, program, xff, stream, classification, signature, gid, sid, rev, raw) '
-										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );'
-									);
-								$sth->execute(
-									$_[HEAP]{instance},           $_[HEAP]{host},
-									$json->{timestamp},           $event_id,
-									$json->{flow_id},             $json->{in_iface},
-									$json->{src_ip},              $json->{src_port},
-									$json->{dest_ip},             $json->{dest_port},
-									$json->{proto},               $json->{facility},
-									$json->{host},                $json->{level},
-									$json->{priority},            $json->{program},
-									$json->{xff},                 $json->{stream},
-									$json->{alert}{category},
-									$json->{alert}{signature},    $json->{alert}{gid},
-									$json->{alert}{signature_id}, $json->{alert}{rev},
-									$_[ARG0],
-								);
-							} elsif ( $_[HEAP]{type} eq 'cape' ) {
-								my $sth
-									= $dbh->prepare( 'insert into cape_alerts'
-										. ' ( instance, target, instance_host, task, start, stop, malscore, subbed_from_ip, subbed_from_host, pkg, md5, sha1, sha256, slug, url, url_hostname, proto, src_ip, src_port, dest_ip, dest_port, size, raw ) '
-										. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? );'
-									);
-
-								my $url;
-								if ( defined( $json->{http} ) && defined( $json->{http}{url} ) ) {
-									$url = $json->{http}{url};
-								}
-
-								my $url_hostname;
-								if ( defined( $json->{http} ) && defined( $json->{http}{hostname} ) ) {
-									$url_hostname = $json->{http}{hostname};
-								}
-
-								my $proto;
-								if ( defined( $json->{proto} ) ) {
-									$proto = $json->{proto};
-								}
-
-								my $src_ip;
-								if ( defined( $json->{src_ip} ) ) {
-									$src_ip = $json->{src_ip};
-								}
-
-								my $src_port;
-								if ( defined( $json->{src_port} ) ) {
-									$src_port = $json->{src_port};
-								}
-
-								my $dest_ip;
-								if ( defined( $json->{dest_ip} ) ) {
-									$dest_ip = $json->{dest_ip};
-								}
-
-								my $dest_port;
-								if ( defined( $json->{dest_port} ) ) {
-									$dest_port = $json->{dest_port};
-								}
-
-								my $size;
-								if ( defined( $json->{cape_submit} ) && defined( $json->{cape_submit}{size} ) ) {
-									$size = $json->{cape_submit}{size};
-								} elsif ( defined( $json->{fileinfo} ) && defined( $json->{fileinfo}{size} ) ) {
-									$size = $json->{fileinfo}{size};
-								}
-
-								# figure out what to use for the target
-								my $target;
-								if ( defined( $json->{cape_submit} ) && defined( $json->{cape_submit}{name} ) ) {
-									$target = $json->{cape_submit}{name};
-								} elsif ( defined( $json->{suricata_extract_submit} )
-									&& defined( $json->{suricata_extract_submit}{name} ) )
-								{
-									$target = $json->{suricata_extract_submit}{name};
-								} else {
-									$target = $json->{row}{target};
-								}
-
-								my $subbed_from_ip;
-								if ( defined( $json->{cape_submit} ) && defined( $json->{cape_submit}{remote_ip} ) )
-								{
-									$subbed_from_ip = $json->{cape_submit}{remote_ip};
-								}
-
-								my $subbed_from_host;
-								if (   defined( $json->{suricata_extract_submit} )
-									&& defined( $json->{suricata_extract_submit}{host} ) )
-								{
-									$subbed_from_host = $json->{suricata_extract_submit}{host};
-								}
-
-								my $md5;
-								if ( defined( $json->{cape_submit} ) && defined( $json->{cape_submit}{md5} ) ) {
-									$md5 = $json->{cape_submit}{md5};
-								} elsif ( defined( $json->{suricata_extract_submit} )
-									&& defined( $json->{suricata_extract_submit}{md5} ) )
-								{
-									$md5 = $json->{suricata_extract_submit}{md5};
-								}
-
-								my $sha1;
-								if ( defined( $json->{cape_submit} ) && defined( $json->{cape_submit}{sha1} ) ) {
-									$sha1 = $json->{cape_submit}{sha1};
-								} elsif ( defined( $json->{suricata_extract_submit} )
-									&& defined( $json->{suricata_extract_submit}{sha1} ) )
-								{
-									$sha1 = $json->{suricata_extract_submit}{sha1};
-								}
-
-								my $sha256;
-								if ( defined( $json->{cape_submit} ) && defined( $json->{cape_submit}{sha256} ) ) {
-									$sha256 = $json->{cape_submit}{sha256};
-								} elsif ( defined( $json->{suricata_extract_submit} )
-									&& defined( $json->{suricata_extract_submit}{sha256} ) )
-								{
-									$sha256 = $json->{suricata_extract_submit}{sha256};
-								}
-
-								my $slug;
-								if ( defined( $json->{suricata_extract_submit}{slug} ) ) {
-									$slug = $json->{suricata_extract_submit}{slug};
-								} elsif ( defined( $json->{cape_submit} ) && defined( $json->{cape_submit}{slug} ) )
-								{
-									$slug = $json->{cape_submit}{slug};
-								}
-
-								$target =~ s/^.*\///g;
-								$sth->execute(
-									$_[HEAP]{instance},       $target,
-									$_[HEAP]{host},           $json->{row}{id},
-									$json->{row}{started_on}, $json->{row}{completed_on},
-									$json->{malscore},        $subbed_from_ip,
-									$subbed_from_host,        $json->{row}{package},
-									$md5,                     $sha1,
-									$sha256,                  $slug,
-									$url,                     $url_hostname,
-									$proto,                   $src_ip,
-									$src_port,                $dest_ip,
-									$dest_port,               $size,
-									$_[ARG0],
-								);
-							} ## end elsif ( $_[HEAP]{type} eq 'cape' )
-						} ## end if ( defined($json) && defined( $json->{event_type...}))
-						if ($@) {
-							warn( 'SQL INSERT issue... ' . $@ );
-							openlog( 'lilith', undef, 'daemon' );
-							syslog( 'LOG_ERR', 'SQL INSERT issue... ' . $@ );
-							closelog;
-						}
-					} ## end eval
 
 				},
 			},

@@ -17,7 +17,7 @@
      escalation_targets / escalations / auto_escalations
         |                |                 |
         v                v                 v
-  lilith (CLI)      lilith-web        lilith auto_escalate
+  lilith (CLI)      mojo_lilith       lilith auto_escalate
   search, event,    Mojolicious       (systemd timer / cron)
   extend, esc_*,    web frontend      rules -> escalate()
   ae_*                  |
@@ -58,14 +58,14 @@ standalone reimplementation of just this daemon and the extend. Same
 tables, same event IDs, same extend output, same `[eves.*]` config shape
 (in `/usr/local/etc/lilu.toml`), and no dependency on Lilith itself, so
 the sensors carry a much smaller dependency chain. See
-[install.md](install.md).
+[install](install.md).
 
 ## The tables
 
 PostgreSQL is required — the `raw` column is jsonb, and the schema is
 managed with
 [DBIx::Class::Migration](https://metacpan.org/pod/DBIx::Class::Migration)
-(currently schema version 3; see [install.md](install.md) for the
+(currently schema version 3; see [install](install.md) for the
 `dbic-migration` invocations).
 
 | table                | what                                                         |
@@ -90,11 +90,11 @@ often an alert was escalated without touching the `escalations` table.
 each action is a subcommand under `Lilith::CLI::Command`. Global options
 (`--config`, `--debug`, `--version`) come before the subcommand, and a bare
 `lilith` (or one whose first argument is an option) runs `search`. See
-[usage.md](usage.md).
+[usage](usage.md).
 
 ## The web frontend
 
-`lilith-web` is a [Mojolicious](https://metacpan.org/pod/Mojolicious) app
+`mojo_lilith` is a [Mojolicious](https://metacpan.org/pod/Mojolicious) app
 (`Lilith::Web`) started with the standard Mojolicious server commands
 (`daemon`, `prefork`, ...). It reads the same config file, via the
 `LILITH_CONFIG` env var when set. It serves:
@@ -103,12 +103,32 @@ each action is a subcommand under `Lilith::CLI::Command`. Global options
 - `/event/<table>/<id>` — a single event in full, with the decoded `raw`,
   IP/domain info lookups, escalation, and PCAP download via Virani
 - `/escalation` and `/auto_escalation` — target and rule management, each
-  gated by its own config option (see [escalation.md](escalation.md) and
-  [security.md](security.md))
+  gated by its own config option (see [escalation](escalation.md) and
+  [security](security.md))
 - `/api/...` — the JSON endpoints behind all of the above
 
 Blocking work — Virani fetches, whois/DNS lookups, escalation sends — runs
 in subprocesses so the event loop is never stalled by a slow remote.
+
+## The EVE receiver
+
+`mojo_lilith_receiver` (`Lilith::Receiver`) is the network counterpart to the
+local ingest daemon. Instead of Lilith tailing EVE files on the database host,
+a remote sensor parses its own EVE stream with the same `parse_eve` and POSTs
+each row to `POST /eve/:table`. The receiver authenticates the bearer key,
+validates the body against that table's column set — rejecting the
+database/escalation-managed columns (`id`, `escalations`, `auto_escalated`)
+outright — and inserts through the shared `Lilith::insert_alert`, the same
+method the local tailer uses, so neither can drift from `%Lilith::alert_columns`.
+Sensors thus need no database credentials of their own.
+
+Keys live in the `receiver_apikeys` table (managed with `lilith
+receiver_key_*`), stored as their SHA-256. Each key can be scoped to a set of
+client IPs/subnets and instance names: the IP check happens up front (a Postgres
+`inet <<= any(cidr[])` containment test, so subnets and IPv6 just work), while
+the instance check runs once the body is parsed, matching the row's `instance`
+against the key's patterns — which may use `*`/`?` wildcards. An unset axis is
+unrestricted.
 
 ## The auto escalation timer
 
@@ -118,8 +138,8 @@ enabled rules from `auto_escalations`, evaluates them (via
 ingested within its `-m` window that have not yet been considered, and
 escalates matches through the same path as a manual escalation — same audit
 trail, same per-row `escalations` array. Ready made systemd service+timer
-units and a cron entry ship under `init/`. See
-[escalation.md](escalation.md).
+units and a cron entry ship under `rc/`. See
+[escalation](escalation.md).
 
 ## Where Lilith sits in the pantheon
 

@@ -1,0 +1,37 @@
+# systemd service for the Lilith EVE ingest daemon.
+#
+# Install into /etc/systemd/system/ and enable:
+#
+#   cp rc/systemd/lilith.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now lilith
+#
+# This runs `lilith run` in the foreground -- do NOT add --daemonize, systemd
+# supervises the process itself and User=/Group= below drop the privileges the
+# --daemonize/--user path would otherwise handle.
+#
+# Unlike the web frontend and receiver, this daemon reads the EVE log files, so
+# its user must have read access to every followed EVE file. The 'lilith' user
+# below holds the database credentials but may not be able to read the sensor
+# logs; adjust User=/Group= (e.g. add it to the suricata/sagan group, or run as
+# a user that can read the logs) to suit your setup. For a non default config
+# path, use the commented ExecStart.
+
+[Unit]
+Description=Lilith EVE ingest daemon
+Documentation=man:lilith
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lilith
+Group=lilith
+ExecStart=/usr/local/bin/lilith run
+# to use a non default config file, comment the line above and use:
+#ExecStart=/usr/local/bin/lilith --config /usr/local/etc/lilith.toml run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

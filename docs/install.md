@@ -10,7 +10,7 @@ Declared in `Makefile.PL`; the load bearing ones are below.
 | `POE`                                   | the ingest daemon's FollowTail sessions        |
 | `DBI`, `DBD::Pg`                        | talking to PostgreSQL                          |
 | `DBIx::Class`, `DBIx::Class::Migration` | the schema and its versioned migrations        |
-| `Mojolicious` (>= 9.0)                  | the `lilith-web` frontend                      |
+| `Mojolicious` (>= 9.0)                  | the `mojo_lilith` frontend                      |
 | `JSON`, `TOML`                          | EVE decoding and the config file               |
 | `Rule::Engine`                          | evaluating auto escalation rules               |
 | `Text::ANSITable`, `Term::ANSIColor`    | the CLI's table output                         |
@@ -72,7 +72,7 @@ createdb -E UTF8 -O lilith lilith
 ```
 
 ...write the connection details into `/usr/local/etc/lilith.toml` (see
-[configuration.md](configuration.md))...
+[configuration](configuration.md))...
 
 ```toml
 dsn="dbi:Pg:dbname=lilith;host=192.168.1.2"
@@ -105,38 +105,90 @@ dbic-migration --schema_class Lilith::Schema -P $password -U $user --dsn $dsn up
 
 ### The ingest daemon
 
-A FreeBSD rc.d script ships as [init/freebsd](../init/freebsd). Install it
-as `/usr/local/etc/rc.d/lilith` and enable with:
+A systemd unit ships as [rc/systemd/lilith.service](../rc/systemd/lilith.service)
+and a FreeBSD rc.d script as [rc/freebsd/lilith](../rc/freebsd/lilith):
 
 ```shell
+# systemd
+cp rc/systemd/lilith.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now lilith
+
+# FreeBSD
+install -m 0755 rc/freebsd/lilith /usr/local/etc/rc.d/lilith
 sysrc lilith_enable=YES
 service lilith start
 ```
 
-It runs `lilith run --daemonize --user $lilith_user --group $lilith_group`;
-the user needs read access to the followed EVE files.
+The systemd unit runs `lilith run` in the foreground (systemd supervises it);
+the FreeBSD script runs `lilith run --daemonize --user $lilith_user --group
+$lilith_group`. Either way the user it runs as needs read access to the
+followed EVE files — see the comments in the unit about `User=`/`Group=`.
 
 ### The web frontend
 
-`lilith-web` supports every standard Mojolicious server command, so run it
+`mojo_lilith` supports every standard Mojolicious server command, so run it
 however you prefer to run Mojolicious apps:
 
 ```shell
-lilith-web daemon -l http://127.0.0.1:8080
+mojo_lilith daemon -l http://127.0.0.1:8080
 ```
 
-Read [security.md](security.md) before binding it anywhere other than
-localhost — the frontend is unauthenticated.
+To run it at boot, a systemd unit ships as
+[rc/systemd/mojo_lilith.service](../rc/systemd/mojo_lilith.service) and a
+FreeBSD rc.d script as [rc/freebsd/mojo_lilith](../rc/freebsd/mojo_lilith):
+
+```shell
+# systemd
+cp rc/systemd/mojo_lilith.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now mojo_lilith
+
+# FreeBSD
+install -m 0755 rc/freebsd/mojo_lilith /usr/local/etc/rc.d/mojo_lilith
+sysrc mojo_lilith_enable=YES
+service mojo_lilith start
+```
+
+Both default to `prefork` on `http://127.0.0.1:8080`; edit the listen URL in
+the unit/`mojo_lilith_listen` to change it. Read [security](security.md)
+before binding it anywhere other than localhost — the frontend is
+unauthenticated.
+
+### The EVE receiver
+
+`mojo_lilith_receiver` is the network counterpart to the local EVE-file
+tailer: remote sensors POST already parsed alert rows to it and it inserts
+them into the database, so a sensor never needs its own DB credentials. Like
+`mojo_lilith` it takes any Mojolicious server command:
+
+```shell
+mojo_lilith_receiver daemon -l http://127.0.0.1:8081
+```
+
+It ships the same pair of boot scripts,
+[rc/systemd/mojo_lilith_receiver.service](../rc/systemd/mojo_lilith_receiver.service)
+and [rc/freebsd/mojo_lilith_receiver](../rc/freebsd/mojo_lilith_receiver),
+installed the same way (service name `mojo_lilith_receiver`, default port
+`8081`). If it sits behind a TLS terminating proxy, set `MOJO_REVERSE_PROXY=1`
+in its environment (the systemd unit has a commented line for it) so per-key
+IP scoping sees the real client address.
+
+Unlike the frontend it authenticates every request against the API keys in
+the database (created with `lilith receiver_key_create`) and refuses every
+request until at least one key exists. Keys can be scoped to client
+IPs/subnets and instance names. See [configuration](configuration.md) and
+[usage](usage.md) for key management and the push format.
 
 ### The auto escalation timer
 
-If you use auto escalation rules (see [escalation.md](escalation.md)), run
-`lilith auto_escalate` periodically. Ready made units ship under `init/`.
+If you use auto escalation rules (see [escalation](escalation.md)), run
+`lilith auto_escalate` periodically. Ready made units ship under `rc/`.
 
 With systemd:
 
 ```shell
-cp init/lilith-auto-escalate.service init/lilith-auto-escalate.timer \
+cp rc/systemd/lilith-auto-escalate.service rc/systemd/lilith-auto-escalate.timer \
     /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now lilith-auto-escalate.timer
@@ -145,7 +197,7 @@ systemctl enable --now lilith-auto-escalate.timer
 Without systemd, the cron flavor:
 
 ```shell
-cp init/lilith-auto-escalate.cron /etc/cron.d/lilith-auto-escalate
+cp rc/lilith-auto-escalate.cron /etc/cron.d/lilith-auto-escalate
 ```
 
 Both run every five minutes with `-m 60`. The `-m` window only bounds how
@@ -168,7 +220,7 @@ cpanm App::Lilu
 
 The config is `/usr/local/etc/lilu.toml`: just `dsn`/`user`/`pass` and the
 same `[eves.*]` sub tables as Lilith's config (see
-[configuration.md](configuration.md)). Then:
+[configuration](configuration.md)). Then:
 
 ```shell
 lilu run --daemonize --user lilith --group lilith

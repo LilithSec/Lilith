@@ -24,7 +24,7 @@ selected with a `-a` flag (`lilith -a run`); that flag is gone in favor of
 subcommands (`lilith run`).
 
 The escalation subcommands (`esc`, `esc_*`, `ae_*`, `auto_escalate`) are
-covered in [escalation.md](escalation.md).
+covered in [escalation](escalation.md).
 
 ### run
 
@@ -38,7 +38,7 @@ lilith run [--daemonize] [--user <user>] [--group <group>]
 On a box that only feeds the annals,
 [Lilu](https://github.com/LilithSec/App-Lilu)'s `lilu run` / `lilu extend`
 do the same jobs without the rest of Lilith; see
-[install.md](install.md).
+[install](install.md).
 
 ### search
 
@@ -139,12 +139,12 @@ extend lilith /usr/local/bin/lilith extend
 ## The web frontend
 
 ```shell
-lilith-web daemon -l http://127.0.0.1:8080
-LILITH_CONFIG=/etc/lilith.toml lilith-web prefork
+mojo_lilith daemon -l http://127.0.0.1:8080
+LILITH_CONFIG=/etc/lilith.toml mojo_lilith prefork
 ```
 
 All the standard Mojolicious server commands work. Read
-[security.md](security.md) before exposing it — it is unauthenticated.
+[security](security.md) before exposing it — it is unauthenticated.
 
 - **/search** — the same filters as the CLI search, in a form. Escalated
   events are badged with a red **E**.
@@ -155,7 +155,7 @@ All the standard Mojolicious server commands work. Read
   and a **Mail** button (combined SPF / DMARC / DKIM check). With
   `[virani.*]` remotes configured, a **Download PCAP** control fetches the
   flow PCAP (see below). With `escalation_enable` on, an **Escalate**
-  button and the escalation history appear ([escalation.md](escalation.md)).
+  button and the escalation history appear ([escalation](escalation.md)).
 - **Virani dropdown** — appears in the navbar when any `[virani.*]` remote
   is configured. **PCAP Search** takes an arbitrary BPF filter and time
   range: it always builds a ready-to-copy local `virani` command, and with
@@ -167,6 +167,65 @@ All the standard Mojolicious server commands work. Read
   streams it back. The set to pull from is selectable (queried live from
   the remote), and a dropdown offers the equivalent `virani` command to run
   on the box holding the PCAPs instead.
+
+## The EVE receiver
+
+```shell
+mojo_lilith_receiver daemon -l http://127.0.0.1:8081
+LILITH_CONFIG=/etc/lilith.toml mojo_lilith_receiver prefork
+```
+
+Instead of Lilith tailing EVE files locally, a remote sensor can parse its
+own EVE stream and push the resulting rows to a central Lilith. The sensor
+does the same `parse_eve` work `lilith run` does and POSTs the row as JSON;
+only the receiver touches the database.
+
+- **Endpoint** — `POST /eve/:table`, where `:table` is `suricata_alerts`,
+  `sagan_alerts`, or `cape_alerts`. An unknown table is a `404`.
+- **Auth** — `Authorization: Bearer <key>`, checked against the keys in the
+  database (see below). No/invalid key, or a key not permitted for the
+  client's IP, is a `401`; a key not permitted for the row's instance is a
+  `403`. With no keys created every request is refused.
+- **Body** — a JSON object with one key per ingestable column for that table
+  (the same keys `parse_eve` returns, including `raw`). `raw` may be sent as
+  a JSON object or as a JSON string.
+- **Rejected columns** — `id`, `escalations`, and `auto_escalated` are set by
+  the database and the escalation subsystem, never by a sensor. A body that
+  carries any of them — or any key that is not a column of that table — is
+  rejected with `400` rather than silently stripped, so a caller is never
+  misled about what was stored.
+- **Response** — `201 {"status":"ok","id":<new id>}` on success; a `4xx`/`5xx`
+  with `{"status":"error","error":...}` otherwise.
+
+Keys are managed with the CLI and stored hashed (only the SHA-256 is kept):
+
+| command                | what                                                       |
+|------------------------|-------------------------------------------------------------|
+| `receiver_key_create`  | make a key; prints it once. `--ip`/`--instance` scope it.   |
+| `receiver_key_list`    | list keys with their IP and instance scopes and last use.   |
+| `receiver_key_get`     | show one key (`--id` or `--name`) as JSON.                   |
+| `receiver_key_update`  | change scope/enable/disable; `--clear-ips`/`--clear-instances` to widen. |
+| `receiver_key_delete`  | remove a key (`--id` or `--name`).                          |
+
+`--ip` takes a host or CIDR subnet; `--instance` takes an instance name or a
+`*`/`?` glob (e.g. `foo-*` for every instance beginning `foo-`). Both are
+repeatable and optional — an unset axis is unrestricted. To rotate a key,
+delete it and create a new one.
+
+```shell
+# create a key scoped to a subnet and the foo-* instances (quote the glob so
+# the shell does not expand it)
+lilith receiver_key_create --name sensor1 --ip 10.0.0.0/8 --instance 'foo-*'
+
+# then push with it
+curl -sS -X POST http://127.0.0.1:8081/eve/suricata_alerts \
+  -H 'Authorization: Bearer <the-printed-key>' \
+  -H 'Content-Type: application/json' \
+  --data '{"instance":"foo-pie","host":"sensor1","timestamp":"2026-07-14T00:00:00Z","raw":{...}}'
+```
+
+Read [security](security.md) before exposing it — in particular the
+`MOJO_REVERSE_PROXY` note if the receiver runs behind a proxy.
 
 ## Environment variables
 

@@ -1,0 +1,33 @@
+# systemd service for the Lilith EVE receiver (Mojolicious).
+#
+# Install into /etc/systemd/system/ and enable:
+#
+#   cp rc/systemd/mojo_lilith_receiver.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now mojo_lilith_receiver
+#
+# The receiver authenticates every push against the receiver_apikeys table
+# (manage keys with `lilith receiver_key_*`). If it runs behind a TLS
+# terminating reverse proxy, uncomment the MOJO_REVERSE_PROXY line so per-key
+# IP scoping sees the real client address from X-Forwarded-For. Edit
+# LILITH_CONFIG for a non default config path.
+
+[Unit]
+Description=Lilith EVE receiver
+Documentation=man:mojo_lilith_receiver
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# the same low privilege user that holds Lilith's database credentials
+User=lilith
+Group=lilith
+Environment=LILITH_CONFIG=/usr/local/etc/lilith.toml
+#Environment=MOJO_REVERSE_PROXY=1
+ExecStart=/usr/local/bin/mojo_lilith_receiver prefork -l http://127.0.0.1:8081
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

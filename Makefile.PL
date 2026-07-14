@@ -13,7 +13,7 @@ my %WriteMakefileArgs = (
 	LICENSE            => 'artistic_2',
 	MIN_PERL_VERSION   => '5.006',
 	INST_SCRIPT        => 'bin',
-	EXE_FILES          => [ 'src_bin/lilith', 'src_bin/lilith-web' ],
+	EXE_FILES          => [ 'src_bin/lilith', 'src_bin/mojo_lilith', 'src_bin/mojo_lilith_receiver' ],
 	CONFIGURE_REQUIRES => {
 		'ExtUtils::MakeMaker'     => '0',
 		'File::ShareDir::Install' => '0',
@@ -23,6 +23,7 @@ my %WriteMakefileArgs = (
 	},
 	PREREQ_PM => {
 		'App::Cmd'               => '0.331',
+		'Crypt::URandom'         => '0',
 		'DBI'                    => '1.643',
 		'DBIx::Class'            => '0',
 		'DBIx::Class::Migration' => '0',

@@ -12,6 +12,7 @@ our @EXPORT_OK = qw(
 	esc_lookup_target
 	esc_resolve_targets
 	ae_read_rule
+	receiver_key_lookup
 );
 
 =head1 NAME
@@ -50,6 +51,10 @@ target IDs.
 
 Reads the C<--rule> value, either a JSON string or, when it begins with C<@>,
 the path to a file holding the JSON. Returns the decoded hash ref.
+
+=head2 receiver_key_lookup( $lilith, $id, $name )
+
+Looks up a receiver API key, by C<$id> when given and by C<$name> otherwise.
 
 =cut
 
@@ -171,5 +176,29 @@ sub ae_read_rule {
 
 	return $decoded;
 } ## end sub ae_read_rule
+
+sub receiver_key_lookup {
+	my ( $lilith, $id, $name ) = @_;
+
+	if ( defined($id) && $id ne '' ) {
+		if ( $id !~ /^[0-9]+$/ ) {
+			die( '"' . $id . '" for --id is not numeric' );
+		}
+		return $lilith->receiver_apikey_get($id);
+	}
+
+	if ( defined($name) && $name ne '' ) {
+		my $keys = $lilith->receiver_apikeys;
+		my ($match) = grep { $_->{name} eq $name } @{$keys};
+		if ( !$match ) {
+			die(      'no receiver api key named "'
+					. $name . '"'
+					. ( @{$keys} ? '; known: ' . join( ', ', map { $_->{name} } @{$keys} ) : '' ) );
+		}
+		return $match;
+	} ## end if ( defined($name) && $name ne '' )
+
+	die('either --id or --name is required for picking the receiver api key');
+} ## end sub receiver_key_lookup
 
 1;

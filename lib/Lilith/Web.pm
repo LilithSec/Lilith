@@ -27,11 +27,11 @@ Lilith::Web - Mojolicious web frontend for Lilith.
 
 =head1 SYNOPSIS
 
-    # Start via lilith-web script
-    lilith-web daemon
+    # Start via mojo_lilith script
+    mojo_lilith daemon
 
     # Or directly
-    LILITH_CONFIG=/usr/local/etc/lilith.toml lilith-web daemon -l http://*:8080
+    LILITH_CONFIG=/usr/local/etc/lilith.toml mojo_lilith daemon -l http://*:8080
 
 =head1 DESCRIPTION
 

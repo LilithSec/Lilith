@@ -4,7 +4,7 @@
 # long running daemon. Install both files into /etc/systemd/system/ and
 # enable the timer (not the service):
 #
-#   cp init/lilith-auto-escalate.service init/lilith-auto-escalate.timer \
+#   cp rc/systemd/lilith-auto-escalate.service rc/systemd/lilith-auto-escalate.timer \
 #       /etc/systemd/system/
 #   systemctl daemon-reload
 #   systemctl enable --now lilith-auto-escalate.timer

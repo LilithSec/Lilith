@@ -1,7 +1,7 @@
 # Configuration
 
 The config file is TOML, default `/usr/local/etc/lilith.toml`. The CLI
-takes another via `lilith --config <file> <command>`; `lilith-web` reads
+takes another via `lilith --config <file> <command>`; `mojo_lilith` reads
 the `LILITH_CONFIG` env var.
 
 The ingest daemon, the CLI, and the web frontend all read the same file —
@@ -36,7 +36,7 @@ it is spammy.
 
 ### The web frontend
 
-All optional; all default off / unset. Read [security.md](security.md)
+All optional; all default off / unset. Read [security](security.md)
 before turning on any of the enables — the frontend is unauthenticated.
 
 | key                          | description                                     |
@@ -93,8 +93,8 @@ Remote [Virani](https://github.com/LilithSec/Virani) (`mojo-virani`)
 servers for PCAP retrieval, one sub table each. When any are configured the
 web event view grows a "Download PCAP" control for Suricata events (the
 instance matching the alert's `instance` is pre-selected) and a **Virani**
-dropdown appears in the navbar. See [usage.md](usage.md) for what those do
-and [security.md](security.md) for why you may not want them reachable.
+dropdown appears in the navbar. See [usage](usage.md) for what those do
+and [security](security.md) for why you may not want them reachable.
 
 | key               | required | description                                            |
 |-------------------|----------|--------------------------------------------------------|
@@ -104,6 +104,26 @@ and [security.md](security.md) for why you may not want them reachable.
 | `type`            | no       | Filter type: `tcpdump`, `tshark`, or `bpf2tshark`.     |
 | `timeout`         | no       | Fetch timeout in seconds. Default `60`.                |
 | `verify_hostname` | no       | Verify the TLS certificate for HTTPS URLs. Default `true`. |
+
+## EVE receiver keys
+
+`mojo_lilith_receiver` (the daemon that accepts pushed alert rows over HTTP)
+has no config-file settings — its bearer keys live in the database, not the
+TOML. Manage them with the `lilith receiver_key_*` commands:
+
+```shell
+# a key that may push from a subnet, only as instances named foo-*
+lilith receiver_key_create --name sensor1 \
+    --ip 10.0.0.0/8 --ip 192.168.1.5/32 \
+    --instance 'foo-*'
+```
+
+The command prints the generated key once; only its SHA-256 is stored, so it
+cannot be shown again. `--ip` (host or CIDR subnet) and `--instance` (a name
+or `*`/`?` glob) are each repeatable and each optional — omit an axis to leave
+it unrestricted. With no keys created the receiver rejects every request. See
+[usage](usage.md) for the commands and push format and [security](security.md)
+for the reverse-proxy caveat that per-IP scoping depends on.
 
 ## A complete example
 

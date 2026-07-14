@@ -1,6 +1,27 @@
 Revision history for Lilith
 
 4.0.0	unreleased
+		 - Add mojo_lilith_receiver (Lilith::Receiver), a Mojolicious daemon
+		   that ingests pushed alert rows. A remote sensor parses its own
+		   EVE stream and POSTs each parse_eve row as JSON to
+		   POST /eve/:table, so sensors need no database credentials. The
+		   body is validated against the table's column set and inserted via
+		   the new shared Lilith::insert_alert; id, escalations, and
+		   auto_escalated cannot be set by a caller and a body carrying them
+		   is rejected.
+		 - Receiver API keys are stored in the database (schema version 4,
+		   new receiver_apikeys table) as their SHA-256, managed with the
+		   lilith receiver_key_create/list/get/update/delete commands. A key
+		   can be scoped to a set of client IPs/subnets and to a set of
+		   instance names; instance patterns may use the '*' and '?'
+		   wildcards (e.g. foo-*). Behind a reverse proxy set
+		   MOJO_REVERSE_PROXY=1 so the client IP scoping works.
+		 - Rename init/ to rc/ and split it into rc/freebsd/ and
+		   rc/systemd/ (the generic cron entry stays at rc/). Add boot
+		   scripts for the Mojolicious daemons: FreeBSD rc.d scripts
+		   rc/freebsd/mojo_lilith and rc/freebsd/mojo_lilith_receiver and
+		   systemd units rc/systemd/mojo_lilith.service and
+		   rc/systemd/mojo_lilith_receiver.service.
 		 - Add a escalation system to the web frontend. Escalation targets
 		   are stored in SQL (schema version 3, new escalation_targets and
 		   escalations tables) and each has a pluggable type; a type is a
@@ -48,7 +69,7 @@ Revision history for Lilith
 		   run periodically, plus ae_list / ae_get / ae_create /
 		   ae_update / ae_delete to manage rules. A systemd service +
 		   timer and a cron example for running auto_escalate every few
-		   minutes ship under init/. The web UI gets a /auto_escalation
+		   minutes ship under rc/. The web UI gets a /auto_escalation
 		   page for managing rules: a visual builder for the match tree
 		   (nested ALL/ANY/NOT groups of field/op/value tests) with a
 		   "Advanced (JSON)" toggle for editing the raw DSL, and a live
@@ -120,6 +141,13 @@ Revision history for Lilith
 		   matching duplicate bind), which PostgreSQL rejects with
 		   "column specified more than once"; the Sagan ingest path now
 		   inserts the correct 24 columns.
+
+		 - Factor the EVE field extraction out of the run() POE closure
+		   into a testable parse_eve() method, with %Lilith::alert_columns
+		   as the shared source of truth for each table's column order
+		   (so the INSERT and the parsed row cannot drift). Adds
+		   t/lilith-parse-eve.t covering Suricata/Sagan/CAPE parsing,
+		   including a regression test for the duplicate-proto fix.
 
 3.0.0	2026-06-25/01:00
 		 - use DBIx::Class::Migration

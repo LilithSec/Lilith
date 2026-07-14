@@ -24,34 +24,36 @@ she sends Virani to fetch them. She also has a lesser kinsman:
 [Lilu](https://github.com/LilithSec/App-Lilu), a cut down Lilith who only
 carries alerts into her book — just the ingest daemon and the extend, for
 sensor boxes that hold no court of their own. See
-[architecture.md](architecture.md) for how she relates.
+[architecture](architecture.md) for how she relates.
 
-- [architecture.md](architecture.md) :: the daemon and its followed EVE
+- [architecture](architecture.md) :: the daemon and its followed EVE
   files, the tables, the CLI, the web frontend, the auto escalation timer,
   and where Lilith sits in the pantheon
 
-- [install.md](install.md) :: dependencies in detail, per-OS install,
+- [install](install.md) :: dependencies in detail, per-OS install,
   setting up PostgreSQL and the schema, and running at boot
 
-- [configuration.md](configuration.md) :: the `lilith.toml` reference and a
+- [configuration](configuration.md) :: the `lilith.toml` reference and a
   complete example
 
-- [usage.md](usage.md) :: the `lilith` CLI, searching the annals, and the
+- [usage](usage.md) :: the `lilith` CLI, searching the annals, and the
   web frontend
 
-- [escalation.md](escalation.md) :: sending word onward — targets, types,
+- [escalation](escalation.md) :: sending word onward — targets, types,
   the escalation CLI, and the auto escalation rule DSL
 
-- [security.md](security.md) :: the heavy part — the web frontend is
+- [security](security.md) :: the heavy part — the web frontend is
   unauthenticated, and several features reach out to the world
 
-- [examples.md](examples.md) :: copy-paste scenarios
+- [examples](examples.md) :: copy-paste scenarios
 
 Also...
 
-- `perldoc Lilith`
-- `perldoc Lilith::Web`
-- `perldoc Lilith::Escalate`
-- `perldoc Lilith::AutoEscalate`
-- `perldoc lilith`
-- `perldoc lilith-web`
+- [Lilith](https://metacpan.org/pod/Lilith)
+- [Lilith::Web](https://metacpan.org/pod/Lilith::Web)
+- [Lilith::Receiver](https://metacpan.org/pod/Lilith::Receiver)
+- [Lilith::Escalate](https://metacpan.org/pod/Lilith::Escalate)
+- [Lilith::AutoEscalate](https://metacpan.org/pod/Lilith::AutoEscalate)
+- [lilith](https://metacpan.org/pod/lilith)
+- [mojo_lilith](https://metacpan.org/pod/mojo_lilith)
+- [mojo_lilith_receiver](https://metacpan.org/pod/mojo_lilith_receiver)

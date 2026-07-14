@@ -1,0 +1,40 @@
+#!/usr/bin/env perl
+
+=head1 NAME
+
+mojo_lilith_receiver - Mojolicious EVE push receiver for Lilith.
+
+=head1 SYNOPSIS
+
+mojo_lilith_receiver daemon
+
+mojo_lilith_receiver daemon -l http://*:8081
+
+LILITH_CONFIG=/etc/lilith.toml mojo_lilith_receiver daemon
+
+=head1 DESCRIPTION
+
+Starts the Lilith EVE receiver using Mojolicious. Remote sensors POST already
+parsed alert rows (the output of L<Lilith/parse_eve>, one key per ingestable
+column) as JSON and they are inserted into the Lilith PostgreSQL database. This
+is the network counterpart to the local EVE-file tailer driven by
+C<lilith monitor>.
+
+The config file is read from the C<LILITH_CONFIG> env var, defaulting to
+C</usr/local/etc/lilith.toml>.
+
+Supports all standard Mojolicious server commands (daemon, prefork, etc).
+
+=head1 SEE ALSO
+
+L<Mojolicious::Commands>, L<Lilith::Receiver>, L<Lilith::Web>
+
+=cut
+
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use lib "$Bin/../lib";
+use Mojolicious::Commands;
+
+Mojolicious::Commands->start_app('Lilith::Receiver');

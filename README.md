@@ -41,7 +41,7 @@ lilith event --id 42 --pcap ./flow.pcap
 lilith esc --id 42 --to soc-hook --note 'C2 traffic'
 
 # and the web frontend
-lilith-web daemon -l http://127.0.0.1:8080
+mojo_lilith daemon -l http://127.0.0.1:8080
 ```
 
 ...with the instances to follow named in `/usr/local/etc/lilith.toml`:
@@ -107,7 +107,9 @@ Also...
 
 - `perldoc Lilith`
 - `perldoc Lilith::Web`
+- `perldoc Lilith::Receiver`
 - `perldoc Lilith::Escalate`
 - `perldoc Lilith::AutoEscalate`
 - `perldoc lilith`
-- `perldoc lilith-web`
+- `perldoc mojo_lilith`
+- `perldoc mojo_lilith_receiver`

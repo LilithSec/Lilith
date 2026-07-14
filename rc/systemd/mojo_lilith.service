@@ -1,0 +1,31 @@
+# systemd service for the Lilith web frontend (Mojolicious).
+#
+# Install into /etc/systemd/system/ and enable:
+#
+#   cp rc/systemd/mojo_lilith.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now mojo_lilith
+#
+# Adjust the listen URL in ExecStart to taste. The frontend is unauthenticated
+# (see docs/security.md), so keep it on localhost or an internal interface and
+# put authentication in front of it. Edit LILITH_CONFIG for a non default
+# config path.
+
+[Unit]
+Description=Lilith web frontend
+Documentation=man:mojo_lilith
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# the same low privilege user that holds Lilith's database credentials
+User=lilith
+Group=lilith
+Environment=LILITH_CONFIG=/usr/local/etc/lilith.toml
+ExecStart=/usr/local/bin/mojo_lilith prefork -l http://127.0.0.1:8080
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

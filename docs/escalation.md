@@ -79,8 +79,8 @@ alert's `auto_escalated` timestamp marks it considered, so it is evaluated
 exactly once no matter how the windows overlap.
 
 Run it periodically — ready made systemd timer units and a cron entry ship
-under `init/`, both every five minutes with `-m 60`; see
-[install.md](install.md). Use `--dry-run` first to see what would fire
+under `rc/`, both every five minutes with `-m 60`; see
+[install](install.md). Use `--dry-run` first to see what would fire
 without sending anything, and `--tables` to restrict a run.
 
 ```shell
@@ -148,7 +148,7 @@ tests) with an "Advanced (JSON)" toggle for the raw DSL, and a live dry-run
 preview against recent alerts that never sends. Creating, editing, or
 deleting rules from the web UI additionally requires
 `auto_escalation_manage_enable`; with it off the page is read only. See
-[security.md](security.md) for why the gates are tiered like that.
+[security](security.md) for why the gates are tiered like that.
 
 ## How the sends happen
 
