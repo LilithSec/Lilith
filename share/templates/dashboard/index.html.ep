@@ -10,11 +10,19 @@
   .db-chart { position: relative; min-height: 0; flex: 1 1 auto; }
   .db-chart > canvas { position: absolute; inset: 0; }
   .db-wbtn { line-height: 1; text-decoration: none; }
+  /* Edit-only controls (Add widget, Reset, per-widget gear/×) are hidden until
+     the Edit toggle adds .db-editing to the body. */
+  body:not(.db-editing) .db-edit-only { display: none; }
+  body:not(.db-editing) .db-handle { cursor: default; }
 </style>
 
 <div class="card mb-3 border-secondary">
   <div class="card-body py-2">
     <div class="row g-2 align-items-end">
+      <div class="col-auto">
+        <label class="form-label">Dashboard</label>
+        <select id="db-board" class="form-select form-select-sm" style="width:170px"></select>
+      </div>
       <div class="col-auto">
         <label class="form-label">Table</label>
         <select id="db-table" class="form-select form-select-sm" style="width:120px">
@@ -38,10 +46,25 @@
           <label class="form-check-label small text-muted" for="db-gpcd"
                  title="Generic Protocol Command Decode">Show GPCD</label>
         </div>
-        <button type="button" id="db-add-widget" class="btn btn-sm btn-outline-success">+ Add widget</button>
-        <button type="button" id="db-reset" class="btn btn-sm btn-outline-secondary"
-                title="Remove all widgets and restore the built-in set">Reset layout</button>
+        <button type="button" id="db-add-widget" class="btn btn-sm btn-outline-success db-edit-only">+ Add widget</button>
+        <button type="button" id="db-reset" class="btn btn-sm btn-outline-secondary db-edit-only"
+                title="Replace this dashboard's widgets with the built-in set">Reset layout</button>
         <button type="button" id="db-refresh" class="btn btn-sm btn-outline-danger">Refresh</button>
+        <div class="btn-group btn-group-sm">
+          <button type="button" id="db-edit" class="btn btn-outline-primary"
+                  title="Toggle edit mode -- rearrange, add, and remove widgets">Edit</button>
+          <button type="button" class="btn btn-outline-primary dropdown-toggle dropdown-toggle-split"
+                  data-bs-toggle="dropdown" aria-expanded="false">
+            <span class="visually-hidden">Dashboard actions</span>
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end">
+            <li><a class="dropdown-item" href="#" id="db-new">New dashboard&hellip;</a></li>
+            <li><a class="dropdown-item" href="#" id="db-rename">Rename&hellip;</a></li>
+            <li><a class="dropdown-item" href="#" id="db-set-default">Set as default</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item text-danger" href="#" id="db-delete">Delete&hellip;</a></li>
+          </ul>
+        </div>
       </div>
     </div>
     <div id="db-error" class="text-warning small mt-2" style="display:none"></div>
@@ -114,6 +137,28 @@
   </div>
 </div>
 
+<!-- New / rename dashboard modal -->
+<div class="modal fade" id="board-modal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content bg-dark text-light border-secondary">
+      <div class="modal-header py-2 border-secondary">
+        <h6 class="modal-title" id="board-modal-title">New dashboard</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label small text-muted mb-1" for="board-name">Name</label>
+        <input type="text" id="board-name" class="form-control form-control-sm" maxlength="64"
+               placeholder="e.g. CAPE overview">
+        <div id="board-modal-error" class="text-warning small mt-2" style="display:none"></div>
+      </div>
+      <div class="modal-footer py-2 border-secondary">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-sm btn-danger" id="board-modal-save">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="/vendor/Chart.js"></script>
 <script src="/vendor/gridstack/gridstack-all.js"></script>
 <script>
@@ -147,12 +192,13 @@
     { type: 'top',        config: { column: 'src_ip', measure: 'distinct_dest_port' },x: 6, y: 20, w: 6, h: 4 }
   ];
 
-  var state   = { table: '<%= $table %>', mins: <%= $go_back_minutes %>, showGpcd: <%= $show_gpcd ? 'true' : 'false' %> };
+  var state   = { board: 'default', table: '<%= $table %>', mins: <%= $go_back_minutes %>, showGpcd: <%= $show_gpcd ? 'true' : 'false' %> };
   var widgets = [];      // [{ id, type, config, x, y, w, h }]
   var charts  = {};      // widget id -> Chart
   var colsCache = {};    // table -> [columns]
   var measuresCache = {}; // table -> [{name,label}]
   var suppressSave = false;
+  var editing = false;   // edit mode: only then can widgets move/add/remove and only then does a change persist
 
   function uid() { return 'w' + Math.random().toString(36).slice(2, 9); }
 
@@ -196,6 +242,17 @@
         return data;
       });
     });
+  }
+  // POST JSON and resolve with the parsed body, throwing the server's error
+  // message on a non-2xx (used by the board-management actions).
+  function postJSON(url, body) {
+    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function(response) {
+        return response.json().then(function(data) {
+          if (!response.ok) { throw new Error(data && data.error ? data.error : ('HTTP ' + response.status)); }
+          return data;
+        });
+      });
   }
   function showError(msg) { var el = document.getElementById('db-error'); el.textContent = 'Error: ' + msg; el.style.display = ''; }
   function clearError() { document.getElementById('db-error').style.display = 'none'; }
@@ -368,9 +425,12 @@
       return { id: n.id, type: widget.type, config: widget.config || {}, x: n.x, y: n.y, w: n.w, h: n.h };
     }).filter(function(n) { return n.type; });
   }
+  // The board's view state travels with its layout, so switching to a board
+  // restores its own table / time range / GPCD setting.
+  function currentSettings() { return { table: state.table, go_back_minutes: state.mins, show_gpcd: state.showGpcd ? 1 : 0 }; }
   function postLayout(layout) {
     return fetch('/api/dashboard/layout', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({ layout: layout }) });
+                                            body: JSON.stringify({ name: state.board, layout: layout, settings: currentSettings() }) });
   }
   var saveTimer;
   function saveLayout() {
@@ -378,14 +438,29 @@
     widgets = layout.map(function(n) { return { id: n.id, type: n.type, config: n.config, x: n.x, y: n.y, w: n.w, h: n.h }; });
     postLayout(layout).catch(function() {});
   }
-  grid.on('change', function() { if (suppressSave) { return; } clearTimeout(saveTimer); saveTimer = setTimeout(saveLayout, 800); });
+  // Only persist while editing: out of edit mode the grid is locked, so a change
+  // event is either a programmatic rebuild (suppressSave) or nothing at all.
+  grid.on('change', function() { if (suppressSave || !editing) { return; } clearTimeout(saveTimer); saveTimer = setTimeout(saveLayout, 800); });
   grid.on('resize', resizeAllCharts);
   grid.on('resizestop', resizeAllCharts);
 
-  // config / remove buttons (event-delegated on the grid)
+  // Enter/leave edit mode: unlock the grid, reveal the edit-only controls (via
+  // the body class the CSS keys off), and relabel the toggle.
+  function setEditing(on) {
+    editing = !!on;
+    document.body.classList.toggle('db-editing', editing);
+    grid.setStatic(!editing);
+    var btn = document.getElementById('db-edit');
+    btn.classList.toggle('active', editing);
+    btn.textContent = editing ? 'Done' : 'Edit';
+  }
+
+  // config / remove buttons (event-delegated on the grid). The buttons are
+  // hidden outside edit mode, but guard anyway.
   grid.el.addEventListener('click', function(event) {
     var btn = event.target.closest('[data-act]'); if (!btn) { return; }
     event.preventDefault();
+    if (!editing) { return; }
     var item = btn.closest('.grid-stack-item'); var id = item && item.getAttribute('gs-id'); if (!id) { return; }
     if (btn.getAttribute('data-act') === 'remove') {
       destroyChart(id); grid.removeWidget(item);
@@ -473,25 +548,112 @@
   function markRange() {
     document.querySelectorAll('#db-range button').forEach(function(b) { b.classList.toggle('active', Number(b.dataset.mins) === state.mins); });
   }
-  document.getElementById('db-table').addEventListener('change', function() { state.table = this.value; refresh(); });
+  // A view control changed: always re-pull; when editing, persist it to the board.
+  function viewChanged() { refresh(); if (editing) { clearTimeout(saveTimer); saveTimer = setTimeout(saveLayout, 400); } }
+  document.getElementById('db-table').addEventListener('change', function() { state.table = this.value; viewChanged(); });
   document.querySelectorAll('#db-range button').forEach(function(b) {
-    b.addEventListener('click', function() { state.mins = Number(this.dataset.mins); markRange(); refresh(); });
+    b.addEventListener('click', function() { state.mins = Number(this.dataset.mins); markRange(); viewChanged(); });
   });
-  document.getElementById('db-gpcd').addEventListener('change', function() { state.showGpcd = this.checked; refresh(); });
+  document.getElementById('db-gpcd').addEventListener('change', function() { state.showGpcd = this.checked; viewChanged(); });
   document.getElementById('db-refresh').addEventListener('click', refresh);
   document.getElementById('db-add-widget').addEventListener('click', function() { openModal(null); });
   document.getElementById('db-reset').addEventListener('click', function() {
-    postLayout([]).then(function() { location.reload(); }).catch(function() { location.reload(); });
+    widgets = seedDefaults(); rebuildGrid(); refresh(); setTimeout(saveLayout, 50);
+  });
+  document.getElementById('db-edit').addEventListener('click', function() { setEditing(!editing); });
+
+  // ---- dashboards (boards) ----
+  function applySettings(s) {
+    s = s || {};
+    if (s.table && /^(?:suricata|sagan|cape)$/.test(s.table)) { state.table = s.table; }
+    if (s.go_back_minutes) { state.mins = Number(s.go_back_minutes); }
+    if (s.show_gpcd !== undefined) { state.showGpcd = !!s.show_gpcd; }
+    document.getElementById('db-table').value = state.table;
+    document.getElementById('db-gpcd').checked = state.showGpcd;
+    markRange();
+  }
+  // (Re)load the board list into the picker; select `want` (or the default).
+  function loadBoards(want) {
+    return getJSON('/api/dashboard/boards').then(function(data) {
+      var boards = data.boards || [];
+      var sel = document.getElementById('db-board');
+      sel.innerHTML = '';
+      boards.forEach(function(b) {
+        var option = document.createElement('option');
+        option.value = b.name;
+        option.textContent = b.name + (b.is_default ? ' ★' : '');
+        sel.appendChild(option);
+      });
+      var target = want || data.default || (boards[0] && boards[0].name) || 'default';
+      sel.value = target; state.board = target;
+      return target;
+    });
+  }
+  // Load one board: apply its saved view state, then its widgets. An unsaved
+  // default board seeds the built-in set; other empty boards start blank.
+  function loadBoard(name) {
+    return getJSON('/api/dashboard/layout?name=' + encodeURIComponent(name)).then(function(data) {
+      state.board = data.name || name;
+      applySettings(data.settings);
+      var layout = (data && Array.isArray(data.layout)) ? data.layout.filter(function(w) { return w && w.type; }) : [];
+      widgets = layout.length
+        ? layout.map(function(w) { return { id: w.id || uid(), type: w.type, config: w.config || {}, x: w.x || 0, y: w.y || 0, w: w.w || 4, h: w.h || 4 }; })
+        : (data.is_default ? seedDefaults() : []);
+      rebuildGrid(); refresh();
+    });
+  }
+  document.getElementById('db-board').addEventListener('change', function() {
+    if (editing) { setEditing(false); }
+    clearError();
+    loadBoard(this.value).catch(function(err) { showError(err.message); });
+  });
+
+  // New and Rename share one modal.
+  var boardModal, boardModalMode = 'new';
+  function getBoardModal() { boardModal = boardModal || new bootstrap.Modal(document.getElementById('board-modal')); return boardModal; }
+  function openBoardModal(mode) {
+    boardModalMode = mode;
+    document.getElementById('board-modal-title').textContent = (mode === 'rename') ? 'Rename dashboard' : 'New dashboard';
+    var input = document.getElementById('board-name');
+    input.value = (mode === 'rename') ? state.board : '';
+    document.getElementById('board-modal-error').style.display = 'none';
+    getBoardModal().show();
+  }
+  document.getElementById('db-new').addEventListener('click', function(event) { event.preventDefault(); openBoardModal('new'); });
+  document.getElementById('db-rename').addEventListener('click', function(event) { event.preventDefault(); openBoardModal('rename'); });
+  document.getElementById('board-modal-save').addEventListener('click', function() {
+    var name = document.getElementById('board-name').value.trim();
+    var errEl = document.getElementById('board-modal-error');
+    if (!name) { errEl.textContent = 'A name is required.'; errEl.style.display = ''; return; }
+    var request = (boardModalMode === 'rename')
+      ? postJSON('/api/dashboard/rename', { name: state.board, to: name })
+      : postJSON('/api/dashboard/boards', { name: name });
+    request.then(function(data) {
+      getBoardModal().hide();
+      var newName = data.name || name;
+      return loadBoards(newName).then(function() { return loadBoard(newName); });
+    }).catch(function(err) { errEl.textContent = err.message; errEl.style.display = ''; });
+  });
+  document.getElementById('db-set-default').addEventListener('click', function(event) {
+    event.preventDefault(); clearError();
+    postJSON('/api/dashboard/default', { name: state.board })
+      .then(function() { return loadBoards(state.board); })
+      .catch(function(err) { showError(err.message); });
+  });
+  document.getElementById('db-delete').addEventListener('click', function(event) {
+    event.preventDefault(); clearError();
+    if (!window.confirm('Delete dashboard "' + state.board + '"? This cannot be undone.')) { return; }
+    postJSON('/api/dashboard/delete', { name: state.board })
+      .then(function() { return loadBoards().then(function(name) { return loadBoard(name); }); })
+      .catch(function(err) { showError(err.message); });
   });
 
   // ---- boot ----
   function seedDefaults() { return DEFAULT_WIDGETS.map(function(widget) { return { id: uid(), type: widget.type, config: widget.config, x: widget.x, y: widget.y, w: widget.w, h: widget.h }; }); }
   markRange();
-  getJSON('/api/dashboard/layout').then(function(data) {
-    var layout = (data && Array.isArray(data.layout)) ? data.layout.filter(function(widget) { return widget && widget.type; }) : [];
-    widgets = layout.length
-      ? layout.map(function(widget) { return { id: widget.id || uid(), type: widget.type, config: widget.config || {}, x: widget.x || 0, y: widget.y || 0, w: widget.w || 4, h: widget.h || 4 }; })
-      : seedDefaults();
-  }).catch(function() { widgets = seedDefaults(); }).then(function() { rebuildGrid(); refresh(); });
+  setEditing(false);
+  loadBoards().then(function(name) { return loadBoard(name); }).catch(function() {
+    widgets = seedDefaults(); rebuildGrid(); refresh();
+  });
 })();
 </script>

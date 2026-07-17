@@ -2652,54 +2652,176 @@ sub stats {
 =head2 dashboard_get
 
     my $board = $lilith->dashboard_get( name => 'default' );
+    my $board = $lilith->dashboard_get;    # the default board
 
-Returns a saved dashboard board as C<< { name, layout, is_default } >>, where
-C<layout> is the decoded JSON array of widget placements. Returns C<undef> when
-no board of that name exists. C<name> defaults to C<default>.
+Returns a saved dashboard board as
+C<< { name, layout, settings, is_default } >>, where C<layout> is the decoded
+JSON array of widget placements and C<settings> is the decoded JSON hash of that
+board's view state (table, go_back_minutes, show_gpcd). Returns C<undef> when no
+board of that name exists. With no (or an empty) C<name>, returns the board
+flagged C<is_default> -- the one loaded first, which is not necessarily the board
+literally named C<default> once another has been set default.
 
 =cut
 
 sub dashboard_get {
 	my ( $self, %opts ) = @_;
 
-	my $name = defined $opts{name} && $opts{name} ne '' ? $opts{name} : 'default';
+	my $name = defined $opts{name} && $opts{name} ne '' ? $opts{name} : undef;
 
 	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } );
-	my $sth = $dbh->prepare('select name, layout, is_default from dashboards where name = ?');
-	$sth->execute($name);
+	my $sth;
+	if ( defined $name ) {
+		$sth = $dbh->prepare('select name, layout, settings, is_default from dashboards where name = ?');
+		$sth->execute($name);
+	} else {
+		# No name asked -> the board flagged default (loaded first); fall back to
+		# the lowest id so a database with no default flagged still returns a board.
+		$sth = $dbh->prepare(
+			'select name, layout, settings, is_default from dashboards order by is_default desc, id asc limit 1');
+		$sth->execute;
+	}
 	my $row = $sth->fetchrow_hashref;
 	return undef unless $row;
 
-	my $layout = eval { decode_json( $row->{layout} ) };
-	$row->{layout}     = ( ref $layout eq 'ARRAY' ) ? $layout : [];
-	$row->{is_default} = $row->{is_default}         ? 1       : 0;
+	my $layout   = eval { decode_json( $row->{layout} ) };
+	my $settings = eval { decode_json( $row->{settings} ) };
+	$row->{layout}     = ( ref $layout eq 'ARRAY' )  ? $layout   : [];
+	$row->{settings}   = ( ref $settings eq 'HASH' ) ? $settings : {};
+	$row->{is_default} = $row->{is_default}          ? 1         : 0;
 
 	return $row;
 } ## end sub dashboard_get
 
 =head2 dashboard_save
 
-    $lilith->dashboard_save( name => 'default', layout => \@placements );
+    $lilith->dashboard_save( name => 'default', layout => \@placements, settings => \%settings );
 
 Upserts a dashboard board by name, storing C<layout> (an array ref of widget
-placements) as JSON. C<name> defaults to C<default>.
+placements) and C<settings> (a hash ref of the board's view state) as JSON.
+C<name> defaults to C<default>; a missing C<layout>/C<settings> stores an empty
+array/hash.
 
 =cut
 
 sub dashboard_save {
 	my ( $self, %opts ) = @_;
 
-	my $name   = defined $opts{name} && $opts{name} ne '' ? $opts{name}   : 'default';
-	my $layout = ( ref $opts{layout} eq 'ARRAY' )         ? $opts{layout} : [];
-	my $json   = encode_json($layout);
+	my $name          = defined $opts{name} && $opts{name} ne '' ? $opts{name}     : 'default';
+	my $layout        = ( ref $opts{layout} eq 'ARRAY' )         ? $opts{layout}   : [];
+	my $settings      = ( ref $opts{settings} eq 'HASH' )        ? $opts{settings} : {};
+	my $layout_json   = encode_json($layout);
+	my $settings_json = encode_json($settings);
 
 	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } );
-	my $sth = $dbh->prepare( 'insert into dashboards (name, layout, updated) values (?, ?::jsonb, now())'
-			. ' on conflict (name) do update set layout = excluded.layout, updated = now()' );
-	$sth->execute( $name, $json );
+	my $sth
+		= $dbh->prepare(
+			  'insert into dashboards (name, layout, settings, updated) values (?, ?::jsonb, ?::jsonb, now())'
+			. ' on conflict (name) do update set layout = excluded.layout,'
+			. ' settings = excluded.settings, updated = now()' );
+	$sth->execute( $name, $layout_json, $settings_json );
 
 	return 1;
 } ## end sub dashboard_save
+
+=head2 dashboard_list
+
+    my $boards = $lilith->dashboard_list;
+
+Returns all dashboard boards as an array ref of
+C<< { name, is_default, updated } >>, ordered default-first then by name -- the
+list that drives the dashboard picker.
+
+=cut
+
+sub dashboard_list {
+	my ($self) = @_;
+
+	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } );
+	my $rows
+		= $dbh->selectall_arrayref(
+			'select name, is_default, updated from dashboards order by is_default desc, name asc',
+			{ Slice => {} } );
+	for my $row (@$rows) { $row->{is_default} = $row->{is_default} ? 1 : 0; }
+
+	return $rows;
+} ## end sub dashboard_list
+
+=head2 dashboard_delete
+
+    $lilith->dashboard_delete( name => 'scratch' );
+
+Deletes the named board, returning the number of rows removed (0 if no such
+board). Callers are responsible for refusing to delete the default or last
+board; this is the raw delete.
+
+=cut
+
+sub dashboard_delete {
+	my ( $self, %opts ) = @_;
+
+	my $name = defined $opts{name} ? $opts{name} : '';
+	return 0 unless $name ne '';
+
+	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } );
+	return $dbh->do( 'delete from dashboards where name = ?', undef, $name ) + 0;
+}
+
+=head2 dashboard_rename
+
+    $lilith->dashboard_rename( name => 'old', to => 'new' );
+
+Renames a board, returning the number of rows changed (0 if the source board
+does not exist). A collision with an existing name raises (the unique
+constraint), so callers should check first.
+
+=cut
+
+sub dashboard_rename {
+	my ( $self, %opts ) = @_;
+
+	my $name = defined $opts{name} ? $opts{name} : '';
+	my $to   = defined $opts{to}   ? $opts{to}   : '';
+	return 0 unless $name ne '' && $to ne '';
+
+	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } );
+	return $dbh->do( 'update dashboards set name = ?, updated = now() where name = ?', undef, $to, $name ) + 0;
+} ## end sub dashboard_rename
+
+=head2 dashboard_set_default
+
+    $lilith->dashboard_set_default( name => 'ops' );
+
+Makes the named board the default (the one loaded first). Clears the flag from
+every other board and sets it on this one inside a transaction, so there is
+always exactly one default. Returns the number of rows set default (0 if no such
+board).
+
+=cut
+
+sub dashboard_set_default {
+	my ( $self, %opts ) = @_;
+
+	my $name = defined $opts{name} ? $opts{name} : '';
+	return 0 unless $name ne '';
+
+	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } );
+
+	my $set = 0;
+	$dbh->begin_work;
+	eval {
+		$dbh->do('update dashboards set is_default = FALSE where is_default');
+		$set = $dbh->do( 'update dashboards set is_default = TRUE where name = ?', undef, $name ) + 0;
+		$dbh->commit;
+		1;
+	} or do {
+		my $err = $@;
+		eval { $dbh->rollback };
+		die $err;
+	};
+
+	return $set;
+} ## end sub dashboard_set_default
 
 =head1 AUTHOR
 

@@ -41,6 +41,13 @@ sub app_for {
 		->element_exists( '#wm-style option[value="pie"]',                    'modal offers a pie style' )
 		->element_exists( 'input#wm-limit[type="number"][min="1"][max="50"]', 'modal has a 1-50 count input' )
 		->element_exists( '#db-reset',                                        'has the reset-layout button' )
+		->element_exists( 'select#db-board',                                  'has the dashboard selector' )
+		->element_exists( '#db-edit',                                         'has the Edit toggle' )
+		->element_exists( '#db-new',                                          'has the New dashboard action' )
+		->element_exists( '#db-rename',                                       'has the Rename action' )
+		->element_exists( '#db-set-default',                                  'has the Set-as-default action' )
+		->element_exists( '#db-delete',                                       'has the Delete action' )
+		->element_exists( '#board-modal',                                     'has the board-name modal' )
 		->element_exists( 'script[src="/vendor/gridstack/gridstack-all.js"]', 'pulls in Gridstack' )
 		->element_exists( 'script[src="/vendor/Chart.js"]',                   'pulls in Chart.js' );
 
@@ -186,6 +193,60 @@ SKIP: {
 
 	# A malformed body is rejected.
 	$t->post_ok( '/api/dashboard/layout' => json => { nope => 1 } )->status_is( 400, 'bad layout body is a 400' );
+
+	# ---- multiple dashboards + per-board settings ----
+	# The list starts with just the seeded default board.
+	$t->get_ok('/api/dashboard/boards')
+		->status_is( 200, 'boards ok' )
+		->json_is( '/default',             'default', 'default board is the default' )
+		->json_is( '/boards/0/name',       'default', 'default board is listed' )
+		->json_is( '/boards/0/is_default', 1,         'and flagged default' );
+
+	# A board's view state (table/range/gpcd) rides along with the layout save and
+	# reads back; an unknown settings key is dropped by the sanitizer.
+	$t->post_ok(
+		'/api/dashboard/layout' => json => {
+			name     => 'default',
+			layout   => [],
+			settings => { table => 'cape', go_back_minutes => 360, show_gpcd => 1, bogus => 'x' }
+		}
+	)->status_is( 200, 'default board settings saved' );
+	$t->get_ok('/api/dashboard/layout')
+		->json_is( '/settings/table',           'cape', 'saved board table round-trips' )
+		->json_is( '/settings/go_back_minutes', 360,    'saved board range round-trips' )
+		->json_is( '/settings/show_gpcd',       1,      'saved board gpcd round-trips' )
+		->json_hasnt( '/settings/bogus', 'unknown settings key was stripped' );
+
+	# Create a second board; it appears, empty and non-default.
+	$t->post_ok( '/api/dashboard/boards' => json => { name => 'ops' } )
+		->status_is( 200, 'board created' )
+		->json_is( '/name', 'ops', 'create echoes the name' );
+	$t->get_ok('/api/dashboard/layout?name=ops')
+		->json_is( '/name',       'ops', 'named board fetched' )
+		->json_is( '/is_default', 0,     'new board is not default' )
+		->json_is( '/layout',     [],    'new board starts empty' );
+
+	# A duplicate name and an invalid name are refused.
+	$t->post_ok( '/api/dashboard/boards' => json => { name => 'ops' } )->status_is( 400, 'duplicate name refused' );
+	$t->post_ok( '/api/dashboard/boards' => json => { name => 'bad/name' } )->status_is( 400, 'invalid name refused' );
+
+	# Move the default flag to the new board; the no-name layout endpoint follows it.
+	$t->post_ok( '/api/dashboard/default' => json => { name => 'ops' } )->status_is( 200, 'set default ok' );
+	$t->get_ok('/api/dashboard/boards')->json_is( '/default', 'ops', 'default moved to ops' );
+	$t->get_ok('/api/dashboard/layout')->json_is( '/name',    'ops', 'no-name layout follows the default flag' );
+
+	# Rename it.
+	$t->post_ok( '/api/dashboard/rename' => json => { name => 'ops', to => 'soc' } )->status_is( 200, 'rename ok' );
+	$t->get_ok('/api/dashboard/layout?name=soc')->json_is( '/name', 'soc', 'board renamed' );
+
+	# The default board is protected from deletion; a non-default one deletes.
+	$t->post_ok( '/api/dashboard/delete' => json => { name => 'soc' } )
+		->status_is( 400, 'deleting the default board is refused' );
+	$t->post_ok( '/api/dashboard/delete' => json => { name => 'default' } )
+		->status_is( 200, 'non-default board deleted' );
+	# The last remaining board is also protected.
+	$t->post_ok( '/api/dashboard/delete' => json => { name => 'soc' } )
+		->status_is( 400, 'deleting the last board is refused' );
 
 	$dbh->disconnect;
 	$pg->stop;

@@ -69,6 +69,14 @@ sub table_exists {
 	return $hit ? 1 : 0;
 }
 
+sub column_exists {
+	my ( $dbh, $table, $column ) = @_;
+	my ($hit)
+		= $dbh->selectrow_array( 'select 1 from information_schema.columns where table_name = ? and column_name = ?',
+			undef, $table, $column );
+	return $hit ? 1 : 0;
+}
+
 # ---------------------------------------------------------------------------
 # Phase 1: deploy at the current version into a fresh database.
 # ---------------------------------------------------------------------------
@@ -108,6 +116,9 @@ sub table_exists {
 	# version 8: the MITRE tactic/technique partial expression indexes.
 	ok( index_exists( $dbh, 'suricata_alerts_mitre_tactic_idx' ),    'deploy created the MITRE tactic index' );
 	ok( index_exists( $dbh, 'suricata_alerts_mitre_technique_idx' ), 'deploy created the MITRE technique index' );
+
+	# version 9: the per-dashboard settings column.
+	ok( column_exists( $dbh, 'dashboards', 'settings' ), 'deploy added the dashboards.settings column' );
 	$dbh->disconnect;
 
 	my ($sv_after) = run_cmd('Lilith::CLI::Command::SchemaVersion');
@@ -145,9 +156,10 @@ sub table_exists {
 	my ($ver)
 		= $dbh->selectrow_array('select version from dbix_class_deploymenthandler_versions order by id desc limit 1');
 	is( $ver, $code, 'version storage records the current version after the upgrade' );
-	ok( table_exists( $dbh, 'dashboards' ), 'the upgrade created the dashboards table' );
+	ok( table_exists( $dbh, 'dashboards' ),                       'the upgrade created the dashboards table' );
 	ok( index_exists( $dbh, 'suricata_alerts_severity_ts_idx' ),  'the upgrade created the severity index' );
 	ok( index_exists( $dbh, 'suricata_alerts_mitre_tactic_idx' ), 'the upgrade created the MITRE tactic index' );
+	ok( column_exists( $dbh, 'dashboards', 'settings' ),          'the upgrade added the dashboards.settings column' );
 	$dbh->disconnect;
 
 	my ($sv) = run_cmd('Lilith::CLI::Command::SchemaVersion');

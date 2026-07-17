@@ -346,6 +346,11 @@ sub startup {
 	$r->get('/api/dashboard/measures')->to('dashboard#measures');
 	$r->get('/api/dashboard/layout')->to('dashboard#layout');
 	$r->post('/api/dashboard/layout')->to('dashboard#layout_save');
+	$r->get('/api/dashboard/boards')->to('dashboard#boards');
+	$r->post('/api/dashboard/boards')->to('dashboard#board_create');
+	$r->post('/api/dashboard/rename')->to('dashboard#board_rename');
+	$r->post('/api/dashboard/delete')->to('dashboard#board_delete');
+	$r->post('/api/dashboard/default')->to('dashboard#board_default');
 	$r->get('/event/:table/:id')->to('event#view');
 	$r->get('/event/:table/:id/body/:which/zip')->to('event#body_zip');
 	$r->get('/event/:table/:id/pcap')->to('event#pcap');

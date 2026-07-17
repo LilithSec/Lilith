@@ -10,24 +10,44 @@ in the navbar (the frontend is unauthenticated — see [security](security.md)).
 
 Along the top:
 
-- **Table** — which annal the widgets read: Suricata, Sagan, or CAPE. This is
-  global; every widget and the stat cards use it.
-- **Time range** — 1h / 6h / 24h / 7d. Global.
+- **Dashboard** — which saved board to show. Pick another to switch to it; the
+  star (★) marks the default board (the one loaded first).
+- **Table** — which annal the widgets read: Suricata, Sagan, or CAPE. Applies to
+  every widget and the stat cards on the current board.
+- **Time range** — 1h / 6h / 24h / 7d.
 - **Show GPCD** — off by default. When off, `Generic Protocol Command Decode`
   alerts are excluded everywhere (as the search page hides them). Tick it to
   include them. Only affects tables with a classification (Suricata/Sagan).
-- **+ Add widget** — opens the widget picker (see below).
-- **Reset layout** — removes every widget and restores the built-in set.
 - **Refresh** — re-pulls all data for the current controls.
+- **Edit** — toggles edit mode (see below). Its dropdown holds the board actions:
+  **New dashboard**, **Rename**, **Set as default**, and **Delete**.
+
+The **Table**, **Time range**, and **Show GPCD** controls are per-board: each
+board remembers its own, restored when you switch to it. Changing them just
+re-draws until you save (in edit mode).
 
 Below the controls is a fixed strip of stat cards (total alerts, unique sources,
 a per-table detail count, escalated, and the busiest sensor), and then the
 widget grid.
 
-Widgets **drag by their title** to reorder and **resize from the bottom-right
-corner**; each has a gear to reconfigure and an × to remove. The whole layout is
-saved to the database as a single global board named `default` — the web UI has
-no accounts, so it is shared, not per-user, and persists across reloads.
+## Edit mode
+
+The board is **read-only until you click Edit**. In view mode the grid is
+locked — widgets can't be moved or resized, so casually dragging one never
+overwrites the saved layout. Clicking **Edit** unlocks it and reveals the
+editing controls:
+
+- **+ Add widget** — opens the widget picker (see below).
+- **Reset layout** — replaces this board's widgets with the built-in set.
+- Each widget grows a gear (reconfigure) and an × (remove), **drags by its
+  title** to reorder, and **resizes from the bottom-right corner**.
+
+While editing, layout and control changes are saved automatically; click
+**Done** to leave edit mode and lock the grid again.
+
+Boards are stored in the database and, because the web UI has no accounts, are
+**shared, not per-user**. They persist across reloads. A brand-new board starts
+empty; the built-in `default` board comes seeded with the widget set below.
 
 ## Widget types
 

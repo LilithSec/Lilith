@@ -61,6 +61,39 @@ sub _json {
 	return $self->render( json => $data );
 } ## end sub _json
 
+# A dashboard name a user may create: trimmed, 1-64 chars of a conservative set,
+# so a board name is safe to show and to round-trip. Returns the cleaned name or
+# undef when it does not qualify. Plain function, not a method.
+sub _clean_name {
+	my ($name) = @_;
+	return undef unless defined $name;
+	$name =~ s/^\s+//;
+	$name =~ s/\s+$//;
+	return undef unless length $name && length $name <= 64;
+	return undef unless $name =~ /\A[A-Za-z0-9 ._-]+\z/;
+	return $name;
+}
+
+# The view state a board may carry, whitelisted the same way widget config is:
+# the table type, the go_back_minutes window, and the show_gpcd flag. Unknown
+# keys and bad values are dropped, so a posted settings blob cannot smuggle
+# anything into storage.
+sub _clean_settings {
+	my ($settings) = @_;
+	return {} unless ref $settings eq 'HASH';
+
+	my %clean;
+	my $table = $settings->{table};
+	$clean{table} = $table if defined $table && $table =~ /\A(?:suricata|sagan|cape)\z/;
+
+	my $mins = $settings->{go_back_minutes};
+	$clean{go_back_minutes} = int($mins) if defined $mins && $mins =~ /\A[0-9]+\z/ && $mins > 0;
+
+	$clean{show_gpcd} = ( $settings->{show_gpcd} ? 1 : 0 ) if exists $settings->{show_gpcd};
+
+	return \%clean;
+} ## end sub _clean_settings
+
 =head2 index
 
 C<GET /dashboard> -- the shell page. Data is pulled by the browser from the API
@@ -231,21 +264,31 @@ sub countries {
 
 =head2 layout
 
-C<GET /api/dashboard/layout> -- the saved global dashboard layout, as
-C<< { name, layout => [ { id, x, y, w, h }, ... ], is_default } >>. Falls back
-to an empty layout (the panels' built-in default positions) when none is saved.
+C<GET /api/dashboard/layout?name=> -- one saved dashboard board, as
+C<< { name, layout => [ { id, x, y, w, h }, ... ], settings, is_default } >>.
+With no C<name> the default board (the one flagged C<is_default>) is returned.
+Falls back to an empty layout (the panels' built-in default positions) when the
+board is not saved.
 
 =cut
 
 sub layout {
-	my $self = shift;
+	my $self  = shift;
+	my $name  = $self->param('name');
+	my $named = defined $name && $name ne '';
 	return $self->_json(
 		sub {
-			my $board = $self->lilith->dashboard_get( name => 'default' );
-			return $board || { name => 'default', layout => [], is_default => 1 };
+			my $board = $self->lilith->dashboard_get( $named ? ( name => $name ) : () );
+			return $board if $board;
+			return {
+				name       => $named ? $name : 'default',
+				layout     => [],
+				settings   => {},
+				is_default => $named ? 0 : 1,
+			};
 		}
 	);
-}
+} ## end sub layout
 
 =head2 columns
 
@@ -284,9 +327,11 @@ sub measures {
 
 =head2 layout_save
 
-C<POST /api/dashboard/layout> -- persist the global dashboard layout. The body is
-JSON C<< { layout => [ { id, type, config, x, y, w, h }, ... ] } >>; anything else
-is a 400. Widgets without a known type, and any unknown config keys, are dropped.
+C<POST /api/dashboard/layout> -- persist a dashboard board. The body is JSON
+C<< { name, layout => [ { id, type, config, x, y, w, h }, ... ], settings } >>;
+a missing/invalid layout array is a 400. C<name> defaults to the C<default>
+board and, when given, must be a valid board name. Widgets without a known type,
+any unknown config keys, and unknown settings keys are dropped.
 
 =cut
 
@@ -296,6 +341,15 @@ sub layout_save {
 	my $body = $self->req->json;
 	unless ( ref $body eq 'HASH' && ref $body->{layout} eq 'ARRAY' ) {
 		return $self->render( json => { error => 'expected a JSON body with a layout array' }, status => 400 );
+	}
+
+	# name defaults to the default board when omitted (back-compat with the
+	# single-board API); when supplied it must be a valid board name.
+	my $name;
+	if ( defined $body->{name} && $body->{name} ne '' ) {
+		$name = _clean_name( $body->{name} );
+		return $self->render( json => { error => 'invalid dashboard name' }, status => 400 )
+			unless defined $name;
 	}
 
 	# Keep only known widget types, their whitelisted config keys, and the integer
@@ -329,12 +383,139 @@ sub layout_save {
 		);
 	} ## end for my $w ( @{ $body->{layout} } )
 
+	my $settings = _clean_settings( $body->{settings} );
+
 	return $self->_json(
 		sub {
-			$self->lilith->dashboard_save( name => 'default', layout => \@clean );
+			$self->lilith->dashboard_save(
+				( defined $name ? ( name => $name ) : () ),
+				layout   => \@clean,
+				settings => $settings,
+			);
 			return { ok => 1, count => scalar @clean };
 		}
 	);
 } ## end sub layout_save
+
+=head2 boards
+
+C<GET /api/dashboard/boards> -- the list of saved boards for the picker, as
+C<< { boards => [ { name, is_default, updated }, ... ], default } >>.
+
+=cut
+
+sub boards {
+	my $self = shift;
+	return $self->_json(
+		sub {
+			my $list = $self->lilith->dashboard_list;
+			my ($default) = map { $_->{name} } grep { $_->{is_default} } @$list;
+			return { boards => $list, default => $default };
+		}
+	);
+} ## end sub boards
+
+=head2 board_create
+
+C<POST /api/dashboard/boards> -- create a new empty board. Body is
+C<< { name } >>; an invalid name is a 400, and a name already in use is a 400.
+
+=cut
+
+sub board_create {
+	my $self = shift;
+	my $body = $self->req->json;
+	my $name = ( ref $body eq 'HASH' ) ? _clean_name( $body->{name} ) : undef;
+	return $self->render( json => { error => 'invalid dashboard name' }, status => 400 )
+		unless defined $name;
+
+	return $self->_json(
+		sub {
+			die "a dashboard named '$name' already exists\n"
+				if $self->lilith->dashboard_get( name => $name );
+			$self->lilith->dashboard_save( name => $name, layout => [], settings => {} );
+			return { ok => 1, name => $name };
+		}
+	);
+} ## end sub board_create
+
+=head2 board_rename
+
+C<POST /api/dashboard/rename> -- rename a board. Body is C<< { name, to } >>; an
+invalid/missing name or a collision with an existing board is a 400.
+
+=cut
+
+sub board_rename {
+	my $self = shift;
+	my $body = $self->req->json;
+	my $from = ( ref $body eq 'HASH' ) ? $body->{name}              : undef;
+	my $to   = ( ref $body eq 'HASH' ) ? _clean_name( $body->{to} ) : undef;
+	return $self->render( json => { error => 'missing source name' }, status => 400 )
+		unless defined $from && $from ne '';
+	return $self->render( json => { error => 'invalid target name' }, status => 400 )
+		unless defined $to;
+
+	return $self->_json(
+		sub {
+			die "no dashboard named '$from'\n" unless $self->lilith->dashboard_get( name => $from );
+			die "a dashboard named '$to' already exists\n"
+				if $to ne $from && $self->lilith->dashboard_get( name => $to );
+			$self->lilith->dashboard_rename( name => $from, to => $to );
+			return { ok => 1, name => $to };
+		}
+	);
+} ## end sub board_rename
+
+=head2 board_delete
+
+C<POST /api/dashboard/delete> -- delete a board. Body is C<< { name } >>. The
+default board and the last remaining board are protected (400).
+
+=cut
+
+sub board_delete {
+	my $self = shift;
+	my $body = $self->req->json;
+	my $name = ( ref $body eq 'HASH' ) ? $body->{name} : undef;
+	return $self->render( json => { error => 'missing dashboard name' }, status => 400 )
+		unless defined $name && $name ne '';
+
+	return $self->_json(
+		sub {
+			my $board = $self->lilith->dashboard_get( name => $name );
+			die "no dashboard named '$name'\n" unless $board;
+			die "cannot delete the default dashboard; set another as default first\n"
+				if $board->{is_default};
+			die "cannot delete the only dashboard\n"
+				if @{ $self->lilith->dashboard_list } <= 1;
+			$self->lilith->dashboard_delete( name => $name );
+			return { ok => 1 };
+		}
+	);
+} ## end sub board_delete
+
+=head2 board_default
+
+C<POST /api/dashboard/default> -- make a board the default (loaded first). Body
+is C<< { name } >>. Moves the C<is_default> flag off every other board.
+
+=cut
+
+sub board_default {
+	my $self = shift;
+	my $body = $self->req->json;
+	my $name = ( ref $body eq 'HASH' ) ? $body->{name} : undef;
+	return $self->render( json => { error => 'missing dashboard name' }, status => 400 )
+		unless defined $name && $name ne '';
+
+	return $self->_json(
+		sub {
+			die "no dashboard named '$name'\n" unless $self->lilith->dashboard_get( name => $name );
+			$self->lilith->dashboard_set_default( name => $name );
+			return { ok => 1, default => $name };
+		}
+	);
+} ## end sub board_default
 
 1;
