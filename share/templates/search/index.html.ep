@@ -385,30 +385,30 @@ var _orderByCols = {
              'md5','sha1','sha256']
 };
 function syncOrderBy(keepVal) {
-  var sel  = document.getElementById('table-sel').value;
-  var ob   = document.getElementById('order-by');
-  var prev = keepVal ? ob.value : null;
-  var cols = _orderByCols[sel] || _orderByCols.suricata;
-  ob.innerHTML = '';
-  cols.forEach(function(c) {
-    var opt = document.createElement('option');
-    opt.value = c; opt.textContent = c;
-    ob.appendChild(opt);
+  var table = document.getElementById('table-sel').value;
+  var orderBy = document.getElementById('order-by');
+  var prev = keepVal ? orderBy.value : null;
+  var cols = _orderByCols[table] || _orderByCols.suricata;
+  orderBy.innerHTML = '';
+  cols.forEach(function(column) {
+    var option = document.createElement('option');
+    option.value = column; option.textContent = column;
+    orderBy.appendChild(option);
   });
   // Restore previous value if still valid, otherwise use table default
   if (prev && cols.indexOf(prev) !== -1) {
-    ob.value = prev;
+    orderBy.value = prev;
   } else {
-    ob.value = cols[0];
+    orderBy.value = cols[0];
   }
   var ihField = document.getElementById('instance-host-field');
-  ihField.style.display = (sel === 'sagan' || sel === 'cape') ? '' : 'none';
+  ihField.style.display = (table === 'sagan' || table === 'cape') ? '' : 'none';
   var capeFilters = document.getElementById('cape-filters');
-  capeFilters.style.display = (sel === 'cape') ? '' : 'none';
+  capeFilters.style.display = (table === 'cape') ? '' : 'none';
   var ruleFilters = document.getElementById('rule-filters');
-  ruleFilters.style.display = (sel === 'cape') ? 'none' : '';
+  ruleFilters.style.display = (table === 'cape') ? 'none' : '';
   var classFilter = document.getElementById('class-filter');
-  classFilter.style.display = (sel === 'cape') ? 'none' : 'flex';
+  classFilter.style.display = (table === 'cape') ? 'none' : 'flex';
 }
 function applyHostCol(show) {
   document.querySelectorAll('.col-host').forEach(function(el) {
@@ -426,8 +426,8 @@ function applyGeoCity(show) {
 // Bind a class of clickable result cells to a filter input + submit.
 function bindFilter(selector, inputId, dataKey) {
   document.querySelectorAll(selector).forEach(function(el) {
-    el.addEventListener('click', function(e) {
-      e.preventDefault();
+    el.addEventListener('click', function(event) {
+      event.preventDefault();
       document.getElementById(inputId).value = this.dataset[dataKey];
       document.getElementById('search-form').submit();
     });
@@ -441,35 +441,35 @@ function initSort() {
   var thead = table.querySelector('thead');
   var tbody = table.querySelector('tbody');
   if (!thead || !tbody) { return; }
-  var ths = Array.from(thead.querySelectorAll('th'));
+  var headerCells = Array.from(thead.querySelectorAll('th'));
   var sortCol = -1, sortAsc = true;
 
-  ths.forEach(function(th) {
-    th.dataset.origText = th.textContent;
-    th.style.cursor = 'pointer';
-    th.style.userSelect = 'none';
+  headerCells.forEach(function(headerCell) {
+    headerCell.dataset.origText = headerCell.textContent;
+    headerCell.style.cursor = 'pointer';
+    headerCell.style.userSelect = 'none';
   });
 
-  ths.forEach(function(th, idx) {
-    th.addEventListener('click', function() {
+  headerCells.forEach(function(headerCell, idx) {
+    headerCell.addEventListener('click', function() {
       if (sortCol === idx) {
         sortAsc = !sortAsc;
       } else {
         sortCol = idx;
         sortAsc = true;
       }
-      ths.forEach(function(h) { h.textContent = h.dataset.origText; });
-      th.textContent = th.dataset.origText + (sortAsc ? ' ▲' : ' ▼');
+      headerCells.forEach(function(otherHeaderCell) { otherHeaderCell.textContent = otherHeaderCell.dataset.origText; });
+      headerCell.textContent = headerCell.dataset.origText + (sortAsc ? ' ▲' : ' ▼');
 
       var rows = Array.from(tbody.querySelectorAll('tr'));
       rows.sort(function(a, b) {
-        var ac = a.cells[idx] ? a.cells[idx].textContent.trim() : '';
-        var bc = b.cells[idx] ? b.cells[idx].textContent.trim() : '';
-        var an = parseFloat(ac), bn = parseFloat(bc);
-        var cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : ac.localeCompare(bc);
+        var aText = a.cells[idx] ? a.cells[idx].textContent.trim() : '';
+        var bText = b.cells[idx] ? b.cells[idx].textContent.trim() : '';
+        var aNum = parseFloat(aText), bNum = parseFloat(bText);
+        var cmp = (!isNaN(aNum) && !isNaN(bNum)) ? aNum - bNum : aText.localeCompare(bText);
         return sortAsc ? cmp : -cmp;
       });
-      rows.forEach(function(r) { tbody.appendChild(r); });
+      rows.forEach(function(row) { tbody.appendChild(row); });
     });
   });
 }
@@ -508,14 +508,14 @@ function initResults() {
 function setRefreshStatus(ok) {
   var el = document.getElementById('ar-status');
   if (!el) { return; }
-  var d = new Date();
+  var now = new Date();
   function p(n) { return (n < 10 ? '0' : '') + n; }
-  var t = p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  var timeStr = p(now.getHours()) + ':' + p(now.getMinutes()) + ':' + p(now.getSeconds());
   if (ok) {
-    el.textContent = 'updated ' + t;
+    el.textContent = 'updated ' + timeStr;
     el.className = 'small text-muted';
   } else {
-    el.textContent = '⚠ refresh failed ' + t + ' (showing stale data)';
+    el.textContent = '⚠ refresh failed ' + timeStr + ' (showing stale data)';
     el.className = 'small text-warning';
   }
   el.style.whiteSpace = 'nowrap';
@@ -526,7 +526,7 @@ function currentRowIds() {
   var ids = new Set();
   var box = document.getElementById('search-results');
   if (box) {
-    box.querySelectorAll('tbody tr .event-link').forEach(function(a) { ids.add(a.textContent.trim()); });
+    box.querySelectorAll('tbody tr .event-link').forEach(function(link) { ids.add(link.textContent.trim()); });
   }
   return ids;
 }
@@ -539,7 +539,7 @@ function refreshResults(done) {
   var url = new URL(window.location.href);
   url.searchParams.set('partial', '1');
   fetch(url.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-    .then(function(r) { if (!r.ok) { throw new Error('HTTP ' + r.status); } return r.text(); })
+    .then(function(response) { if (!response.ok) { throw new Error('HTTP ' + response.status); } return response.text(); })
     .then(function(html) {
       var fresh   = new DOMParser().parseFromString(html, 'text/html').getElementById('search-results');
       var current = document.getElementById('search-results');

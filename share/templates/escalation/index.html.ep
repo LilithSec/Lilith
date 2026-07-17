@@ -171,11 +171,11 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   // populate the type select
-  ESC_TYPES.forEach(function(t) {
-    var opt = document.createElement('option');
-    opt.value = t.type;
-    opt.textContent = t.type;
-    typeEl.appendChild(opt);
+  ESC_TYPES.forEach(function(escType) {
+    var option = document.createElement('option');
+    option.value = escType.type;
+    option.textContent = escType.type;
+    typeEl.appendChild(option);
   });
 
   // Build a repeatable "list" config field. Returns the container element,
@@ -184,52 +184,52 @@ document.addEventListener('DOMContentLoaded', function() {
   // data-config-list-col input per column, otherwise a single
   // data-config-list-item input. An empty spare row and an add button let
   // the user grow the list.
-  function buildListField(f, values) {
+  function buildListField(field, values) {
     var container = document.createElement('div');
     var rows = document.createElement('div');
     rows.className = 'd-flex flex-column gap-2';
     container.appendChild(rows);
 
-    function addRow(val) {
+    function addRow(value) {
       var row = document.createElement('div');
       row.className = 'input-group input-group-sm';
       row.dataset.configListRow = '1';
-      if (f.columns) {
-        f.columns.forEach(function(c) {
-          var inp = document.createElement('input');
-          inp.type = 'text';
-          inp.className = 'form-control';
-          inp.placeholder = c.placeholder || c.name;
-          inp.dataset.configListCol = c.name;
-          if (val && val[c.name] !== undefined && val[c.name] !== null) { inp.value = val[c.name]; }
-          row.appendChild(inp);
+      if (field.columns) {
+        field.columns.forEach(function(column) {
+          var input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'form-control';
+          input.placeholder = column.placeholder || column.name;
+          input.dataset.configListCol = column.name;
+          if (value && value[column.name] !== undefined && value[column.name] !== null) { input.value = value[column.name]; }
+          row.appendChild(input);
         });
       } else {
         var single = document.createElement('input');
         single.type = 'text';
         single.className = 'form-control';
         single.dataset.configListItem = '1';
-        if (typeof val === 'string') { single.value = val; }
+        if (typeof value === 'string') { single.value = value; }
         row.appendChild(single);
       }
-      var rm = document.createElement('button');
-      rm.type = 'button';
-      rm.className = 'btn btn-outline-danger';
-      rm.textContent = '✕';
-      rm.addEventListener('click', function() { rows.removeChild(row); });
-      row.appendChild(rm);
+      var removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'btn btn-outline-danger';
+      removeBtn.textContent = '✕';
+      removeBtn.addEventListener('click', function() { rows.removeChild(row); });
+      row.appendChild(removeBtn);
       rows.appendChild(row);
     }
 
     (Array.isArray(values) ? values : []).forEach(addRow);
     addRow();   // one empty spare row to type into
 
-    var add = document.createElement('button');
-    add.type = 'button';
-    add.className = 'btn btn-sm btn-outline-secondary mt-2';
-    add.textContent = '+ Add';
-    add.addEventListener('click', function() { addRow(); });
-    container.appendChild(add);
+    var addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'btn btn-sm btn-outline-secondary mt-2';
+    addBtn.textContent = '+ Add';
+    addBtn.addEventListener('click', function() { addRow(); });
+    container.appendChild(addBtn);
 
     return container;
   }
@@ -245,66 +245,66 @@ document.addEventListener('DOMContentLoaded', function() {
     if (!info) { return; }
     var config     = (target && target.config)      || {};
     var secretsSet = (target && target.secrets_set) || [];
-    info.fields.forEach(function(f) {
+    info.fields.forEach(function(field) {
       var col = document.createElement('div');
       col.className = 'col-md-6';
       var label = document.createElement('label');
       label.className = 'form-label small text-muted mb-1';
-      label.textContent = f.label + (f.required ? ' *' : '');
+      label.textContent = field.label + (field.required ? ' *' : '');
       col.appendChild(label);
       var input;
-      if (f.type === 'boolean') {
+      if (field.type === 'boolean') {
         var wrap = document.createElement('div');
         wrap.className = 'form-check';
         input = document.createElement('input');
         input.type = 'checkbox';
         input.className = 'form-check-input';
-        input.checked = config[f.name] !== undefined ? !!config[f.name] : !!f.default;
+        input.checked = config[field.name] !== undefined ? !!config[field.name] : !!field.default;
         wrap.appendChild(input);
         col.appendChild(wrap);
-      } else if (f.type === 'enum') {
+      } else if (field.type === 'enum') {
         input = document.createElement('select');
         input.className = 'form-select form-select-sm';
-        (f.options || []).forEach(function(opt) {
-          var o = document.createElement('option');
-          o.value = opt;
-          o.textContent = opt;
-          input.appendChild(o);
+        (field.options || []).forEach(function(optionValue) {
+          var option = document.createElement('option');
+          option.value = optionValue;
+          option.textContent = optionValue;
+          input.appendChild(option);
         });
-        var cur = (config[f.name] !== undefined && config[f.name] !== null) ? config[f.name]
-                : (f.default !== undefined && f.default !== null ? f.default : '');
-        if (cur !== '') { input.value = cur; }
+        var currentValue = (config[field.name] !== undefined && config[field.name] !== null) ? config[field.name]
+                : (field.default !== undefined && field.default !== null ? field.default : '');
+        if (currentValue !== '') { input.value = currentValue; }
         col.appendChild(input);
-      } else if (f.type === 'list') {
+      } else if (field.type === 'list') {
         col.className = 'col-12';
         // a new target has no stored value, so seed the rows from the field
         // default; an existing target uses its own value, even when empty
-        var listVals = (config[f.name] !== undefined) ? config[f.name] : f.default;
-        input = buildListField(f, listVals);
+        var listValues = (config[field.name] !== undefined) ? config[field.name] : field.default;
+        input = buildListField(field, listValues);
         col.appendChild(input);
       } else {
         input = document.createElement('input');
-        input.type = (f.type === 'secret') ? 'password' : 'text';
-        if (f.type === 'integer') { input.inputMode = 'numeric'; }
+        input.type = (field.type === 'secret') ? 'password' : 'text';
+        if (field.type === 'integer') { input.inputMode = 'numeric'; }
         input.className = 'form-control form-control-sm';
-        if (f.type === 'secret') {
+        if (field.type === 'secret') {
           input.autocomplete = 'new-password';
-          if (secretsSet.indexOf(f.name) !== -1) { input.placeholder = '(unchanged)'; }
-        } else if (config[f.name] !== undefined && config[f.name] !== null) {
-          input.value = config[f.name];
-        } else if (f.default !== undefined && f.default !== null) {
-          input.placeholder = 'default: ' + f.default;
+          if (secretsSet.indexOf(field.name) !== -1) { input.placeholder = '(unchanged)'; }
+        } else if (config[field.name] !== undefined && config[field.name] !== null) {
+          input.value = config[field.name];
+        } else if (field.default !== undefined && field.default !== null) {
+          input.placeholder = 'default: ' + field.default;
         }
         col.appendChild(input);
       }
-      if (f.help) {
+      if (field.help) {
         var help = document.createElement('div');
         help.className = 'form-text small';
-        help.textContent = f.help;
+        help.textContent = field.help;
         col.appendChild(help);
       }
-      input.dataset.configName = f.name;
-      input.dataset.configType = f.type;
+      input.dataset.configName = field.name;
+      input.dataset.configType = field.type;
       fieldsEl.appendChild(col);
     });
   }
@@ -350,13 +350,13 @@ document.addEventListener('DOMContentLoaded', function() {
         input.querySelectorAll('[data-config-list-row]').forEach(function(row) {
           var cols = row.querySelectorAll('[data-config-list-col]');
           if (cols.length) {
-            var obj = {}, any = false;
-            cols.forEach(function(c) {
-              var v = c.value.trim();
-              obj[c.dataset.configListCol] = v;
-              if (v !== '') { any = true; }
+            var rowObj = {}, hasValue = false;
+            cols.forEach(function(column) {
+              var value = column.value.trim();
+              rowObj[column.dataset.configListCol] = value;
+              if (value !== '') { hasValue = true; }
             });
-            if (any) { items.push(obj); }
+            if (hasValue) { items.push(rowObj); }
           } else {
             var single = row.querySelector('[data-config-list-item]');
             if (single && single.value.trim() !== '') { items.push(single.value.trim()); }
@@ -382,17 +382,17 @@ document.addEventListener('DOMContentLoaded', function() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     })
-      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
-      .then(function(res) {
-        if (!res.ok || res.data.error) {
-          errEl.textContent = res.data.error || 'save failed';
+      .then(function(response) { return response.json().then(function(data) { return { ok: response.ok, data: data }; }); })
+      .then(function(result) {
+        if (!result.ok || result.data.error) {
+          errEl.textContent = result.data.error || 'save failed';
           errEl.style.display = '';
           return;
         }
         window.location.reload();
       })
-      .catch(function(e) {
-        errEl.textContent = 'save failed: ' + e;
+      .catch(function(err) {
+        errEl.textContent = 'save failed: ' + err;
         errEl.style.display = '';
       });
   });
@@ -402,15 +402,15 @@ document.addEventListener('DOMContentLoaded', function() {
       var id = this.dataset.targetId;
       if (!window.confirm('Delete escalation target "' + this.dataset.targetName + '"?')) { return; }
       fetch('/api/escalation/targets/' + encodeURIComponent(id) + '/delete', { method: 'POST' })
-        .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
-        .then(function(res) {
-          if (!res.ok || res.data.error) {
-            status(res.data.error || 'delete failed', false);
+        .then(function(response) { return response.json().then(function(data) { return { ok: response.ok, data: data }; }); })
+        .then(function(result) {
+          if (!result.ok || result.data.error) {
+            status(result.data.error || 'delete failed', false);
             return;
           }
           window.location.reload();
         })
-        .catch(function(e) { status('delete failed: ' + e, false); });
+        .catch(function(err) { status('delete failed: ' + err, false); });
     });
   });
 
@@ -424,26 +424,26 @@ document.addEventListener('DOMContentLoaded', function() {
       document.getElementById('test-result-content').style.display = 'none';
       testModal.show();
       fetch('/api/escalation/targets/' + encodeURIComponent(id) + '/test', { method: 'POST' })
-        .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
-        .then(function(res) {
+        .then(function(response) { return response.json().then(function(data) { return { ok: response.ok, data: data }; }); })
+        .then(function(result) {
           var errEl   = document.getElementById('test-result-error');
           var payWrap = document.getElementById('test-result-payload-wrap');
-          if (!res.ok || res.data.error) {
-            errEl.textContent = res.data.error || 'test failed';
+          if (!result.ok || result.data.error) {
+            errEl.textContent = result.data.error || 'test failed';
             errEl.style.display = '';
             payWrap.style.display = 'none';
           } else {
             errEl.style.display = 'none';
             document.getElementById('test-result-payload').textContent
-              = JSON.stringify(res.data.payload, null, 2);
+              = JSON.stringify(result.data.payload, null, 2);
             payWrap.style.display = '';
           }
           document.getElementById('test-result-loading').style.display = 'none';
           document.getElementById('test-result-content').style.display = '';
         })
-        .catch(function(e) {
+        .catch(function(err) {
           var errEl = document.getElementById('test-result-error');
-          errEl.textContent = 'test failed: ' + e;
+          errEl.textContent = 'test failed: ' + err;
           errEl.style.display = '';
           document.getElementById('test-result-loading').style.display = 'none';
           document.getElementById('test-result-content').style.display = '';

@@ -171,15 +171,15 @@
   function resizeAllCharts() { Object.keys(charts).forEach(function(id) { if (charts[id]) { charts[id].resize(); } }); }
   function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
 
-  function flag(cc) {
-    if (!/^[A-Za-z]{2}$/.test(cc)) { return ''; }
-    return String.fromCodePoint.apply(null, cc.toUpperCase().split('').map(function(c) { return 0x1F1E6 + c.charCodeAt(0) - 65; }));
+  function flag(countryCode) {
+    if (!/^[A-Za-z]{2}$/.test(countryCode)) { return ''; }
+    return String.fromCodePoint.apply(null, countryCode.toUpperCase().split('').map(function(c) { return 0x1F1E6 + c.charCodeAt(0) - 65; }));
   }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function bucketLabel(epoch) {
     var d = new Date(epoch * 1000);
-    var hm = pad(d.getHours()) + ':' + pad(d.getMinutes());
-    return state.mins <= 1440 ? hm : (pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + hm);
+    var hourMin = pad(d.getHours()) + ':' + pad(d.getMinutes());
+    return state.mins <= 1440 ? hourMin : (pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + hourMin);
   }
   function bucketUnit() { return state.mins <= 180 ? 'minute' : (state.mins <= 20160 ? 'hour' : 'day'); }
 
@@ -190,10 +190,10 @@
     return s;
   }
   function getJSON(url) {
-    return fetch(url).then(function(r) {
-      return r.json().then(function(body) {
-        if (!r.ok) { throw new Error(body && body.error ? body.error : ('HTTP ' + r.status)); }
-        return body;
+    return fetch(url).then(function(response) {
+      return response.json().then(function(data) {
+        if (!response.ok) { throw new Error(data && data.error ? data.error : ('HTTP ' + response.status)); }
+        return data;
       });
     });
   }
@@ -207,21 +207,21 @@
     for (var i = 0; i < list.length; i++) { if (list[i].name === name) { return list[i].label; } }
     return name.replace(/_/g, ' ');
   }
-  function widgetTitle(w) {
-    var m = measureLabel(state.table, w.config.measure);
-    if (w.type === 'timeseries') {
-      return (m || 'Alerts') + ' over time' + (w.config.group_by ? ' (by ' + w.config.group_by + ')' : '');
+  function widgetTitle(widget) {
+    var measure = measureLabel(state.table, widget.config.measure);
+    if (widget.type === 'timeseries') {
+      return (measure || 'Alerts') + ' over time' + (widget.config.group_by ? ' (by ' + widget.config.group_by + ')' : '');
     }
-    if (w.type === 'top')       { return 'Top ' + (w.config.column || '') + (m ? ' by ' + m : ''); }
-    if (w.type === 'countries') { return 'Source countries'; }
+    if (widget.type === 'top')       { return 'Top ' + (widget.config.column || '') + (measure ? ' by ' + measure : ''); }
+    if (widget.type === 'countries') { return 'Source countries'; }
     return 'Widget';
   }
-  function widgetEl(w) {
+  function widgetEl(widget) {
     var el = document.createElement('div');
     el.className = 'grid-stack-item';
-    el.setAttribute('gs-id', w.id);
-    el.setAttribute('gs-x', w.x); el.setAttribute('gs-y', w.y);
-    el.setAttribute('gs-w', w.w); el.setAttribute('gs-h', w.h);
+    el.setAttribute('gs-id', widget.id);
+    el.setAttribute('gs-x', widget.x); el.setAttribute('gs-y', widget.y);
+    el.setAttribute('gs-w', widget.w); el.setAttribute('gs-h', widget.h);
     el.innerHTML =
       '<div class="grid-stack-item-content">'
       + '<div class="card border-secondary h-100 mb-0 db-card"><div class="card-body p-2 d-flex flex-column">'
@@ -234,38 +234,38 @@
       +   '<div class="db-chart"><canvas data-role="canvas"></canvas></div>'
       + '</div></div>'
       + '</div>';
-    el.querySelector('[data-role=title]').textContent = widgetTitle(w);
-    el.querySelector('canvas').id = 'chart-' + w.id;
+    el.querySelector('[data-role=title]').textContent = widgetTitle(widget);
+    el.querySelector('canvas').id = 'chart-' + widget.id;
     return el;
   }
   function itemFor(id) { return document.querySelector('.grid-stack-item[gs-id="' + id + '"]'); }
-  function showNote(w, msg) {
-    var it = itemFor(w.id); if (!it) { return; }
-    it.querySelector('[data-role=note]').textContent = msg;
-    it.querySelector('[data-role=note]').style.display = '';
-    it.querySelector('canvas').style.display = 'none';
-    destroyChart(w.id);
+  function showNote(widget, msg) {
+    var item = itemFor(widget.id); if (!item) { return; }
+    item.querySelector('[data-role=note]').textContent = msg;
+    item.querySelector('[data-role=note]').style.display = '';
+    item.querySelector('canvas').style.display = 'none';
+    destroyChart(widget.id);
   }
-  function clearNote(w) {
-    var it = itemFor(w.id); if (!it) { return; }
-    it.querySelector('[data-role=note]').style.display = 'none';
-    it.querySelector('canvas').style.display = '';
+  function clearNote(widget) {
+    var item = itemFor(widget.id); if (!item) { return; }
+    item.querySelector('[data-role=note]').style.display = 'none';
+    item.querySelector('canvas').style.display = '';
   }
 
   // ---- chart renderers ----
-  function renderTop(w, cv, rows) {
-    destroyChart(w.id);
+  function renderTop(widget, canvas, rows) {
+    destroyChart(widget.id);
     var labels = rows.map(function(r) { return r.value; });
     var counts = rows.map(function(r) { return r.count; });
-    if ((w.config && w.config.style) === 'pie') {
-      charts[w.id] = new Chart(cv, {
+    if ((widget.config && widget.config.style) === 'pie') {
+      charts[widget.id] = new Chart(canvas, {
         type: 'pie',
         data: { labels: labels,
                 datasets: [{ data: counts, backgroundColor: rows.map(function(_, i) { return PALETTE[i % PALETTE.length]; }) }] },
         options: baseOpts({ plugins: { legend: { display: true, position: 'right' } } })
       });
     } else {
-      charts[w.id] = new Chart(cv, {
+      charts[widget.id] = new Chart(canvas, {
         type: 'bar',
         data: { labels: labels, datasets: [{ data: counts, backgroundColor: PALETTE[0] }] },
         options: baseOpts({
@@ -276,26 +276,26 @@
       });
     }
   }
-  function renderTimeseries(id, cv, body) {
+  function renderTimeseries(id, canvas, data) {
     destroyChart(id);
-    var rows = body.rows || [], bset = {}, gset = {};
-    rows.forEach(function(r) { bset[r.bucket] = 1; if (r.group !== undefined) { gset[r.group] = 1; } });
-    var buckets = Object.keys(bset).map(Number).sort(function(a, b) { return a - b; });
-    var bindex = {}; buckets.forEach(function(b, i) { bindex[b] = i; });
-    var groups = Object.keys(gset), datasets;
-    if (body.grouped && groups.length) {
-      datasets = groups.map(function(g, i) {
-        var data = buckets.map(function() { return 0; });
-        rows.forEach(function(r) { if (r.group === g) { data[bindex[r.bucket]] = r.count; } });
-        var c = PALETTE[i % PALETTE.length];
-        return { label: g, data: data, backgroundColor: c, borderColor: c, stack: 's' };
+    var rows = data.rows || [], bucketSet = {}, groupSet = {};
+    rows.forEach(function(r) { bucketSet[r.bucket] = 1; if (r.group !== undefined) { groupSet[r.group] = 1; } });
+    var buckets = Object.keys(bucketSet).map(Number).sort(function(a, b) { return a - b; });
+    var bucketIndex = {}; buckets.forEach(function(b, i) { bucketIndex[b] = i; });
+    var groups = Object.keys(groupSet), datasets;
+    if (data.grouped && groups.length) {
+      datasets = groups.map(function(group, i) {
+        var seriesData = buckets.map(function() { return 0; });
+        rows.forEach(function(r) { if (r.group === group) { seriesData[bucketIndex[r.bucket]] = r.count; } });
+        var color = PALETTE[i % PALETTE.length];
+        return { label: group, data: seriesData, backgroundColor: color, borderColor: color, stack: 's' };
       });
     } else {
-      var data = buckets.map(function() { return 0; });
-      rows.forEach(function(r) { data[bindex[r.bucket]] = r.count; });
-      datasets = [{ label: 'alerts', data: data, backgroundColor: PALETTE[1], borderColor: PALETTE[1] }];
+      var seriesData = buckets.map(function() { return 0; });
+      rows.forEach(function(r) { seriesData[bucketIndex[r.bucket]] = r.count; });
+      datasets = [{ label: 'alerts', data: seriesData, backgroundColor: PALETTE[1], borderColor: PALETTE[1] }];
     }
-    charts[id] = new Chart(cv, {
+    charts[id] = new Chart(canvas, {
       type: 'bar', data: { labels: buckets.map(bucketLabel), datasets: datasets },
       options: baseOpts({
         interaction: { mode: 'index', intersect: false },
@@ -305,12 +305,12 @@
       })
     });
   }
-  function renderCountries(w, cv, body) {
-    if (!body.enabled) { showNote(w, 'GeoIP is not configured on this server.'); return; }
-    clearNote(w);
-    destroyChart(w.id);
-    var rows = body.rows || [];
-    charts[w.id] = new Chart(cv, {
+  function renderCountries(widget, canvas, data) {
+    if (!data.enabled) { showNote(widget, 'GeoIP is not configured on this server.'); return; }
+    clearNote(widget);
+    destroyChart(widget.id);
+    var rows = data.rows || [];
+    charts[widget.id] = new Chart(canvas, {
       type: 'bar',
       data: { labels: rows.map(function(r) { return (flag(r.country) + ' ' + r.country).trim(); }),
               datasets: [{ data: rows.map(function(r) { return r.count; }), backgroundColor: PALETTE[3] }] },
@@ -319,35 +319,35 @@
   }
 
   // ---- data loading ----
-  function renderCards(d) {
-    document.getElementById('card-total').textContent  = d.total;
-    document.getElementById('card-src').textContent    = d.distinct_src_ip;
-    document.getElementById('card-detail').textContent = d.distinct_detail;
-    document.getElementById('card-detail-label').textContent = 'Unique ' + d.detail_label + 's';
-    document.getElementById('card-esc').textContent    = d.escalated;
-    var b = d.busiest_instance;
-    document.getElementById('card-busiest').textContent = b ? (b.value + ' (' + b.count + ')') : '–';
+  function renderCards(data) {
+    document.getElementById('card-total').textContent  = data.total;
+    document.getElementById('card-src').textContent    = data.distinct_src_ip;
+    document.getElementById('card-detail').textContent = data.distinct_detail;
+    document.getElementById('card-detail-label').textContent = 'Unique ' + data.detail_label + 's';
+    document.getElementById('card-esc').textContent    = data.escalated;
+    var busiest = data.busiest_instance;
+    document.getElementById('card-busiest').textContent = busiest ? (busiest.value + ' (' + busiest.count + ')') : '–';
   }
-  function loadWidget(w) {
-    var cv = document.getElementById('chart-' + w.id);
-    if (!cv) { return; }
-    if (w.type === 'top') {
-      getJSON('/api/dashboard/top' + qs({ column: w.config.column, limit: w.config.limit || 10, measure: w.config.measure }))
-        .then(function(b) { clearNote(w); renderTop(w, cv, b.rows || []); })
-        .catch(function(e) { showNote(w, e.message); });
-    } else if (w.type === 'timeseries') {
-      getJSON('/api/dashboard/timeseries' + qs({ bucket: bucketUnit(), group_by: w.config.group_by, top_groups: 6, measure: w.config.measure }))
-        .then(function(b) { clearNote(w); renderTimeseries(w.id, cv, b); })
-        .catch(function(e) { showNote(w, e.message); });
-    } else if (w.type === 'countries') {
+  function loadWidget(widget) {
+    var canvas = document.getElementById('chart-' + widget.id);
+    if (!canvas) { return; }
+    if (widget.type === 'top') {
+      getJSON('/api/dashboard/top' + qs({ column: widget.config.column, limit: widget.config.limit || 10, measure: widget.config.measure }))
+        .then(function(data) { clearNote(widget); renderTop(widget, canvas, data.rows || []); })
+        .catch(function(err) { showNote(widget, err.message); });
+    } else if (widget.type === 'timeseries') {
+      getJSON('/api/dashboard/timeseries' + qs({ bucket: bucketUnit(), group_by: widget.config.group_by, top_groups: 6, measure: widget.config.measure }))
+        .then(function(data) { clearNote(widget); renderTimeseries(widget.id, canvas, data); })
+        .catch(function(err) { showNote(widget, err.message); });
+    } else if (widget.type === 'countries') {
       getJSON('/api/dashboard/countries' + qs())
-        .then(function(b) { renderCountries(w, cv, b); })
-        .catch(function(e) { showNote(w, e.message); });
+        .then(function(data) { renderCountries(widget, canvas, data); })
+        .catch(function(err) { showNote(widget, err.message); });
     }
   }
   function refresh() {
     clearError();
-    getJSON('/api/dashboard/summary' + qs()).then(renderCards).catch(function(e) { showError(e.message); });
+    getJSON('/api/dashboard/summary' + qs()).then(renderCards).catch(function(err) { showError(err.message); });
     widgets.forEach(loadWidget);
   }
 
@@ -359,13 +359,13 @@
     suppressSave = true;
     Object.keys(charts).forEach(destroyChart);
     grid.removeAll();
-    widgets.forEach(function(w) { var el = widgetEl(w); grid.el.appendChild(el); grid.makeWidget(el); });
+    widgets.forEach(function(widget) { var el = widgetEl(widget); grid.el.appendChild(el); grid.makeWidget(el); });
     setTimeout(function() { suppressSave = false; }, 0);
   }
   function currentLayout() {
     return (grid.save(false) || []).map(function(n) {
-      var w = widgets.filter(function(x) { return x.id === n.id; })[0] || {};
-      return { id: n.id, type: w.type, config: w.config || {}, x: n.x, y: n.y, w: n.w, h: n.h };
+      var widget = widgets.filter(function(x) { return x.id === n.id; })[0] || {};
+      return { id: n.id, type: widget.type, config: widget.config || {}, x: n.x, y: n.y, w: n.w, h: n.h };
     }).filter(function(n) { return n.type; });
   }
   function postLayout(layout) {
@@ -383,9 +383,9 @@
   grid.on('resizestop', resizeAllCharts);
 
   // config / remove buttons (event-delegated on the grid)
-  grid.el.addEventListener('click', function(e) {
-    var btn = e.target.closest('[data-act]'); if (!btn) { return; }
-    e.preventDefault();
+  grid.el.addEventListener('click', function(event) {
+    var btn = event.target.closest('[data-act]'); if (!btn) { return; }
+    event.preventDefault();
     var item = btn.closest('.grid-stack-item'); var id = item && item.getAttribute('gs-id'); if (!id) { return; }
     if (btn.getAttribute('data-act') === 'remove') {
       destroyChart(id); grid.removeWidget(item);
@@ -401,67 +401,67 @@
   function getModal() { modal = modal || new bootstrap.Modal(document.getElementById('widget-modal')); return modal; }
   function loadColumns(table) {
     if (colsCache[table]) { return Promise.resolve(colsCache[table]); }
-    return getJSON('/api/dashboard/columns?table=' + encodeURIComponent(table)).then(function(d) {
-      colsCache[table] = d.columns || []; return colsCache[table];
+    return getJSON('/api/dashboard/columns?table=' + encodeURIComponent(table)).then(function(data) {
+      colsCache[table] = data.columns || []; return colsCache[table];
     });
   }
   function loadMeasures(table) {
     if (measuresCache[table]) { return Promise.resolve(measuresCache[table]); }
-    return getJSON('/api/dashboard/measures?table=' + encodeURIComponent(table)).then(function(d) {
-      measuresCache[table] = d.measures || []; return measuresCache[table];
+    return getJSON('/api/dashboard/measures?table=' + encodeURIComponent(table)).then(function(data) {
+      measuresCache[table] = data.measures || []; return measuresCache[table];
     });
   }
   function syncModalFields() {
-    var t = document.getElementById('wm-type').value;
-    document.getElementById('wm-column-wrap').style.display  = (t === 'top') ? '' : 'none';
-    document.getElementById('wm-style-wrap').style.display   = (t === 'top') ? '' : 'none';
-    document.getElementById('wm-limit-wrap').style.display   = (t === 'top') ? '' : 'none';
-    document.getElementById('wm-group-wrap').style.display   = (t === 'timeseries') ? '' : 'none';
-    document.getElementById('wm-measure-wrap').style.display = (t === 'top' || t === 'timeseries') ? '' : 'none';
+    var type = document.getElementById('wm-type').value;
+    document.getElementById('wm-column-wrap').style.display  = (type === 'top') ? '' : 'none';
+    document.getElementById('wm-style-wrap').style.display   = (type === 'top') ? '' : 'none';
+    document.getElementById('wm-limit-wrap').style.display   = (type === 'top') ? '' : 'none';
+    document.getElementById('wm-group-wrap').style.display   = (type === 'timeseries') ? '' : 'none';
+    document.getElementById('wm-measure-wrap').style.display = (type === 'top' || type === 'timeseries') ? '' : 'none';
   }
   function openModal(id) {
     editingId = id || null;
-    var w = id ? widgets.filter(function(x) { return x.id === id; })[0] : null;
+    var widget = id ? widgets.filter(function(x) { return x.id === id; })[0] : null;
     document.getElementById('widget-modal-title').textContent = id ? 'Configure widget' : 'Add widget';
     document.getElementById('wm-table').textContent = state.table;
-    document.getElementById('wm-type').value = w ? w.type : 'timeseries';
-    Promise.all([loadColumns(state.table), loadMeasures(state.table)]).then(function(res) {
-      var cols = res[0], meas = res[1];
+    document.getElementById('wm-type').value = widget ? widget.type : 'timeseries';
+    Promise.all([loadColumns(state.table), loadMeasures(state.table)]).then(function(results) {
+      var cols = results[0], meas = results[1];
       var colSel = document.getElementById('wm-column'), grpSel = document.getElementById('wm-group');
       var measSel = document.getElementById('wm-measure');
       colSel.innerHTML = ''; grpSel.innerHTML = '<option value="">(none)</option>'; measSel.innerHTML = '';
       cols.forEach(function(c) {
-        var o1 = document.createElement('option'); o1.value = c; o1.textContent = c; colSel.appendChild(o1);
-        var o2 = document.createElement('option'); o2.value = c; o2.textContent = c; grpSel.appendChild(o2);
+        var colOption = document.createElement('option'); colOption.value = c; colOption.textContent = c; colSel.appendChild(colOption);
+        var groupOption = document.createElement('option'); groupOption.value = c; groupOption.textContent = c; grpSel.appendChild(groupOption);
       });
-      meas.forEach(function(m) {
-        var o = document.createElement('option'); o.value = m.name; o.textContent = m.label; measSel.appendChild(o);
+      meas.forEach(function(measure) {
+        var option = document.createElement('option'); option.value = measure.name; option.textContent = measure.label; measSel.appendChild(option);
       });
-      if (w && w.type === 'top') { colSel.value = w.config.column || ''; }
-      if (w && w.type === 'timeseries') { grpSel.value = w.config.group_by || ''; }
-      document.getElementById('wm-style').value = (w && w.config.style) ? w.config.style : 'bar';
-      document.getElementById('wm-limit').value = (w && w.config.limit) ? w.config.limit : 10;
-      measSel.value = (w && w.config.measure) ? w.config.measure : 'count';
+      if (widget && widget.type === 'top') { colSel.value = widget.config.column || ''; }
+      if (widget && widget.type === 'timeseries') { grpSel.value = widget.config.group_by || ''; }
+      document.getElementById('wm-style').value = (widget && widget.config.style) ? widget.config.style : 'bar';
+      document.getElementById('wm-limit').value = (widget && widget.config.limit) ? widget.config.limit : 10;
+      measSel.value = (widget && widget.config.measure) ? widget.config.measure : 'count';
     }).catch(function() {}).then(function() { syncModalFields(); getModal().show(); });
   }
   document.getElementById('wm-type').addEventListener('change', syncModalFields);
   document.getElementById('wm-save').addEventListener('click', function() {
-    var t = document.getElementById('wm-type').value, config = {};
+    var type = document.getElementById('wm-type').value, config = {};
     var measure = document.getElementById('wm-measure').value;
-    if (t === 'top') {
+    if (type === 'top') {
       config.column = document.getElementById('wm-column').value;
       config.style = document.getElementById('wm-style').value;
       var lim = parseInt(document.getElementById('wm-limit').value, 10);
       if (isNaN(lim) || lim < 1) { lim = 1; } if (lim > 50) { lim = 50; }
       config.limit = lim;
     }
-    if (t === 'timeseries') { var g = document.getElementById('wm-group').value; if (g) { config.group_by = g; } }
-    if ((t === 'top' || t === 'timeseries') && measure && measure !== 'count') { config.measure = measure; }
+    if (type === 'timeseries') { var group = document.getElementById('wm-group').value; if (group) { config.group_by = group; } }
+    if ((type === 'top' || type === 'timeseries') && measure && measure !== 'count') { config.measure = measure; }
     if (editingId) {
-      var w = widgets.filter(function(x) { return x.id === editingId; })[0];
-      if (w) { w.type = t; w.config = config; }
+      var widget = widgets.filter(function(x) { return x.id === editingId; })[0];
+      if (widget) { widget.type = type; widget.config = config; }
     } else {
-      widgets.push({ id: uid(), type: t, config: config, x: 0, y: 1000, w: 4, h: 4 });
+      widgets.push({ id: uid(), type: type, config: config, x: 0, y: 1000, w: 4, h: 4 });
     }
     getModal().hide();
     rebuildGrid();
@@ -485,12 +485,12 @@
   });
 
   // ---- boot ----
-  function seedDefaults() { return DEFAULT_WIDGETS.map(function(w) { return { id: uid(), type: w.type, config: w.config, x: w.x, y: w.y, w: w.w, h: w.h }; }); }
+  function seedDefaults() { return DEFAULT_WIDGETS.map(function(widget) { return { id: uid(), type: widget.type, config: widget.config, x: widget.x, y: widget.y, w: widget.w, h: widget.h }; }); }
   markRange();
-  getJSON('/api/dashboard/layout').then(function(d) {
-    var L = (d && Array.isArray(d.layout)) ? d.layout.filter(function(w) { return w && w.type; }) : [];
-    widgets = L.length
-      ? L.map(function(w) { return { id: w.id || uid(), type: w.type, config: w.config || {}, x: w.x || 0, y: w.y || 0, w: w.w || 4, h: w.h || 4 }; })
+  getJSON('/api/dashboard/layout').then(function(data) {
+    var layout = (data && Array.isArray(data.layout)) ? data.layout.filter(function(widget) { return widget && widget.type; }) : [];
+    widgets = layout.length
+      ? layout.map(function(widget) { return { id: widget.id || uid(), type: widget.type, config: widget.config || {}, x: widget.x || 0, y: widget.y || 0, w: widget.w || 4, h: widget.h || 4 }; })
       : seedDefaults();
   }).catch(function() { widgets = seedDefaults(); }).then(function() { rebuildGrid(); refresh(); });
 })();

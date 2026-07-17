@@ -1483,18 +1483,18 @@
 document.addEventListener('DOMContentLoaded', function() {
   document.querySelectorAll('.http-body-dl').forEach(function(btn) {
     btn.addEventListener('click', function() {
-      var b64      = this.dataset.body;
+      var base64Body = this.dataset.body;
       var filename = this.dataset.filename;
       var type     = this.dataset.type.split(';')[0].trim() || 'application/octet-stream';
-      var binary   = atob(b64);
+      var binary   = atob(base64Body);
       var bytes    = new Uint8Array(binary.length);
       for (var i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
       var blob = new Blob([bytes], { type: type });
       var url  = URL.createObjectURL(blob);
-      var a    = document.createElement('a');
-      a.href     = url;
-      a.download = filename;
-      a.click();
+      var downloadLink = document.createElement('a');
+      downloadLink.href     = url;
+      downloadLink.download = filename;
+      downloadLink.click();
       URL.revokeObjectURL(url);
     });
   });
@@ -1508,7 +1508,7 @@ document.addEventListener('DOMContentLoaded', function() {
       document.getElementById('domaininfo-content').style.display = 'none';
       domainModal.show();
       fetch('/api/domaininfo/' + encodeURIComponent(domain))
-        .then(function(r) { return r.json(); })
+        .then(function(response) { return response.json(); })
         .then(function(data) {
           var dnsEl = document.getElementById('domaininfo-dns');
           if (data.dns && Object.keys(data.dns).length) {
@@ -1520,8 +1520,8 @@ document.addEventListener('DOMContentLoaded', function() {
               return ai - bi;
             });
             dnsEl.innerHTML = keys.map(function(type) {
-              return data.dns[type].map(function(v) {
-                return '<strong>' + type + '</strong> ' + v;
+              return data.dns[type].map(function(value) {
+                return '<strong>' + type + '</strong> ' + value;
               }).join('<br>');
             }).join('<br>');
           } else {
@@ -1564,10 +1564,10 @@ document.addEventListener('DOMContentLoaded', function() {
       for (var i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
       var blob = new Blob([bytes], { type: 'application/octet-stream' });
       var url  = URL.createObjectURL(blob);
-      var a    = document.createElement('a');
-      a.href     = url;
-      a.download = this.dataset.filename;
-      a.click();
+      var downloadLink = document.createElement('a');
+      downloadLink.href     = url;
+      downloadLink.download = this.dataset.filename;
+      downloadLink.click();
       URL.revokeObjectURL(url);
     });
   }
@@ -1578,10 +1578,10 @@ document.addEventListener('DOMContentLoaded', function() {
       var json = document.querySelector('#raw-json-panel pre').textContent;
       var blob = new Blob([json], { type: 'application/json' });
       var url  = URL.createObjectURL(blob);
-      var a    = document.createElement('a');
-      a.href     = url;
-      a.download = 'event-<%= $table %>-<%= $id %>.json';
-      a.click();
+      var downloadLink = document.createElement('a');
+      downloadLink.href     = url;
+      downloadLink.download = 'event-<%= $table %>-<%= $id %>.json';
+      downloadLink.click();
       URL.revokeObjectURL(url);
     });
   }
@@ -1617,8 +1617,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Local command: show the virani invocation to run on the box with the PCAPs.
     var reveal = document.getElementById('pcap-local-cmd');
     var cmdEl  = document.getElementById('pcap-cmd');
-    document.getElementById('pcap-local').addEventListener('click', function(e) {
-      e.preventDefault();
+    document.getElementById('pcap-local').addEventListener('click', function(event) {
+      event.preventDefault();
       var set = setEl.value;
       var cmd = 'virani -s ' + box.dataset.start + ' -e ' + box.dataset.end
               + (set ? ' --set ' + set : '')
@@ -1644,11 +1644,11 @@ document.addEventListener('DOMContentLoaded', function() {
   var escId    = '<%= $id %>';
 
   function statusBadge(status) {
-    var cls = { sent: 'bg-success', failed: 'bg-danger', pending: 'bg-secondary' }[status] || 'bg-secondary';
-    var b = document.createElement('span');
-    b.className = 'badge ' + cls;
-    b.textContent = status;
-    return b;
+    var badgeClass = { sent: 'bg-success', failed: 'bg-danger', pending: 'bg-secondary' }[status] || 'bg-secondary';
+    var badgeEl = document.createElement('span');
+    badgeEl.className = 'badge ' + badgeClass;
+    badgeEl.textContent = status;
+    return badgeEl;
   }
 
   // Escalation history — one row per recorded escalation, with the raw
@@ -1657,7 +1657,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var body     = document.getElementById('esc-history-body');
     var statusEl = document.getElementById('esc-history-status');
     fetch('/api/escalation/history/' + encodeURIComponent(escTable) + '/' + encodeURIComponent(escId))
-      .then(function(r) { return r.json(); })
+      .then(function(response) { return response.json(); })
       .then(function(data) {
         var rows = data.escalations || [];
         statusEl.textContent = rows.length + ' escalation' + (rows.length === 1 ? '' : 's');
@@ -1685,27 +1685,27 @@ document.addEventListener('DOMContentLoaded', function() {
         table.appendChild(thead);
         var tbody = document.createElement('tbody');
         rows.forEach(function(row) {
-          var tr = document.createElement('tr');
+          var rowEl = document.createElement('tr');
           function cell(text) {
-            var td = document.createElement('td');
-            td.textContent = (text == null ? '' : text);
-            return td;
+            var cellEl = document.createElement('td');
+            cellEl.textContent = (text == null ? '' : text);
+            return cellEl;
           }
-          tr.appendChild(cell(row.timestamp));
+          rowEl.appendChild(cell(row.timestamp));
           // target_name is snapshotted at attempt time; a null target_id
           // alongside a name means the target has since been deleted
           var targetLabel = row.target_name || '(unknown target)';
           if (row.target_name && !row.target_id) { targetLabel += ' (deleted)'; }
-          tr.appendChild(cell(targetLabel));
-          var st = document.createElement('td');
-          st.appendChild(statusBadge(row.status));
-          tr.appendChild(st);
-          tr.appendChild(cell(row.requested_by));
-          tr.appendChild(cell(row.note));
-          var errTd = cell(row.error);
-          errTd.className = row.error ? 'text-warning small' : '';
-          tr.appendChild(errTd);
-          var rawTd = document.createElement('td');
+          rowEl.appendChild(cell(targetLabel));
+          var statusCell = document.createElement('td');
+          statusCell.appendChild(statusBadge(row.status));
+          rowEl.appendChild(statusCell);
+          rowEl.appendChild(cell(row.requested_by));
+          rowEl.appendChild(cell(row.note));
+          var errorCell = cell(row.error);
+          errorCell.className = row.error ? 'text-warning small' : '';
+          rowEl.appendChild(errorCell);
+          var rawCell = document.createElement('td');
           if (row.raw) {
             var details = document.createElement('details');
             var summary = document.createElement('summary');
@@ -1719,10 +1719,10 @@ document.addEventListener('DOMContentLoaded', function() {
             pre.textContent = JSON.stringify(row.raw, null, 2);
             details.appendChild(summary);
             details.appendChild(pre);
-            rawTd.appendChild(details);
+            rawCell.appendChild(details);
           }
-          tr.appendChild(rawTd);
-          tbody.appendChild(tr);
+          rowEl.appendChild(rawCell);
+          tbody.appendChild(rowEl);
         });
         table.appendChild(tbody);
         var wrap = document.createElement('div');
@@ -1730,12 +1730,12 @@ document.addEventListener('DOMContentLoaded', function() {
         wrap.appendChild(table);
         body.appendChild(wrap);
       })
-      .catch(function(e) {
+      .catch(function(err) {
         body.innerHTML = '';
-        var err = document.createElement('span');
-        err.className = 'text-warning small';
-        err.textContent = 'Failed to load escalations: ' + e;
-        body.appendChild(err);
+        var errSpan = document.createElement('span');
+        errSpan.className = 'text-warning small';
+        errSpan.textContent = 'Failed to load escalations: ' + err;
+        body.appendChild(errSpan);
       });
   }
   loadHistory();
@@ -1749,34 +1749,34 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('esc-results').style.display = 'none';
     box.innerHTML = '<span class="text-muted small">Loading…</span>';
     fetch('/api/escalation/targets')
-      .then(function(r) { return r.json(); })
+      .then(function(response) { return response.json(); })
       .then(function(data) {
-        var targets = (data.targets || []).filter(function(t) { return t.enabled; });
+        var targets = (data.targets || []).filter(function(target) { return target.enabled; });
         box.innerHTML = '';
         if (!targets.length) {
           box.innerHTML = '<span class="text-muted small">No enabled escalation targets configured.'
             + ' Add one on the <a href="/escalation" class="text-danger">Escalation</a> page.</span>';
           return;
         }
-        targets.forEach(function(t) {
+        targets.forEach(function(target) {
           var wrap = document.createElement('div');
           wrap.className = 'form-check';
           var input = document.createElement('input');
           input.className = 'form-check-input esc-target-check';
           input.type = 'checkbox';
-          input.value = t.id;
-          input.id = 'esc-target-' + t.id;
+          input.value = target.id;
+          input.id = 'esc-target-' + target.id;
           var label = document.createElement('label');
           label.className = 'form-check-label small';
           label.htmlFor = input.id;
-          label.textContent = t.name + ' (' + t.type + ')' + (t.description ? ' — ' + t.description : '');
+          label.textContent = target.name + ' (' + target.type + ')' + (target.description ? ' — ' + target.description : '');
           wrap.appendChild(input);
           wrap.appendChild(label);
           box.appendChild(wrap);
         });
       })
-      .catch(function(e) {
-        box.innerHTML = '<span class="text-warning small">Failed to load targets: ' + e + '</span>';
+      .catch(function(err) {
+        box.innerHTML = '<span class="text-warning small">Failed to load targets: ' + err + '</span>';
       });
   });
 
@@ -1785,7 +1785,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var resultsEl = document.getElementById('esc-results');
     errEl.style.display = 'none';
     var ids = [];
-    document.querySelectorAll('.esc-target-check:checked').forEach(function(el) { ids.push(el.value); });
+    document.querySelectorAll('.esc-target-check:checked').forEach(function(checkbox) { ids.push(checkbox.value); });
     if (!ids.length) {
       errEl.textContent = 'Select at least one target.';
       errEl.style.display = '';
@@ -1804,7 +1804,7 @@ document.addEventListener('DOMContentLoaded', function() {
         requested_by: document.getElementById('esc-requested-by').value
       })
     })
-      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      .then(function(response) { return response.json().then(function(data) { return { ok: response.ok, data: data }; }); })
       .then(function(res) {
         btn.disabled = false;
         if (!res.ok || res.data.error) {
@@ -1826,9 +1826,9 @@ document.addEventListener('DOMContentLoaded', function() {
         resultsEl.style.display = '';
         loadHistory();
       })
-      .catch(function(e) {
+      .catch(function(err) {
         btn.disabled = false;
-        errEl.textContent = 'escalation failed: ' + e;
+        errEl.textContent = 'escalation failed: ' + err;
         errEl.style.display = '';
       });
   });
