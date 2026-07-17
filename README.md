@@ -96,7 +96,7 @@ cpanm Lilith
 ```
 
 PostgreSQL is required (the raw EVE records are jsonb); creating the
-database and deploying the schema with `dbic-migration` is covered in
+database and deploying the schema with `lilith deploy` is covered in
 [docs/install.md](docs/install.md).
 
 ## Documentation

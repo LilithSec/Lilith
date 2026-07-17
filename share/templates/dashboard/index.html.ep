@@ -1,0 +1,497 @@
+% layout 'default';
+% title 'Dashboard';
+
+<link rel="stylesheet" href="/vendor/gridstack/gridstack.min.css">
+<style>
+  .grid-stack-item-content { overflow: hidden; }
+  .db-card { display: flex; flex-direction: column; }
+  .db-handle { cursor: move; user-select: none; }
+  .db-handle::before { content: "\2637"; opacity: .35; margin-right: .4rem; font-size: .8em; }
+  .db-chart { position: relative; min-height: 0; flex: 1 1 auto; }
+  .db-chart > canvas { position: absolute; inset: 0; }
+  .db-wbtn { line-height: 1; text-decoration: none; }
+</style>
+
+<div class="card mb-3 border-secondary">
+  <div class="card-body py-2">
+    <div class="row g-2 align-items-end">
+      <div class="col-auto">
+        <label class="form-label">Table</label>
+        <select id="db-table" class="form-select form-select-sm" style="width:120px">
+          <option value="suricata" <%= $table eq 'suricata' ? 'selected' : '' %>>Suricata</option>
+          <option value="sagan"    <%= $table eq 'sagan'    ? 'selected' : '' %>>Sagan</option>
+          <option value="cape"     <%= $table eq 'cape'     ? 'selected' : '' %>>CAPE</option>
+        </select>
+      </div>
+      <div class="col-auto">
+        <label class="form-label">Time range</label>
+        <div class="btn-group btn-group-sm" role="group" id="db-range">
+          <button type="button" class="btn btn-outline-secondary" data-mins="60">1h</button>
+          <button type="button" class="btn btn-outline-secondary" data-mins="360">6h</button>
+          <button type="button" class="btn btn-outline-secondary" data-mins="1440">24h</button>
+          <button type="button" class="btn btn-outline-secondary" data-mins="10080">7d</button>
+        </div>
+      </div>
+      <div class="col-auto ms-auto d-flex align-items-center gap-3">
+        <div class="form-check mb-0">
+          <input class="form-check-input" type="checkbox" id="db-gpcd" <%= $show_gpcd ? 'checked' : '' %>>
+          <label class="form-check-label small text-muted" for="db-gpcd"
+                 title="Generic Protocol Command Decode">Show GPCD</label>
+        </div>
+        <button type="button" id="db-add-widget" class="btn btn-sm btn-outline-success">+ Add widget</button>
+        <button type="button" id="db-reset" class="btn btn-sm btn-outline-secondary"
+                title="Remove all widgets and restore the built-in set">Reset layout</button>
+        <button type="button" id="db-refresh" class="btn btn-sm btn-outline-danger">Refresh</button>
+      </div>
+    </div>
+    <div id="db-error" class="text-warning small mt-2" style="display:none"></div>
+  </div>
+</div>
+
+<div class="row g-2 mb-3">
+  <div class="col-6 col-md"><div class="card border-secondary h-100"><div class="card-body py-2">
+    <div class="text-muted small">Total alerts</div><div class="fs-4 fw-bold" id="card-total">&ndash;</div></div></div></div>
+  <div class="col-6 col-md"><div class="card border-secondary h-100"><div class="card-body py-2">
+    <div class="text-muted small">Unique sources</div><div class="fs-4 fw-bold" id="card-src">&ndash;</div></div></div></div>
+  <div class="col-6 col-md"><div class="card border-secondary h-100"><div class="card-body py-2">
+    <div class="text-muted small" id="card-detail-label">Unique signatures</div><div class="fs-4 fw-bold" id="card-detail">&ndash;</div></div></div></div>
+  <div class="col-6 col-md"><div class="card border-secondary h-100"><div class="card-body py-2">
+    <div class="text-muted small">Escalated</div><div class="fs-4 fw-bold" id="card-esc">&ndash;</div></div></div></div>
+  <div class="col-6 col-md"><div class="card border-secondary h-100"><div class="card-body py-2">
+    <div class="text-muted small">Busiest sensor</div><div class="fs-6 fw-bold text-truncate" id="card-busiest">&ndash;</div></div></div></div>
+</div>
+
+<div class="grid-stack"></div>
+
+<!-- Add / configure widget modal -->
+<div class="modal fade" id="widget-modal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content bg-dark text-light border-secondary">
+      <div class="modal-header py-2 border-secondary">
+        <h6 class="modal-title" id="widget-modal-title">Add widget</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label small text-muted mb-1">Type</label>
+          <select id="wm-type" class="form-select form-select-sm">
+            <option value="timeseries">Alerts over time</option>
+            <option value="top">Top values</option>
+            <option value="countries">Source countries</option>
+          </select>
+        </div>
+        <div class="mb-2" id="wm-column-wrap">
+          <label class="form-label small text-muted mb-1">Column</label>
+          <select id="wm-column" class="form-select form-select-sm"></select>
+        </div>
+        <div class="mb-2" id="wm-measure-wrap">
+          <label class="form-label small text-muted mb-1">Measure</label>
+          <select id="wm-measure" class="form-select form-select-sm"></select>
+        </div>
+        <div class="mb-2" id="wm-style-wrap">
+          <label class="form-label small text-muted mb-1">Style</label>
+          <select id="wm-style" class="form-select form-select-sm">
+            <option value="bar">Bar</option>
+            <option value="pie">Pie</option>
+          </select>
+        </div>
+        <div class="mb-2" id="wm-limit-wrap">
+          <label class="form-label small text-muted mb-1">Count (1&ndash;50)</label>
+          <input type="number" id="wm-limit" class="form-control form-control-sm" min="1" max="50" step="1" value="10">
+        </div>
+        <div class="mb-2" id="wm-group-wrap">
+          <label class="form-label small text-muted mb-1">Group by</label>
+          <select id="wm-group" class="form-select form-select-sm"></select>
+        </div>
+        <div class="text-muted small">Uses the dashboard's current table (<span id="wm-table"></span>),
+          time range, and GPCD setting.</div>
+      </div>
+      <div class="modal-footer py-2 border-secondary">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-sm btn-danger" id="wm-save">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/vendor/Chart.js"></script>
+<script src="/vendor/gridstack/gridstack-all.js"></script>
+<script>
+(function() {
+  Chart.defaults.color = '#adb5bd';
+  Chart.defaults.borderColor = 'rgba(255,255,255,0.08)';
+  Chart.defaults.font.size = 11;
+
+  var GROUP_COL = { suricata: 'classification', sagan: 'classification', cape: 'target' };
+  var PALETTE = ['#dc3545','#0d6efd','#fd7e14','#20c997','#6f42c1','#ffc107','#0dcaf0','#d63384','#198754','#adb5bd'];
+
+  // The widget set a fresh (or reset) dashboard starts with -- a Suricata-shaped
+  // SIEM overview. Every panel is an ordinary widget, so it can be reconfigured,
+  // removed, or added to; on Sagan/CAPE a panel whose column does not exist just
+  // notes so.
+  var DEFAULT_WIDGETS = [
+    { type: 'timeseries', config: { group_by: 'classification' },         x: 0,  y: 0, w: 10, h: 4 },
+    { type: 'top',        config: { column: 'mitre_tactic', style: 'pie' },x: 10, y: 0, w: 2,  h: 4 },
+    { type: 'top',        config: { column: 'classification' },        x: 0, y: 4,  w: 4,  h: 4 },
+    { type: 'top',        config: { column: 'signature' },             x: 4, y: 4,  w: 4,  h: 4 },
+    { type: 'top',        config: { column: 'severity', style: 'pie' },      x: 8,  y: 4, w: 2, h: 4 },
+    { type: 'top',        config: { column: 'mitre_technique', style: 'pie' },x: 10, y: 4, w: 2, h: 4 },
+    { type: 'top',        config: { column: 'src_ip' },                x: 0, y: 8,  w: 4,  h: 4 },
+    { type: 'top',        config: { column: 'dest_ip' },               x: 4, y: 8,  w: 4,  h: 4 },
+    { type: 'top',        config: { column: 'dest_port' },             x: 8, y: 8,  w: 4,  h: 4 },
+    { type: 'top',        config: { column: 'app_proto', style: 'pie' },x: 0, y: 12, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'instance' },              x: 4, y: 12, w: 4,  h: 4 },
+    { type: 'countries',  config: {},                                  x: 8, y: 12, w: 4,  h: 4 },
+    { type: 'timeseries', config: { measure: 'bytes' },                x: 0, y: 16, w: 12, h: 4 },
+    { type: 'top',        config: { column: 'src_ip', measure: 'bytes' },             x: 0, y: 20, w: 6, h: 4 },
+    { type: 'top',        config: { column: 'src_ip', measure: 'distinct_dest_port' },x: 6, y: 20, w: 6, h: 4 }
+  ];
+
+  var state   = { table: '<%= $table %>', mins: <%= $go_back_minutes %>, showGpcd: <%= $show_gpcd ? 'true' : 'false' %> };
+  var widgets = [];      // [{ id, type, config, x, y, w, h }]
+  var charts  = {};      // widget id -> Chart
+  var colsCache = {};    // table -> [columns]
+  var measuresCache = {}; // table -> [{name,label}]
+  var suppressSave = false;
+
+  function uid() { return 'w' + Math.random().toString(36).slice(2, 9); }
+
+  // Compact number for axis ticks / large measures (bytes): 1500 -> 1.5K.
+  function fmtNum(n) {
+    n = Number(n) || 0;
+    var u = ['', 'K', 'M', 'G', 'T'], i = 0;
+    while (Math.abs(n) >= 1000 && i < u.length - 1) { n /= 1000; i++; }
+    return (i === 0 ? n : n.toFixed(n < 10 ? 1 : 0)) + u[i];
+  }
+  function baseOpts(extra) {
+    var o = { responsive: true, maintainAspectRatio: false, animation: false };
+    for (var k in (extra || {})) { o[k] = extra[k]; }
+    return o;
+  }
+  function resizeAllCharts() { Object.keys(charts).forEach(function(id) { if (charts[id]) { charts[id].resize(); } }); }
+  function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+  function flag(cc) {
+    if (!/^[A-Za-z]{2}$/.test(cc)) { return ''; }
+    return String.fromCodePoint.apply(null, cc.toUpperCase().split('').map(function(c) { return 0x1F1E6 + c.charCodeAt(0) - 65; }));
+  }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function bucketLabel(epoch) {
+    var d = new Date(epoch * 1000);
+    var hm = pad(d.getHours()) + ':' + pad(d.getMinutes());
+    return state.mins <= 1440 ? hm : (pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + hm);
+  }
+  function bucketUnit() { return state.mins <= 180 ? 'minute' : (state.mins <= 20160 ? 'hour' : 'day'); }
+
+  function qs(extra) {
+    var s = '?table=' + encodeURIComponent(state.table) + '&go_back_minutes=' + encodeURIComponent(state.mins);
+    if (state.showGpcd) { s += '&show_gpcd=1'; }
+    for (var k in (extra || {})) { if (extra[k] !== undefined && extra[k] !== '') { s += '&' + k + '=' + encodeURIComponent(extra[k]); } }
+    return s;
+  }
+  function getJSON(url) {
+    return fetch(url).then(function(r) {
+      return r.json().then(function(body) {
+        if (!r.ok) { throw new Error(body && body.error ? body.error : ('HTTP ' + r.status)); }
+        return body;
+      });
+    });
+  }
+  function showError(msg) { var el = document.getElementById('db-error'); el.textContent = 'Error: ' + msg; el.style.display = ''; }
+  function clearError() { document.getElementById('db-error').style.display = 'none'; }
+
+  // ---- widget DOM ----
+  function measureLabel(table, name) {
+    if (!name || name === 'count') { return ''; }
+    var list = measuresCache[table] || [];
+    for (var i = 0; i < list.length; i++) { if (list[i].name === name) { return list[i].label; } }
+    return name.replace(/_/g, ' ');
+  }
+  function widgetTitle(w) {
+    var m = measureLabel(state.table, w.config.measure);
+    if (w.type === 'timeseries') {
+      return (m || 'Alerts') + ' over time' + (w.config.group_by ? ' (by ' + w.config.group_by + ')' : '');
+    }
+    if (w.type === 'top')       { return 'Top ' + (w.config.column || '') + (m ? ' by ' + m : ''); }
+    if (w.type === 'countries') { return 'Source countries'; }
+    return 'Widget';
+  }
+  function widgetEl(w) {
+    var el = document.createElement('div');
+    el.className = 'grid-stack-item';
+    el.setAttribute('gs-id', w.id);
+    el.setAttribute('gs-x', w.x); el.setAttribute('gs-y', w.y);
+    el.setAttribute('gs-w', w.w); el.setAttribute('gs-h', w.h);
+    el.innerHTML =
+      '<div class="grid-stack-item-content">'
+      + '<div class="card border-secondary h-100 mb-0 db-card"><div class="card-body p-2 d-flex flex-column">'
+      +   '<div class="d-flex align-items-center mb-1">'
+      +     '<h6 class="card-title db-handle mb-0 flex-grow-1 text-truncate" data-role="title"></h6>'
+      +     '<a href="#" class="db-wbtn text-secondary ms-2" data-act="config" title="Configure">&#9881;</a>'
+      +     '<a href="#" class="db-wbtn text-secondary ms-2" data-act="remove" title="Remove">&times;</a>'
+      +   '</div>'
+      +   '<div class="text-muted small" data-role="note" style="display:none"></div>'
+      +   '<div class="db-chart"><canvas data-role="canvas"></canvas></div>'
+      + '</div></div>'
+      + '</div>';
+    el.querySelector('[data-role=title]').textContent = widgetTitle(w);
+    el.querySelector('canvas').id = 'chart-' + w.id;
+    return el;
+  }
+  function itemFor(id) { return document.querySelector('.grid-stack-item[gs-id="' + id + '"]'); }
+  function showNote(w, msg) {
+    var it = itemFor(w.id); if (!it) { return; }
+    it.querySelector('[data-role=note]').textContent = msg;
+    it.querySelector('[data-role=note]').style.display = '';
+    it.querySelector('canvas').style.display = 'none';
+    destroyChart(w.id);
+  }
+  function clearNote(w) {
+    var it = itemFor(w.id); if (!it) { return; }
+    it.querySelector('[data-role=note]').style.display = 'none';
+    it.querySelector('canvas').style.display = '';
+  }
+
+  // ---- chart renderers ----
+  function renderTop(w, cv, rows) {
+    destroyChart(w.id);
+    var labels = rows.map(function(r) { return r.value; });
+    var counts = rows.map(function(r) { return r.count; });
+    if ((w.config && w.config.style) === 'pie') {
+      charts[w.id] = new Chart(cv, {
+        type: 'pie',
+        data: { labels: labels,
+                datasets: [{ data: counts, backgroundColor: rows.map(function(_, i) { return PALETTE[i % PALETTE.length]; }) }] },
+        options: baseOpts({ plugins: { legend: { display: true, position: 'right' } } })
+      });
+    } else {
+      charts[w.id] = new Chart(cv, {
+        type: 'bar',
+        data: { labels: labels, datasets: [{ data: counts, backgroundColor: PALETTE[0] }] },
+        options: baseOpts({
+          indexAxis: 'y',
+          scales: { x: { beginAtZero: true, ticks: { callback: fmtNum } } },
+          plugins: { legend: { display: false } }
+        })
+      });
+    }
+  }
+  function renderTimeseries(id, cv, body) {
+    destroyChart(id);
+    var rows = body.rows || [], bset = {}, gset = {};
+    rows.forEach(function(r) { bset[r.bucket] = 1; if (r.group !== undefined) { gset[r.group] = 1; } });
+    var buckets = Object.keys(bset).map(Number).sort(function(a, b) { return a - b; });
+    var bindex = {}; buckets.forEach(function(b, i) { bindex[b] = i; });
+    var groups = Object.keys(gset), datasets;
+    if (body.grouped && groups.length) {
+      datasets = groups.map(function(g, i) {
+        var data = buckets.map(function() { return 0; });
+        rows.forEach(function(r) { if (r.group === g) { data[bindex[r.bucket]] = r.count; } });
+        var c = PALETTE[i % PALETTE.length];
+        return { label: g, data: data, backgroundColor: c, borderColor: c, stack: 's' };
+      });
+    } else {
+      var data = buckets.map(function() { return 0; });
+      rows.forEach(function(r) { data[bindex[r.bucket]] = r.count; });
+      datasets = [{ label: 'alerts', data: data, backgroundColor: PALETTE[1], borderColor: PALETTE[1] }];
+    }
+    charts[id] = new Chart(cv, {
+      type: 'bar', data: { labels: buckets.map(bucketLabel), datasets: datasets },
+      options: baseOpts({
+        interaction: { mode: 'index', intersect: false },
+        scales: { x: { stacked: true, ticks: { maxRotation: 0, autoSkip: true } },
+                  y: { stacked: true, beginAtZero: true, ticks: { callback: fmtNum } } },
+        plugins: { legend: { display: datasets.length > 1, position: 'bottom' } }
+      })
+    });
+  }
+  function renderCountries(w, cv, body) {
+    if (!body.enabled) { showNote(w, 'GeoIP is not configured on this server.'); return; }
+    clearNote(w);
+    destroyChart(w.id);
+    var rows = body.rows || [];
+    charts[w.id] = new Chart(cv, {
+      type: 'bar',
+      data: { labels: rows.map(function(r) { return (flag(r.country) + ' ' + r.country).trim(); }),
+              datasets: [{ data: rows.map(function(r) { return r.count; }), backgroundColor: PALETTE[3] }] },
+      options: baseOpts({ indexAxis: 'y', scales: { x: { beginAtZero: true } }, plugins: { legend: { display: false } } })
+    });
+  }
+
+  // ---- data loading ----
+  function renderCards(d) {
+    document.getElementById('card-total').textContent  = d.total;
+    document.getElementById('card-src').textContent    = d.distinct_src_ip;
+    document.getElementById('card-detail').textContent = d.distinct_detail;
+    document.getElementById('card-detail-label').textContent = 'Unique ' + d.detail_label + 's';
+    document.getElementById('card-esc').textContent    = d.escalated;
+    var b = d.busiest_instance;
+    document.getElementById('card-busiest').textContent = b ? (b.value + ' (' + b.count + ')') : '–';
+  }
+  function loadWidget(w) {
+    var cv = document.getElementById('chart-' + w.id);
+    if (!cv) { return; }
+    if (w.type === 'top') {
+      getJSON('/api/dashboard/top' + qs({ column: w.config.column, limit: w.config.limit || 10, measure: w.config.measure }))
+        .then(function(b) { clearNote(w); renderTop(w, cv, b.rows || []); })
+        .catch(function(e) { showNote(w, e.message); });
+    } else if (w.type === 'timeseries') {
+      getJSON('/api/dashboard/timeseries' + qs({ bucket: bucketUnit(), group_by: w.config.group_by, top_groups: 6, measure: w.config.measure }))
+        .then(function(b) { clearNote(w); renderTimeseries(w.id, cv, b); })
+        .catch(function(e) { showNote(w, e.message); });
+    } else if (w.type === 'countries') {
+      getJSON('/api/dashboard/countries' + qs())
+        .then(function(b) { renderCountries(w, cv, b); })
+        .catch(function(e) { showNote(w, e.message); });
+    }
+  }
+  function refresh() {
+    clearError();
+    getJSON('/api/dashboard/summary' + qs()).then(renderCards).catch(function(e) { showError(e.message); });
+    widgets.forEach(loadWidget);
+  }
+
+  // ---- Gridstack ----
+  var grid = GridStack.init({ column: 12, cellHeight: 70, margin: 6, float: false,
+                              handle: '.db-handle', resizable: { handles: 'se' } });
+
+  function rebuildGrid() {
+    suppressSave = true;
+    Object.keys(charts).forEach(destroyChart);
+    grid.removeAll();
+    widgets.forEach(function(w) { var el = widgetEl(w); grid.el.appendChild(el); grid.makeWidget(el); });
+    setTimeout(function() { suppressSave = false; }, 0);
+  }
+  function currentLayout() {
+    return (grid.save(false) || []).map(function(n) {
+      var w = widgets.filter(function(x) { return x.id === n.id; })[0] || {};
+      return { id: n.id, type: w.type, config: w.config || {}, x: n.x, y: n.y, w: n.w, h: n.h };
+    }).filter(function(n) { return n.type; });
+  }
+  function postLayout(layout) {
+    return fetch('/api/dashboard/layout', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ layout: layout }) });
+  }
+  var saveTimer;
+  function saveLayout() {
+    var layout = currentLayout();
+    widgets = layout.map(function(n) { return { id: n.id, type: n.type, config: n.config, x: n.x, y: n.y, w: n.w, h: n.h }; });
+    postLayout(layout).catch(function() {});
+  }
+  grid.on('change', function() { if (suppressSave) { return; } clearTimeout(saveTimer); saveTimer = setTimeout(saveLayout, 800); });
+  grid.on('resize', resizeAllCharts);
+  grid.on('resizestop', resizeAllCharts);
+
+  // config / remove buttons (event-delegated on the grid)
+  grid.el.addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-act]'); if (!btn) { return; }
+    e.preventDefault();
+    var item = btn.closest('.grid-stack-item'); var id = item && item.getAttribute('gs-id'); if (!id) { return; }
+    if (btn.getAttribute('data-act') === 'remove') {
+      destroyChart(id); grid.removeWidget(item);
+      widgets = widgets.filter(function(x) { return x.id !== id; });
+      saveLayout();
+    } else {
+      openModal(id);
+    }
+  });
+
+  // ---- widget config modal ----
+  var modal, editingId = null;
+  function getModal() { modal = modal || new bootstrap.Modal(document.getElementById('widget-modal')); return modal; }
+  function loadColumns(table) {
+    if (colsCache[table]) { return Promise.resolve(colsCache[table]); }
+    return getJSON('/api/dashboard/columns?table=' + encodeURIComponent(table)).then(function(d) {
+      colsCache[table] = d.columns || []; return colsCache[table];
+    });
+  }
+  function loadMeasures(table) {
+    if (measuresCache[table]) { return Promise.resolve(measuresCache[table]); }
+    return getJSON('/api/dashboard/measures?table=' + encodeURIComponent(table)).then(function(d) {
+      measuresCache[table] = d.measures || []; return measuresCache[table];
+    });
+  }
+  function syncModalFields() {
+    var t = document.getElementById('wm-type').value;
+    document.getElementById('wm-column-wrap').style.display  = (t === 'top') ? '' : 'none';
+    document.getElementById('wm-style-wrap').style.display   = (t === 'top') ? '' : 'none';
+    document.getElementById('wm-limit-wrap').style.display   = (t === 'top') ? '' : 'none';
+    document.getElementById('wm-group-wrap').style.display   = (t === 'timeseries') ? '' : 'none';
+    document.getElementById('wm-measure-wrap').style.display = (t === 'top' || t === 'timeseries') ? '' : 'none';
+  }
+  function openModal(id) {
+    editingId = id || null;
+    var w = id ? widgets.filter(function(x) { return x.id === id; })[0] : null;
+    document.getElementById('widget-modal-title').textContent = id ? 'Configure widget' : 'Add widget';
+    document.getElementById('wm-table').textContent = state.table;
+    document.getElementById('wm-type').value = w ? w.type : 'timeseries';
+    Promise.all([loadColumns(state.table), loadMeasures(state.table)]).then(function(res) {
+      var cols = res[0], meas = res[1];
+      var colSel = document.getElementById('wm-column'), grpSel = document.getElementById('wm-group');
+      var measSel = document.getElementById('wm-measure');
+      colSel.innerHTML = ''; grpSel.innerHTML = '<option value="">(none)</option>'; measSel.innerHTML = '';
+      cols.forEach(function(c) {
+        var o1 = document.createElement('option'); o1.value = c; o1.textContent = c; colSel.appendChild(o1);
+        var o2 = document.createElement('option'); o2.value = c; o2.textContent = c; grpSel.appendChild(o2);
+      });
+      meas.forEach(function(m) {
+        var o = document.createElement('option'); o.value = m.name; o.textContent = m.label; measSel.appendChild(o);
+      });
+      if (w && w.type === 'top') { colSel.value = w.config.column || ''; }
+      if (w && w.type === 'timeseries') { grpSel.value = w.config.group_by || ''; }
+      document.getElementById('wm-style').value = (w && w.config.style) ? w.config.style : 'bar';
+      document.getElementById('wm-limit').value = (w && w.config.limit) ? w.config.limit : 10;
+      measSel.value = (w && w.config.measure) ? w.config.measure : 'count';
+    }).catch(function() {}).then(function() { syncModalFields(); getModal().show(); });
+  }
+  document.getElementById('wm-type').addEventListener('change', syncModalFields);
+  document.getElementById('wm-save').addEventListener('click', function() {
+    var t = document.getElementById('wm-type').value, config = {};
+    var measure = document.getElementById('wm-measure').value;
+    if (t === 'top') {
+      config.column = document.getElementById('wm-column').value;
+      config.style = document.getElementById('wm-style').value;
+      var lim = parseInt(document.getElementById('wm-limit').value, 10);
+      if (isNaN(lim) || lim < 1) { lim = 1; } if (lim > 50) { lim = 50; }
+      config.limit = lim;
+    }
+    if (t === 'timeseries') { var g = document.getElementById('wm-group').value; if (g) { config.group_by = g; } }
+    if ((t === 'top' || t === 'timeseries') && measure && measure !== 'count') { config.measure = measure; }
+    if (editingId) {
+      var w = widgets.filter(function(x) { return x.id === editingId; })[0];
+      if (w) { w.type = t; w.config = config; }
+    } else {
+      widgets.push({ id: uid(), type: t, config: config, x: 0, y: 1000, w: 4, h: 4 });
+    }
+    getModal().hide();
+    rebuildGrid();
+    refresh();
+    setTimeout(saveLayout, 50);
+  });
+
+  // ---- controls ----
+  function markRange() {
+    document.querySelectorAll('#db-range button').forEach(function(b) { b.classList.toggle('active', Number(b.dataset.mins) === state.mins); });
+  }
+  document.getElementById('db-table').addEventListener('change', function() { state.table = this.value; refresh(); });
+  document.querySelectorAll('#db-range button').forEach(function(b) {
+    b.addEventListener('click', function() { state.mins = Number(this.dataset.mins); markRange(); refresh(); });
+  });
+  document.getElementById('db-gpcd').addEventListener('change', function() { state.showGpcd = this.checked; refresh(); });
+  document.getElementById('db-refresh').addEventListener('click', refresh);
+  document.getElementById('db-add-widget').addEventListener('click', function() { openModal(null); });
+  document.getElementById('db-reset').addEventListener('click', function() {
+    postLayout([]).then(function() { location.reload(); }).catch(function() { location.reload(); });
+  });
+
+  // ---- boot ----
+  function seedDefaults() { return DEFAULT_WIDGETS.map(function(w) { return { id: uid(), type: w.type, config: w.config, x: w.x, y: w.y, w: w.w, h: w.h }; }); }
+  markRange();
+  getJSON('/api/dashboard/layout').then(function(d) {
+    var L = (d && Array.isArray(d.layout)) ? d.layout.filter(function(w) { return w && w.type; }) : [];
+    widgets = L.length
+      ? L.map(function(w) { return { id: w.id || uid(), type: w.type, config: w.config || {}, x: w.x || 0, y: w.y || 0, w: w.w || 4, h: w.h || 4 }; })
+      : seedDefaults();
+  }).catch(function() { widgets = seedDefaults(); }).then(function() { rebuildGrid(); refresh(); });
+})();
+</script>

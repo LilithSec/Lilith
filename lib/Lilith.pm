@@ -3,13 +3,13 @@ package Lilith;
 use 5.006;
 use strict;
 use warnings;
-use POE              qw(Wheel::FollowTail);
-use JSON             qw( decode_json encode_json );
-use Sys::Hostname    qw( hostname );
-use DBI              ();
-use Digest::SHA      qw(sha256_base64);
-use Sys::Syslog      qw( closelog openlog syslog );
-use POSIX            qw( strftime );
+use POE                  qw(Wheel::FollowTail);
+use JSON                 qw( decode_json encode_json );
+use Sys::Hostname        qw( hostname );
+use DBI                  ();
+use Digest::SHA          qw(sha256_base64);
+use Sys::Syslog          qw( closelog openlog syslog );
+use POSIX                qw( strftime );
 use Lilith::Schema       ();
 use Lilith::Escalate     ();
 use Lilith::AutoEscalate ();
@@ -55,7 +55,6 @@ our %alert_columns = (
 		)
 	],
 );
-
 
 =head1 SYNOPSIS
 
@@ -195,17 +194,17 @@ sub new {
 
 	my $self = {
 		escalation_type_namespaces => $opts{escalation_type_namespaces},
-		sid_ignore            => $opts{sid_ignore},
-		suricata_sid_ignore   => $opts{suricata_sid_ignore},
-		sagan_sid_ignore      => $opts{sagan_sid_ignore},
-		class_ignore          => $opts{class_ignore},
-		suricata_class_ignore => $opts{suricata_class_ignore},
-		sagan_class_ignore    => $opts{sagan_class_ignore},
-		dsn                   => $opts{dsn},
-		user                  => $opts{user},
-		pass                  => $opts{pass},
-		debug                 => $opts{debug},
-		class_map             => {
+		sid_ignore                 => $opts{sid_ignore},
+		suricata_sid_ignore        => $opts{suricata_sid_ignore},
+		sagan_sid_ignore           => $opts{sagan_sid_ignore},
+		class_ignore               => $opts{class_ignore},
+		suricata_class_ignore      => $opts{suricata_class_ignore},
+		sagan_class_ignore         => $opts{sagan_class_ignore},
+		dsn                        => $opts{dsn},
+		user                       => $opts{user},
+		pass                       => $opts{pass},
+		debug                      => $opts{debug},
+		class_map                  => {
 			'Not Suspicious Traffic'                                      => '!SusT',
 			'Unknown Traffic'                                             => 'UnknownT',
 			'Attempted Information Leak'                                  => '!IL',
@@ -325,7 +324,7 @@ sub parse_eve {
 	my $json = $opts{json};
 
 	# only alert events are stored; anything else is skipped
-	if (   !defined($json)
+	if (  !defined($json)
 		|| ref($json) ne 'HASH'
 		|| !defined( $json->{event_type} )
 		|| $json->{event_type} ne 'alert' )
@@ -338,13 +337,12 @@ sub parse_eve {
 	my $host     = $opts{host};
 
 	# stable per-event handle; undef parts stringify to '' just as before
-	my $event_id = sha256_base64(
-		  ( defined($instance)            ? $instance            : '' )
-		. ( defined($host)                ? $host                : '' )
-		. ( defined( $json->{timestamp} ) ? $json->{timestamp}   : '' )
-		. ( defined( $json->{flow_id} )   ? $json->{flow_id}     : '' )
-		. ( defined( $json->{in_iface} )  ? $json->{in_iface}    : '' )
-	);
+	my $event_id
+		= sha256_base64( ( defined($instance) ? $instance : '' )
+			. ( defined($host)                ? $host              : '' )
+			. ( defined( $json->{timestamp} ) ? $json->{timestamp} : '' )
+			. ( defined( $json->{flow_id} )   ? $json->{flow_id}   : '' )
+			. ( defined( $json->{in_iface} )  ? $json->{in_iface}  : '' ) );
 
 	if ( defined($type) && $type eq 'suricata' ) {
 		return {
@@ -1401,7 +1399,7 @@ sub search {
 			push( @{ $search->{'-and'} }, { '-or' => \@positive } ) if @positive;
 			push( @{ $search->{'-and'} }, @negative );
 		}
-	}
+	} ## end if ( defined( $opts{ip} ) && $opts{ip} ne ...)
 
 	if ( defined( $opts{port} ) && $opts{port} ne '' ) {
 		my @tokens = ref $opts{port} eq 'ARRAY' ? @{ $opts{port} } : split( /\s*,\s*/, $opts{port} );
@@ -1440,8 +1438,12 @@ sub search {
 			}
 
 			if ( $equality eq '!=' ) {
-				push( @negative,
-					{ '-and' => [ { src_port => { $equality => $number } }, { dest_port => { $equality => $number } } ] }
+				push(
+					@negative,
+					{
+						'-and' =>
+							[ { src_port => { $equality => $number } }, { dest_port => { $equality => $number } } ]
+					}
 				);
 			} else {
 				push( @positive, { src_port => { $equality => $number } }, { dest_port => { $equality => $number } } );
@@ -1455,7 +1457,7 @@ sub search {
 			push( @{ $search->{'-and'} }, { '-or' => \@positive } ) if @positive;
 			push( @{ $search->{'-and'} }, @negative );
 		}
-	}
+	} ## end if ( defined( $opts{port} ) && $opts{port}...)
 
 	#
 	# handle string items
@@ -1483,7 +1485,7 @@ sub search {
 			} else {
 				push( @in, $val );
 			}
-		}
+		} ## end foreach my $val (@class_args)
 		if ( defined( $in[0] ) && !defined( $in[1] ) ) {
 			unshift( @positive, { '=' => $in[0] } );
 		} elsif ( defined( $in[1] ) ) {
@@ -1506,12 +1508,12 @@ sub search {
 			}
 			push( @{ $search->{'-and'} }, @clauses );
 		}
-	} ## end if ( defined( $opts{class} ) )
+	} ## end if ( defined( $opts{class} ) && $table ne ...)
 
 	my @strings = (
-		'host',         'instance_host', 'instance',
-		'signature',    'app_proto',     'in_iface', 'url',
-		'url_hostname', 'slug',          'pkg',      'subbed_from_host'
+		'host',      'instance_host', 'instance', 'signature',
+		'app_proto', 'in_iface',      'url',      'url_hostname',
+		'slug',      'pkg',           'subbed_from_host'
 	);
 	foreach my $item (@strings) {
 		if ( defined( $opts{$item} ) ) {
@@ -1696,10 +1698,10 @@ sub escalation_target_update {
 
 	my $existing = $self->escalation_target_get( $opts{id} );
 
-	my $name        = defined( $opts{name} ) && $opts{name} ne '' ? $opts{name} : $existing->{name};
-	my $type        = defined( $opts{type} ) && $opts{type} ne '' ? $opts{type} : $existing->{type};
-	my $config      = ref( $opts{config} ) eq 'HASH' ? $opts{config} : $existing->{config};
-	my $description = exists( $opts{description} ) ? $opts{description} : $existing->{description};
+	my $name        = defined( $opts{name} ) && $opts{name} ne '' ? $opts{name}        : $existing->{name};
+	my $type        = defined( $opts{type} ) && $opts{type} ne '' ? $opts{type}        : $existing->{type};
+	my $config      = ref( $opts{config} ) eq 'HASH'              ? $opts{config}      : $existing->{config};
+	my $description = exists( $opts{description} )                ? $opts{description} : $existing->{description};
 	my $enabled     = exists( $opts{enabled} ) ? ( $opts{enabled} ? 1 : 0 ) : ( $existing->{enabled} ? 1 : 0 );
 
 	my $module = Lilith::Escalate->type_module( $type, $self->{escalation_type_namespaces} );
@@ -1820,8 +1822,11 @@ sub escalate {
 				= $dbh->prepare(
 				'insert into escalations ( table_name, alert_id, event_id, target_id, target_name, status, note, requested_by, error )'
 					. ' VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ? ) RETURNING id;' );
-			$insert->execute( $opts{table}, $event->{id}, $event->{event_id},
-				$row_target_id, $target_name, $status, $opts{note}, $opts{requested_by}, $error );
+			$insert->execute(
+				$opts{table},   $event->{id},        $event->{event_id},
+				$row_target_id, $target_name,        $status,
+				$opts{note},    $opts{requested_by}, $error
+			);
 			($escalation_id) = $insert->fetchrow_array;
 
 			my $append
@@ -1839,7 +1844,7 @@ sub escalate {
 		}
 
 		return $escalation_id;
-	};
+	}; ## end $record = sub
 
 	my @results;
 	foreach my $target_id ( @{ $opts{target_ids} } ) {
@@ -1855,11 +1860,8 @@ sub escalate {
 				= !$target
 				? 'no escalation target with the id "' . $target_id . '"'
 				: 'escalation target "' . $target->{name} . '" is disabled';
-			my $escalation_id = $record->(
-				( $target ? $target_id       : undef ),
-				( $target ? $target->{name} : undef ),
-				'failed', $error
-			);
+			my $escalation_id = $record->( ( $target ? $target_id : undef ), ( $target ? $target->{name} : undef ),
+				'failed', $error );
 			push(
 				@results,
 				{
@@ -1887,7 +1889,7 @@ sub escalate {
 				target_name  => $target->{name},
 			);
 		};
-		my $error  = $@ ? $@ : undef;
+		my $error  = $@     ? $@       : undef;
 		my $status = $error ? 'failed' : 'sent';
 
 		my $raw_json;
@@ -1908,7 +1910,7 @@ sub escalate {
 				error         => $error,
 			}
 		);
-	} ## end foreach my $target_id ( @{ $opts{target_ids} ...})
+	} ## end foreach my $target_id ( @{ $opts{target_ids} } )
 
 	return \@results;
 } ## end sub escalate
@@ -2107,16 +2109,20 @@ sub auto_escalation_create {
 	}
 
 	my $enabled = ( !defined( $opts{enabled} ) || $opts{enabled} ) ? 1 : 0;
-	my $stop    = $opts{stop_on_match} ? 1 : 0;
+	my $stop    = $opts{stop_on_match}                             ? 1 : 0;
 
 	my $dbh = $self->_escalation_dbh;
 
 	my $sth
 		= $dbh->prepare(
-		'insert into auto_escalations ( name, enabled, priority, tables, rule, stop_on_match, description )'
+			  'insert into auto_escalations ( name, enabled, priority, tables, rule, stop_on_match, description )'
 			. ' VALUES ( ?, ?, ?, ?::varchar[], ?, ?, ? ) RETURNING id;' );
-	$sth->execute( $opts{name}, $enabled, $priority, $self->_pg_text_array($tables),
-		encode_json( $opts{rule} ), $stop, $opts{description} );
+	$sth->execute(
+		$opts{name}, $enabled, $priority,
+		$self->_pg_text_array($tables),
+		encode_json( $opts{rule} ),
+		$stop, $opts{description}
+	);
 
 	my ($id) = $sth->fetchrow_array;
 
@@ -2143,7 +2149,7 @@ sub auto_escalation_update {
 	my $existing = $self->auto_escalation_get( $opts{id} );
 
 	my $name = defined( $opts{name} ) && $opts{name} ne '' ? $opts{name} : $existing->{name};
-	my $rule = ref( $opts{rule} ) eq 'HASH' ? $opts{rule} : $existing->{rule};
+	my $rule = ref( $opts{rule} ) eq 'HASH'                ? $opts{rule} : $existing->{rule};
 	Lilith::AutoEscalate->check_rule($rule);
 
 	my $tables = exists( $opts{tables} ) ? $self->_auto_check_tables( $opts{tables} ) : $existing->{tables};
@@ -2153,9 +2159,10 @@ sub auto_escalation_update {
 		die('"priority" must be an integer');
 	}
 
-	my $stop = exists( $opts{stop_on_match} ) ? ( $opts{stop_on_match} ? 1 : 0 ) : ( $existing->{stop_on_match} ? 1 : 0 );
+	my $stop
+		= exists( $opts{stop_on_match} ) ? ( $opts{stop_on_match} ? 1 : 0 ) : ( $existing->{stop_on_match} ? 1 : 0 );
 	my $enabled     = exists( $opts{enabled} )     ? ( $opts{enabled} ? 1 : 0 ) : ( $existing->{enabled} ? 1 : 0 );
-	my $description = exists( $opts{description} ) ? $opts{description}          : $existing->{description};
+	my $description = exists( $opts{description} ) ? $opts{description}         : $existing->{description};
 
 	my $dbh = $self->_escalation_dbh;
 
@@ -2293,7 +2300,7 @@ sub auto_escalation_preview {
 				malscore       => $event->{malscore},
 			}
 		);
-	} ## end foreach my $match ( @{$matches...})
+	} ## end foreach my $match ( @{$matches} )
 
 	return {
 		table           => $table,
@@ -2348,8 +2355,8 @@ sub auto_escalate {
 		die( '"' . $minutes . '" for go_back_minutes is not numeric' );
 	}
 
-	my $dry = $opts{dry_run} ? 1 : 0;
-	my $by = defined( $opts{requested_by} ) && $opts{requested_by} ne '' ? $opts{requested_by} : 'auto';
+	my $dry = $opts{dry_run}                                              ? 1                   : 0;
+	my $by  = defined( $opts{requested_by} ) && $opts{requested_by} ne '' ? $opts{requested_by} : 'auto';
 
 	my $dbh = $self->_escalation_dbh;
 
@@ -2400,7 +2407,8 @@ sub _auto_escalate_table {
 	}
 
 	# candidate alerts: not yet considered, within the window
-	my $esth = $dbh->prepare( 'select * from '
+	my $esth
+		= $dbh->prepare( 'select * from '
 			. $alert_table
 			. ' where auto_escalated is null and '
 			. $time_column
@@ -2494,13 +2502,14 @@ sub _auto_escalate_table {
 
 				my $usth
 					= $dbh->prepare(
-					'update auto_escalations set last_matched = now(), match_count = match_count + 1 where id = ?;');
+						'update auto_escalations set last_matched = now(), match_count = match_count + 1 where id = ?;'
+					);
 				$usth->execute( $rule->{id} );
-			}
+			} ## end else [ if ($@) ]
 		} ## end else [ if ( !@ids ) ]
 
 		push( @{ $summary->{escalations} }, $entry );
-	} ## end foreach my $match ( @{$matches...})
+	} ## end foreach my $match ( @{$matches} )
 
 	$self->_auto_mark( \@events, $dbh, $alert_table ) if !$opts{dry_run};
 
@@ -2555,7 +2564,7 @@ sub _auto_decode_tables {
 			$part;
 		} split( /,/, $inner );
 		return \@parts;
-	} ## end if ( defined($tables) &&...)
+	} ## end if ( defined($tables) && !ref($tables) )
 
 	return [];
 } ## end sub _auto_decode_tables
@@ -2575,7 +2584,7 @@ sub _auto_check_tables {
 	my @out;
 	foreach my $table ( @{$tables} ) {
 		if ( !defined($table) || !$valid{$table} ) {
-			die( '"'
+			die(      '"'
 					. ( defined($table) ? $table : 'undef' )
 					. '" is not a known table type; valid: suricata, sagan, cape' );
 		}
@@ -2608,7 +2617,7 @@ sub _escalation_dbh {
 	}
 
 	return $dbh;
-}
+} ## end sub _escalation_dbh
 
 sub _escalation_decode_config {
 	my ( $self, $config ) = @_;
@@ -2623,7 +2632,74 @@ sub _escalation_decode_config {
 	}
 
 	return ref $decoded eq 'HASH' ? $decoded : {};
+} ## end sub _escalation_decode_config
+
+=head2 stats
+
+    my $stats = $lilith->stats;
+
+Returns a L<Lilith::Stats> object built from this object's connection details,
+for the dashboard's aggregation queries.
+
+=cut
+
+sub stats {
+	my ($self) = @_;
+	require Lilith::Stats;
+	return Lilith::Stats->new( lilith => $self );
 }
+
+=head2 dashboard_get
+
+    my $board = $lilith->dashboard_get( name => 'default' );
+
+Returns a saved dashboard board as C<< { name, layout, is_default } >>, where
+C<layout> is the decoded JSON array of widget placements. Returns C<undef> when
+no board of that name exists. C<name> defaults to C<default>.
+
+=cut
+
+sub dashboard_get {
+	my ( $self, %opts ) = @_;
+
+	my $name = defined $opts{name} && $opts{name} ne '' ? $opts{name} : 'default';
+
+	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } );
+	my $sth = $dbh->prepare('select name, layout, is_default from dashboards where name = ?');
+	$sth->execute($name);
+	my $row = $sth->fetchrow_hashref;
+	return undef unless $row;
+
+	my $layout = eval { decode_json( $row->{layout} ) };
+	$row->{layout}     = ( ref $layout eq 'ARRAY' ) ? $layout : [];
+	$row->{is_default} = $row->{is_default}         ? 1       : 0;
+
+	return $row;
+} ## end sub dashboard_get
+
+=head2 dashboard_save
+
+    $lilith->dashboard_save( name => 'default', layout => \@placements );
+
+Upserts a dashboard board by name, storing C<layout> (an array ref of widget
+placements) as JSON. C<name> defaults to C<default>.
+
+=cut
+
+sub dashboard_save {
+	my ( $self, %opts ) = @_;
+
+	my $name   = defined $opts{name} && $opts{name} ne '' ? $opts{name}   : 'default';
+	my $layout = ( ref $opts{layout} eq 'ARRAY' )         ? $opts{layout} : [];
+	my $json   = encode_json($layout);
+
+	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } );
+	my $sth = $dbh->prepare( 'insert into dashboards (name, layout, updated) values (?, ?::jsonb, now())'
+			. ' on conflict (name) do update set layout = excluded.layout, updated = now()' );
+	$sth->execute( $name, $json );
+
+	return 1;
+} ## end sub dashboard_save
 
 =head1 AUTHOR
 

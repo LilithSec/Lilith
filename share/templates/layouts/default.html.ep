@@ -24,6 +24,10 @@
     <a class="navbar-brand" href="/">&#9889; LILITH</a>
     <div class="d-flex gap-2 ms-auto">
 
+      <!-- Primary views -->
+      <a class="btn btn-sm btn-outline-secondary" href="/search" id="nav-search">Search</a>
+      <a class="btn btn-sm btn-outline-secondary" href="/dashboard" id="nav-dashboard">Dashboard</a>
+
       <!-- IP Info -->
       <div class="dropdown">
         <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"

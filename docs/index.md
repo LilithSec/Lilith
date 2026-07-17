@@ -39,6 +39,9 @@ sensor boxes that hold no court of their own. See
 - [usage](usage.md) :: the `lilith` CLI, searching the annals, and the
   web frontend
 
+- [dashboard](dashboard.md) :: the configurable `/dashboard` overview —
+  its controls, widget types, and recipe panels per table
+
 - [escalation](escalation.md) :: sending word onward — targets, types,
   the escalation CLI, and the auto escalation rule DSL
 

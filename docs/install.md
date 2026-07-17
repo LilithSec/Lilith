@@ -80,25 +80,47 @@ user="lilith"
 pass="WhateverYouSetAsApassword"
 ```
 
-...and deploy the schema with `dbic-migration` (installed with
-DBIx::Class::Migration):
+...and deploy the schema into the empty database with `lilith deploy`, which
+reads `dsn`/`user`/`pass` from the config and installs the current schema
+version:
 
 ```shell
-dbic-migration --schema_class Lilith::Schema -P $password -U $user --dsn $dsn install
+lilith --config /usr/local/etc/lilith.toml deploy
 ```
+
+`lilith schema_version` prints the version recorded in the database against the
+one this release expects, and whether a deploy or upgrade is pending.
 
 ### Upgrading
 
+Move an already-deployed database to the schema this release expects with
+`lilith migrate` (a no-op when it is already current):
+
 ```shell
-dbic-migration --schema_class Lilith::Schema -P $password -U $user --dsn $dsn upgrade
+lilith --config /usr/local/etc/lilith.toml migrate
 ```
 
-If coming from an old unversioned schema (pre 3.0.0), mark it as version 1
-first and then upgrade:
+The 4 → 5 step is the first upgrade that adds indexes to existing tables
+rather than creating new ones, so on a database with a lot of history it does
+real work. A plain `CREATE INDEX` blocks writes — the ingest daemon and the
+receiver — until each index finishes building, while reads (search and the web
+frontend) keep working. Ingest is not lost (the tailer lags and catches up),
+but run the upgrade during a quiet window on a busy sensor. If that pause is
+unacceptable, build the indexes by hand with `CREATE INDEX CONCURRENTLY`
+(which does not block writes) before upgrading — `lilith migrate` runs each
+step in a transaction and `CONCURRENTLY` cannot, so it has to be done out of
+band. The index set is in
+`share/migrations/PostgreSQL/deploy/5/001-auto.sql`; it is a conservative
+default and any index a deployment does not search or graph by can be dropped.
+
+Both commands wrap `DBIx::Class::Migration`, so the underlying `dbic-migration`
+CLI still works if you need it. If coming from an old unversioned schema
+(pre 3.0.0), mark it as version 1 with `dbic-migration` first, then run
+`lilith migrate`:
 
 ```shell
 dbic-migration --schema_class Lilith::Schema -P $password -U $user --dsn $dsn --to_version 1 upgrade
-dbic-migration --schema_class Lilith::Schema -P $password -U $user --dsn $dsn upgrade
+lilith --config /usr/local/etc/lilith.toml migrate
 ```
 
 ## Running at boot

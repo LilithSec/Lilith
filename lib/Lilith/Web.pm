@@ -337,6 +337,15 @@ sub startup {
 	my $r = $self->routes;
 	$r->get('/')->to( cb => sub { $_[0]->redirect_to('/search') } );
 	$r->get('/search')->to('search#index');
+	$r->get('/dashboard')->to('dashboard#index');
+	$r->get('/api/dashboard/summary')->to('dashboard#summary');
+	$r->get('/api/dashboard/top')->to('dashboard#top');
+	$r->get('/api/dashboard/timeseries')->to('dashboard#timeseries');
+	$r->get('/api/dashboard/countries')->to('dashboard#countries');
+	$r->get('/api/dashboard/columns')->to('dashboard#columns');
+	$r->get('/api/dashboard/measures')->to('dashboard#measures');
+	$r->get('/api/dashboard/layout')->to('dashboard#layout');
+	$r->post('/api/dashboard/layout')->to('dashboard#layout_save');
 	$r->get('/event/:table/:id')->to('event#view');
 	$r->get('/event/:table/:id/body/:which/zip')->to('event#body_zip');
 	$r->get('/event/:table/:id/pcap')->to('event#pcap');

@@ -1,6 +1,94 @@
 Revision history for Lilith
 
 4.0.0	unreleased
+		 - Add MITRE ATT&CK tactic/technique as virtual Suricata dashboard
+		   dimensions, read from the alert.metadata a ruleset (e.g.
+		   Emerging Threats) tags on, with the underscored names spaced out
+		   for display and backed by partial expression indexes in schema
+		   version 8 (partial because MITRE is present on only a fraction
+		   of alerts). The default board gains a tactic pie beside the
+		   alerts-over-time chart (empty where the ruleset does not tag
+		   MITRE).
+		 - Give the top-values and alerts-over-time widgets a "measure":
+		   besides counting rows they can sum/average a numeric column or
+		   count distinct values, via a per-table catalog
+		   (GET /api/dashboard/measures over Lilith::Stats->measures). This
+		   turns the Suricata flow byte/packet counters into top-talker and
+		   bandwidth panels and the ports into port-scan / fan-out panels,
+		   and adds average/max malscore for CAPE. The default board gains
+		   a bandwidth chart plus top-talkers-by-bytes and fan-out panels,
+		   and bar/axis values are shown compactly (1.5K, 3.2M).
+		 - Ship a fuller Suricata-shaped default dashboard (alerts over
+		   time, top classifications/signatures, severity and app-protocol
+		   pies, top source/destination IPs and ports, per-sensor, and
+		   source countries) and document the dashboard, its widget types,
+		   and the recipe panels per table in docs/dashboard.md.
+		 - Make the dashboard panels configurable widgets rather than a
+		   fixed set. An "Add widget" picker builds timeseries, top-values
+		   (any column -- including a virtual "severity" read from the raw
+		   EVE for suricata, its 1-4 numbers shown as High/Medium/Low/
+		   Informational and ordered by that rank, backed by an expression
+		   index in schema version 7 -- drawn as a bar or pie, showing 1-50
+		   values), and source-country
+		   widgets; each has a gear to
+		   reconfigure and an x to remove, and the whole set drag/resizes
+		   and persists as before. The saved layout now stores each
+		   widget's type and config (not just its position), sanitized
+		   server-side against a type/config whitelist. A new
+		   GET /api/dashboard/columns endpoint (over Lilith::Stats->columns)
+		   drives the config pickers from the same whitelist the API
+		   validates against. A fresh or reset board starts from a
+		   built-in default widget set.
+		 - Make the dashboard panels draggable and resizable with
+		   Gridstack (vendored), laid out on a 12-column grid. The layout
+		   is saved to a new dashboards table (schema version 6) as a
+		   global "default" board -- the web UI is unauthenticated, so
+		   boards are shared rather than per-user -- via the
+		   GET/POST /api/dashboard/layout endpoints and Lilith's
+		   dashboard_get/dashboard_save. A "Reset layout" button restores
+		   the built-in positions.
+		 - Add a web dashboard at /dashboard: stat cards (total,
+		   escalated, unique sources, unique signatures/targets, busiest
+		   sensor), an alerts over time chart stacked by
+		   classification/target, six per-table top-N charts
+		   (classification/signature/program/src+dest IP/dest port/app
+		   proto/level/facility/target/pkg/malscore/url host), and a top
+		   source countries chart resolved through the GeoIP databases,
+		   with a table and time-range selector. Backed by
+		   Lilith::Web::Controller::Dashboard and the
+		   /api/dashboard/{summary,top,timeseries,countries} JSON endpoints
+		   over Lilith::Stats, drawn with a vendored Chart.js. A "Show
+		   GPCD" checkbox (off by default) toggles whether Generic Protocol
+		   Command Decode alerts are included. A Dashboard (and Search)
+		   link were added to the navbar.
+		 - Add Lilith::Stats, the dashboard's aggregation layer: total,
+		   distinct, top, and (bucketed, optionally grouped) timeseries
+		   over the suricata/sagan/cape alert tables, windowed on
+		   timestamp (or stop for cape) and leaning on the version-5
+		   indexes. Table/column/bucket names are whitelisted and the
+		   window/limit are integer-checked, so request parameters can be
+		   passed straight through. Reachable as $lilith->stats.
+		 - Fix the migration fixture directories never installing. The
+		   share/fixtures/<version>/conf dirs were kept by a .exists
+		   placeholder, but ExtUtils::Install hardcodes skipping that
+		   reserved MakeMaker marker name, so the dirs never reached the
+		   installed share tree and a non-root `lilith migrate` died
+		   trying to mkdir them under the root-owned share. Renamed the
+		   placeholder to "keep" so the directories install.
+		 - Add lilith deploy / migrate / schema_version commands wrapping
+		   DBIx::Class::Migration, so the schema is installed and upgraded
+		   with the same CLI and config file as everything else rather
+		   than by calling dbic-migration by hand. schema_version reports
+		   the deployed vs expected version and whether work is pending.
+		 - Add search / dashboard indexes (schema version 5). The alert
+		   tables previously carried only their primary key, so search()
+		   and any aggregation seq-scanned the whole table. Add the time
+		   column (timestamp, or stop for cape) plus composite
+		   (column, time) btrees over the top filters per table
+		   (classification, src_ip, sid; malscore/target for cape) so
+		   filtered "newest N" queries and time-windowed GROUP BYs use an
+		   index instead. Conservative set -- other cuts and a BRIN on the
+		   time column can be added per deployment.
 		 - Add mojo_lilith_receiver (Lilith::Receiver), a Mojolicious daemon
 		   that ingests pushed alert rows. A remote sensor parses its own
 		   EVE stream and POSTs each parse_eve row as JSON to
