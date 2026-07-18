@@ -44,7 +44,9 @@ sub app_for {
 		->element_exists( '#db-add-widget',                                   'has the Add widget button' )
 		->element_exists( '#widget-modal',                                    'has the widget config modal' )
 		->element_exists( '#wm-type',                                         'modal has a widget type selector' )
+		->element_exists( 'select#db-table option[value="baphomet"]', 'default-table selector offers baphomet' )
 		->element_exists( '#wm-table option[value="cape"]',                   'modal has a per-widget table selector' )
+		->element_exists( '#wm-table option[value="baphomet"]',               'per-widget table selector offers baphomet' )
 		->element_exists( '#wm-table option[value=""]',                       'and a Follow-default-table option' )
 		->element_exists_not( '#wm-table optgroup[label="Logs (Allani)"]', 'no log sources in the picker without Allani' )
 		->element_exists( '#wm-type option[value="stat"]',                    'modal offers a stat (text) widget type' )
@@ -53,6 +55,7 @@ sub app_for {
 		->element_exists( 'input#wm-limit[type="number"][min="1"][max="50"]', 'modal has a 1-50 count input' )
 		->element_exists( '[data-preset="suricata"]',                         'reset menu offers the Suricata preset' )
 		->element_exists( '[data-preset="cape"]',                             'reset menu offers the CAPE preset' )
+		->element_exists( '[data-preset="baphomet"]',                         'reset menu offers the Baphomet preset' )
 		->element_exists_not( '[data-preset="syslog"]', 'no log presets in the reset menu without Allani' )
 		->element_exists( 'select#db-board',                                  'has the dashboard selector' )
 		->element_exists( '#db-edit',                                         'has the Edit toggle' )
@@ -94,6 +97,14 @@ sub app_for {
 		->json_has( '/measures', 'measures returns a list' );
 	my %meas = map { $_->{name} => 1 } @{ $t->tx->res->json->{measures} };
 	ok( $meas{count} && $meas{bytes}, 'measures include count and bytes' );
+
+	# the same catalog endpoints answer for baphomet, driving its dashboard pickers
+	$t->get_ok('/api/dashboard/columns?table=baphomet')->status_is( 200, 'baphomet columns ok' );
+	my %bcols = map { $_ => 1 } @{ $t->tx->res->json->{columns} };
+	ok( $bcols{event_type} && $bcols{subject} && $bcols{severity}, 'baphomet columns list its dimensions' );
+	$t->get_ok('/api/dashboard/measures?table=baphomet')->status_is( 200, 'baphomet measures ok' );
+	my %bmeas = map { $_->{name} => 1 } @{ $t->tx->res->json->{measures} };
+	ok( $bmeas{avg_score} && $bmeas{max_score}, 'baphomet measures include the score aggregates' );
 
 	# The navbar link the layout now carries.
 	$t->get_ok('/search')->element_exists( 'a#nav-dashboard[href="/dashboard"]', 'navbar has a Dashboard link' );

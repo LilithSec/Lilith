@@ -76,6 +76,7 @@
             <li><h6 class="dropdown-header">Alerts</h6></li>
             <li><a class="dropdown-item" href="#" data-preset="suricata">Suricata</a></li>
             <li><a class="dropdown-item" href="#" data-preset="cape">CAPE</a></li>
+            <li><a class="dropdown-item" href="#" data-preset="baphomet">Baphomet</a></li>
             % if ($self->allani_enabled) {
             <li><hr class="dropdown-divider"></li>
             <li><h6 class="dropdown-header">Logs (Allani)</h6></li>
@@ -297,6 +298,27 @@
       { type: 'top',        config: { column: 'instance' },     x: 6, y: 13, w: 3, h: 4 },
       { type: 'countries',  config: {},                         x: 9, y: 13, w: 3, h: 4 },
       { type: 'timeseries', config: { measure: 'sum_size' },    x: 0, y: 17, w: 12, h: 4 }
+    ] },
+    // Baphomet -- its own judgment log (found/banish/noted/alert/sighting/sighted).
+    { key: 'baphomet', label: 'Baphomet (judgments overview)', table: 'baphomet', widgets: [
+      { type: 'stat', config: { metric: 'total', label: 'Total judgments' },                       x: 0, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { metric: 'distinct', column: 'src_ip', label: 'Unique offenders' }, x: 2, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { metric: 'distinct', column: 'subject', label: 'Unique subjects' }, x: 4, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { metric: 'escalated' },                                             x: 6, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { metric: 'busiest', column: 'kur', label: 'Busiest kur' },          x: 8, y: 0, w: 4, h: 1 },
+      { type: 'timeseries', config: { group_by: 'event_type' },              x: 0,  y: 1, w: 10, h: 4 },
+      { type: 'top',        config: { column: 'event_type', style: 'pie' },  x: 10, y: 1, w: 2,  h: 4 },
+      { type: 'top',        config: { column: 'classification' },        x: 0, y: 5,  w: 4, h: 4 },
+      { type: 'top',        config: { column: 'signature' },             x: 4, y: 5,  w: 4, h: 4 },
+      { type: 'top',        config: { column: 'severity', style: 'pie' },x: 8, y: 5,  w: 4, h: 4 },
+      { type: 'top',        config: { column: 'src_ip' },                x: 0, y: 9,  w: 4, h: 4 },
+      { type: 'top',        config: { column: 'subject' },               x: 4, y: 9,  w: 4, h: 4 },
+      { type: 'top',        config: { column: 'kur' },                   x: 8, y: 9,  w: 4, h: 4 },
+      { type: 'top',        config: { column: 'country', style: 'pie' }, x: 0, y: 13, w: 4, h: 4 },
+      { type: 'top',        config: { column: 'instance' },              x: 4, y: 13, w: 4, h: 4 },
+      { type: 'countries',  config: {},                                  x: 8, y: 13, w: 4, h: 4 },
+      { type: 'top',        config: { column: 'src_ip', measure: 'max_score' }, x: 0, y: 17, w: 6, h: 4 },
+      { type: 'timeseries', config: { measure: 'avg_score' },                   x: 6, y: 17, w: 6, h: 4 }
     ] },
     // Syslog (Allani log store).
     { key: 'syslog', label: 'Syslog', widgets: [

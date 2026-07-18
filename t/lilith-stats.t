@@ -52,12 +52,24 @@ use_ok('Lilith::Stats') or BAIL_OUT('Lilith::Stats failed to load');
 	eval { $s->columns('bogus') };
 	like( $@, qr/not a known table/, 'columns on an unknown table dies' );
 
+	# baphomet exposes its own dimensions to the dashboard pickers.
+	my %bc = map { $_ => 1 } @{ $s->columns('baphomet') };
+	ok( $bc{event_type} && $bc{subject} && $bc{kur} && $bc{severity} && $bc{country},
+		'columns(baphomet) lists its distinctive dimensions' );
+	ok( $bc{src_ip} && $bc{dest_ip} && $bc{classification} && $bc{signature},
+		'columns(baphomet) lists the reused dimensions' );
+	ok( !$bc{raw}, 'columns(baphomet) omits non-dimension columns' );
+
 	# measures() catalog (no database).
 	my %sm = map { $_->{name} => $_->{label} } @{ $s->measures('suricata') };
 	ok( $sm{count} && $sm{bytes} && $sm{distinct_dest_port}, 'suricata measures include count/bytes/fan-out' );
 	is( $s->measures('suricata')->[0]{name}, 'count', 'count is the first measure' );
 	my %cm = map { $_->{name} => 1 } @{ $s->measures('cape') };
 	ok( $cm{avg_malscore} && !$cm{bytes}, 'cape measures reflect its columns' );
+	my %bm = map { $_->{name} => 1 } @{ $s->measures('baphomet') };
+	ok( $bm{avg_score} && $bm{max_score} && $bm{distinct_src_ip} && $bm{distinct_dest_ip},
+		'baphomet measures include score aggregates and distinct-IP fan-out' );
+	is( $s->measures('baphomet')->[0]{name}, 'count', 'baphomet count is the first measure' );
 
 	# The time-window fragment: an absolute start/end range (quoted, cast) takes
 	# precedence over the now-relative go_back_minutes. Uses a mock quote so no
@@ -260,6 +272,44 @@ SKIP: {
 	eval { $ms->top( table => 'suricata', column => 'src_ip', measure => 'nope' ) };
 	like( $@, qr/not a known measure/, 'an unknown measure dies' );
 	$md->disconnect;
+
+	# ---- baphomet: the same aggregation surface backs its dashboard --------
+	# three banishes from 1.1.1.1 (scores 9/5/7), two sightings of a subject with
+	# no ip (scores 2/4), one found from 2.2.2.2 (score 3).
+	my @baph = (
+		[ 'banish',  '1.1.1.1', undef,     9 ],
+		[ 'banish',  '1.1.1.1', undef,     5 ],
+		[ 'banish',  '1.1.1.1', undef,     7 ],
+		[ 'sighted', undef,     'baduser', 2 ],
+		[ 'sighted', undef,     'baduser', 4 ],
+		[ 'found',   '2.2.2.2', undef,     3 ],
+	);
+	for my $b (@baph) {
+		$dbh->do(
+			"insert into baphomet_alerts (instance,host,timestamp,event_id,event_type,src_ip,subject,score,raw)"
+				. " values ('k','h', now(), 'e', ?, ?, ?, ?, '{}')",
+			undef, @$b
+		);
+	}
+
+	is( $s->total( table => 'baphomet' ), 6, 'baphomet total counts the judgment rows' );
+	is( $s->distinct( table => 'baphomet', column => 'src_ip' ),  2, 'baphomet distinct src_ip (nulls excluded)' );
+	is( $s->distinct( table => 'baphomet', column => 'subject' ), 1, 'baphomet distinct subject' );
+	is_deeply(
+		$s->top( table => 'baphomet', column => 'event_type' ),
+		[ { value => 'banish', count => 3 }, { value => 'sighted', count => 2 }, { value => 'found', count => 1 } ],
+		'baphomet top event_type ordered by count'
+	);
+	is_deeply(
+		$s->top( table => 'baphomet', column => 'src_ip', measure => 'max_score' ),
+		[ { value => '1.1.1.1', count => 9 }, { value => '2.2.2.2', count => 3 } ],
+		'baphomet top offenders by max score'
+	);
+
+	# escalated() reads the baphomet_alerts escalations array like the others
+	is( $s->escalated( table => 'baphomet' ), 0, 'no baphomet rows escalated yet' );
+	$dbh->do("update baphomet_alerts set escalations = '{1}' where event_type = 'found'");
+	is( $s->escalated( table => 'baphomet' ), 1, 'escalated counts the flagged baphomet row' );
 
 	$dbh->disconnect;
 	$pg->stop;

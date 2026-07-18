@@ -22,6 +22,11 @@ Revision history for Lilith
 		   out of the default rule-tables set, so an auto-escalation rule only
 		   acts on baphomet when it names it explicitly; existing rules are
 		   unaffected.
+		 - The dashboard fully supports baphomet: every widget type
+		   (stat/top/timeseries/countries) works against it, the column and
+		   measure pickers offer its dimensions (event_type, subject, severity,
+		   kur, country, ...) and score aggregates, and the Reset menu gains a
+		   built-in "Baphomet (judgments overview)" preset.
 		 - Lilith::search now accepts an explicit start/end time window (any
 		   Time::Piece::Guess-parseable time, bound as values and read in the
 		   DB session timezone) as an alternative to the now-relative

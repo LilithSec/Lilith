@@ -13,7 +13,7 @@ Along the top:
 - **Dashboard** — which saved board to show. Pick another to switch to it; the
   star (★) marks the default board (the one loaded first).
 - **Default table** — the default source for any widget that does not set its
-  own: Suricata, Sagan, or CAPE, and — when an [Allani](#allani-log-widgets)
+  own: Suricata, Sagan, CAPE, or Baphomet, and — when an [Allani](#allani-log-widgets)
   store is configured — the log sources `syslog`, `http (access)`, or
   `http error`. Each widget can override it (see the widget config below), so one
   board can span tables; a widget left to follow the default reads whichever it
@@ -53,7 +53,8 @@ editing controls:
 - **+ Add widget** — opens the widget picker (see below).
 - **Reset to…** — replaces this board's widgets with a built-in **preset**
   (after a confirm). The menu offers **Suricata** (the SIEM overview seeded on
-  the default board) and **CAPE**; when an [Allani](#allani-log-widgets) store is
+  the default board), **CAPE**, and **Baphomet** (a judgments overview); when an
+  [Allani](#allani-log-widgets) store is
   configured it also offers **Syslog**, **HTTP (access + error)** — a combined
   overview — **HTTP Access**, and **HTTP Error**. An alert preset also points the
   board's **Default table** at its table; a log preset instead pins each widget's
@@ -105,6 +106,9 @@ aggregate, instead of just counting rows:
   "Top values of `src_ip` by Distinct destination ports" surfaces **port scans /
   fan-out**.
 - **Average / Max malscore, Total size** (CAPE).
+- **Average / Max score, Distinct source / destination IPs** (Baphomet) — so
+  "Top values of `src_ip` by Max score" ranks the worst offenders by their
+  harshest judgment.
 
 ## Allani log widgets
 
