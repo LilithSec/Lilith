@@ -1,7 +1,7 @@
 package Lilith::Web::Controller::Event;
 
 use Mojo::Base 'Mojolicious::Controller';
-use JSON qw(decode_json);
+use JSON               qw(decode_json);
 use MIME::Base64       qw(decode_base64);
 use File::Temp         ();
 use Time::Piece::Guess ();
@@ -47,7 +47,7 @@ sub view {
 	# The default selection is the remote whose name matches the event instance.
 	# The filter/start/end are stashed so the UI can also show a local virani
 	# command for fetching the same flow on the box holding the PCAPs.
-	my @remotes = sort keys %{ $self->virani_remotes };
+	my @remotes        = sort keys %{ $self->virani_remotes };
 	my $pcap_available = 0;
 	my ( $pcap_filter, $pcap_start, $pcap_end, $pcap_default );
 	if ( $self->virani_enabled && $table eq 'suricata' && $event ) {
@@ -62,7 +62,7 @@ sub view {
 				$pcap_default = $event->{instance};
 			}
 		}
-	}
+	} ## end if ( $self->virani_enabled && $table eq 'suricata'...)
 
 	$self->stash(
 		event          => $event,
@@ -70,6 +70,7 @@ sub view {
 		id             => $id,
 		error          => $error,
 		pretty_raw     => $pretty_raw,
+		log_links      => ( $self->allani_enabled ? $self->_log_links($event) : [] ),
 		pcap_available => $pcap_available,
 		pcap_remotes   => \@remotes,
 		pcap_default   => $pcap_default,
@@ -166,7 +167,7 @@ sub _virani_fetch_args {
 	my $filter = 'host ' . $event->{src_ip} . ' and host ' . $event->{dest_ip};
 	if (   defined $event->{src_port}
 		&& defined $event->{dest_port}
-		&& $event->{src_port} =~ /^\d+$/
+		&& $event->{src_port}  =~ /^\d+$/
 		&& $event->{dest_port} =~ /^\d+$/ )
 	{
 		$filter .= ' and ( port ' . $event->{src_port} . ' or port ' . $event->{dest_port} . ' )';
@@ -182,6 +183,60 @@ sub _virani_fetch_args {
 
 	return ( $filter, $start, $end );
 } ## end sub _virani_fetch_args
+
+=head2 _log_links
+
+Builds the "logs around this event" deep-links into the Allani C</logs> page,
+as an array ref of C<< { label, url } >>. Keys the links off the event's host
+(syslog on that host) and source IP (interleaved http on that client), each only
+when the event carries the field. The C<go_back_minutes> window is sized to
+reach from a little before the event up to now (falling back to a day when the
+event time will not parse), so the event's surrounding log lines fall inside the
+now-relative window C</logs> searches. Returns an empty list for no event.
+
+=cut
+
+sub _log_links {
+	my ( $self, $event ) = @_;
+	return [] unless $event;
+
+	my $mins = 1440;
+	my $ts   = $event->{timestamp} // $event->{stop} // $event->{start};
+	if ( defined $ts ) {
+		my $t = eval { Time::Piece::Guess->guess_to_object( $ts, 1 ) };
+		if ( defined $t ) {
+			my $delta = int( ( time - $t->epoch ) / 60 ) + 60;    # +60 min buffer around the event
+			$mins = $delta if $delta > 0;
+			$mins = 44_640 if $mins > 44_640;                     # cap at ~31 days
+		}
+	}
+
+	my @links;
+	if ( defined $event->{host} && $event->{host} ne '' ) {
+		push(
+			@links,
+			{
+				label => 'syslog · host ' . $event->{host},
+				url   => $self->url_for('/logs')
+					->query( source => 'syslog', host => $event->{host}, go_back_minutes => $mins )
+					->to_string,
+			}
+		);
+	} ## end if ( defined $event->{host} && $event->{host...})
+	if ( defined $event->{src_ip} && $event->{src_ip} ne '' ) {
+		push(
+			@links,
+			{
+				label => 'http · client ' . $event->{src_ip},
+				url   => $self->url_for('/logs')
+					->query( source => 'http_all', client_ip => $event->{src_ip}, go_back_minutes => $mins )
+					->to_string,
+			}
+		);
+	} ## end if ( defined $event->{src_ip} && $event->{...})
+
+	return \@links;
+} ## end sub _log_links
 
 =head2 body_zip
 
@@ -213,8 +268,8 @@ sub body_zip {
 		return $self->render( text => 'event not found', status => 404 );
 	}
 
-	my $http = ref $event->{raw} eq 'HASH' ? $event->{raw}{http} : undef;
-	my $b64 = ref $http eq 'HASH' ? $http->{ 'http_' . $which . '_body' } : undef;
+	my $http = ref $event->{raw} eq 'HASH' ? $event->{raw}{http}                   : undef;
+	my $b64  = ref $http eq 'HASH'         ? $http->{ 'http_' . $which . '_body' } : undef;
 	unless ( defined $b64 && $b64 ne '' ) {
 		return $self->render( text => 'no body available', status => 404 );
 	}

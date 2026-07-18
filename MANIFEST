@@ -43,6 +43,7 @@ lib/Lilith/CLI/Command/ReceiverKeyUpdate.pm
 lib/Lilith/CLI/Command/Run.pm
 lib/Lilith/CLI/Command/SchemaVersion.pm
 lib/Lilith/CLI/Command/Search.pm
+lib/Lilith/Allani.pm
 lib/Lilith/Escalate.pm
 lib/Lilith/Escalate/Type/Email.pm
 lib/Lilith/Escalate/Type/Syslog.pm
@@ -62,6 +63,7 @@ MANIFEST			This list of files
 README.md
 share/migrations/PostgreSQL/deploy/1/001-auto.sql
 t/00-load.t
+t/allani-reader.t
 t/auto-escalate.t
 t/escalate.t
 t/fixtures-installable.t
@@ -85,6 +87,7 @@ t/web-auto-escalation.t
 t/web-dashboard.t
 t/web-escalation.t
 t/web-helpers.t
+t/web-logs.t
 t/web-referer.t
 t/web-routes.t
 src_bin/lilith
@@ -97,11 +100,15 @@ lib/Lilith/Web/Controller/Dashboard.pm
 lib/Lilith/Web/Controller/Escalation.pm
 lib/Lilith/Web/Controller/Search.pm
 lib/Lilith/Web/Controller/Event.pm
+lib/Lilith/Web/Controller/Logs.pm
 share/templates/layouts/default.html.ep
 share/templates/search/index.html.ep
 share/templates/search/_results.html.ep
 share/templates/dashboard/index.html.ep
 share/templates/event/view.html.ep
+share/templates/logs/index.html.ep
+share/templates/logs/_results.html.ep
+share/templates/logs/view.html.ep
 share/templates/escalation/index.html.ep
 share/templates/auto_escalation/index.html.ep
 share/public/vendor/bootstrap-5.3.3/css/bootstrap.min.css

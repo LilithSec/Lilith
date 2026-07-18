@@ -1,0 +1,137 @@
+package Lilith::Web::Controller::Logs;
+
+use Mojo::Base 'Mojolicious::Controller';
+use JSON qw(decode_json);
+
+=head1 NAME
+
+Lilith::Web::Controller::Logs - browse the logs stored in Allani.
+
+=head1 DESCRIPTION
+
+Serves the C</logs> search page and the C</logs/:source/:id> record view over a
+configured Allani log store (the C<[allani]> block in the config). Reached via
+the C<allani> helper, a L<Lilith::Allani> reader; the page is inert (and the nav
+entry hidden) unless C<allani_enabled>.
+
+=cut
+
+=head2 index
+
+C<GET /logs> -- the log search form and results. Mirrors the alert Search page:
+a sanitized C<source>, a C<go_back_minutes> window, C<limit>/C<offset>, an
+C<order_dir>, and per-source filters. With C<partial=1> only the results
+fragment is rendered (for auto-refresh).
+
+=cut
+
+sub index {
+	my $self = shift;
+
+	# Building the reader can die (e.g. [allani] set but Allani not installed);
+	# treat that as the feature being unavailable rather than a 500.
+	my ( $reader, $error );
+	if ( $self->allani_enabled ) {
+		eval { $reader = $self->allani };
+		$error = $@ if $@;
+	} else {
+		$error = 'Allani is not configured; add an [allani] block to the config.';
+	}
+	my $sources = $reader ? $reader->sources : [];
+
+	my $source = $self->param('source') // 'syslog';
+	$source = 'syslog' unless $reader && $reader->valid_source($source);
+
+	my $go_back_minutes = $self->param('go_back_minutes') // 1440;
+	my $limit           = $self->param('limit')           // 100;
+	my $offset          = $self->param('offset')          // 0;
+	my $order_dir       = $self->param('order_dir')       // 'DESC';
+	$order_dir = 'DESC' unless $order_dir =~ /^(?:ASC|DESC)$/;
+
+	# Forward only the filter params this source accepts (the reader derives that
+	# whitelist from Allani::Sources), so a param meant for another source cannot
+	# reach the query.
+	my %filters;
+	if ($reader) {
+		for my $name ( @{ $reader->filters($source) } ) {
+			my $val = $self->param($name);
+			$filters{$name} = $val if defined $val && $val ne '';
+		}
+	}
+
+	my $result;
+	if ($reader) {
+		eval {
+			$result = $reader->search(
+				source          => $source,
+				go_back_minutes => $go_back_minutes,
+				order_dir       => $order_dir,
+				limit           => $limit,
+				offset          => $offset,
+				filters         => \%filters,
+			);
+		};
+		$error = $@ if $@;
+	} ## end if ($reader)
+
+	$self->stash(
+		sources         => $sources,
+		source          => $source,
+		result          => $result,
+		error           => $error,
+		go_back_minutes => $go_back_minutes,
+		order_dir       => $order_dir,
+		limit           => $limit,
+		offset          => $offset,
+		filters         => \%filters,
+	);
+
+	if ( $self->param('partial') && defined $result ) {
+		return $self->render( 'logs/_results', layout => undef );
+	}
+
+	return;
+} ## end sub index
+
+=head2 view
+
+C<GET /logs/:source/:id> -- one log record, with its C<raw> JSON pretty-printed.
+
+=cut
+
+sub view {
+	my $self = shift;
+
+	my $source = $self->param('source');
+	my $id     = $self->param('id');
+
+	unless ( $self->allani_enabled ) {
+		return $self->render( text => 'Allani is not configured', status => 404 );
+	}
+
+	my $reader = $self->allani;
+	my ( $row, $error, $pretty_raw );
+	eval { $row = $reader->row( $source, $id ); };
+	$error = $@ if $@;
+
+	if ( $row && defined $row->{raw} ) {
+		my $decoded = ref $row->{raw} ? $row->{raw} : eval { decode_json( $row->{raw} ) };
+		if ( ref $decoded ) {
+			eval { $pretty_raw = JSON->new->pretty->canonical->encode($decoded); };
+		} else {
+			$pretty_raw = $row->{raw};
+		}
+	}
+
+	$self->stash(
+		source     => $source,
+		id         => $id,
+		row        => $row,
+		error      => $error,
+		pretty_raw => $pretty_raw,
+	);
+
+	return;
+} ## end sub view
+
+1;

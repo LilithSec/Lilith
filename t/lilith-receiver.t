@@ -5,6 +5,7 @@ use warnings;
 use Test::More;
 use File::Temp qw(tempfile);
 use Test::Mojo;
+use Mojo::IOLoop;
 use JSON        qw(decode_json);
 use Digest::SHA qw(sha256_base64);
 
@@ -329,6 +330,136 @@ ok( !$lilith->receiver_apikey_instance_ok( { allowed_instances => ['foo.pie'] },
 	$t->post_ok( '/eve/suricata_alerts' => $H => json => { instance => 'x', q{raw = ''); drop table x; --} => 1 } )
 		->status_is( 400, 'an injected column name is rejected' );
 	ok( !exists $cap{sql}, 'no statement is prepared for an injected column name' );
+}
+
+# ---------------------------------------------------------------------------
+# 7.  WebSocket transport: the streaming counterpart to the POST path
+#
+# App::Lilu (lilith_websocket=1) opens one WebSocket per table and streams each
+# parsed alert as a JSON frame. Prove the receiver accepts that connection under
+# the same bearer auth, runs each frame through the same validate-and-insert
+# path, and answers with a status frame per alert.
+# ---------------------------------------------------------------------------
+
+# --- auth at the handshake -------------------------------------------------
+{
+	my $t = _app();
+
+	no warnings qw(redefine once);
+	local *Lilith::receiver_apikey_auth = sub {
+		my ( $self, %o ) = @_;
+		return ( defined $o{apikey} && $o{apikey} eq 'good' ) ? { id => 1, allowed_instances => undef } : undef;
+	};
+	local *Lilith::insert_alert = sub { return 1; };
+	use warnings qw(redefine once);
+
+	# A bad key must not upgrade. Drive the UA directly (rather than
+	# websocket_ok, which asserts the handshake succeeds) so a refused handshake
+	# is something we assert, not a failed test.
+	my ( $code, $is_ws );
+	$t->ua->websocket(
+		'/eve/suricata_alerts' => { Authorization => 'Bearer bad' } => sub {
+			my ( $ua, $tx ) = @_;
+			$is_ws = $tx->is_websocket;
+			$code  = $tx->res->code;
+			Mojo::IOLoop->stop;
+		}
+	);
+	Mojo::IOLoop->start;
+	ok( !$is_ws, 'a bad key does not upgrade to a WebSocket' );
+	is( $code, 401, 'a rejected WebSocket handshake reports 401' );
+
+	# a good key upgrades to a WebSocket
+	$t->websocket_ok( '/eve/suricata_alerts' => { Authorization => 'Bearer good' } )->finish_ok;
+}
+
+# --- streaming inserts and per-frame status --------------------------------
+{
+	my $t = _app();
+
+	my @seen;
+	no warnings qw(redefine once);
+	local *Lilith::receiver_apikey_auth = sub { return { id => 1, allowed_instances => ['foo-*'] }; };
+	local *Lilith::insert_alert         = sub {
+		my ( $self, %o ) = @_;
+		push @seen, \%o;
+		return 100 + scalar @seen;
+	};
+	use warnings qw(redefine once);
+
+	my $H = { Authorization => 'Bearer k' };
+
+	$t->websocket_ok( '/eve/suricata_alerts' => $H );
+
+	# a good row inserts and gets an ok frame carrying the new id
+	$t->send_ok( { json => { instance => 'foo-pie', signature => 'ET TEST' } } )
+		->message_ok('a streamed alert is answered')
+		->json_message_is( '/status', 'ok', 'a good frame reports ok' )
+		->json_message_is( '/id',     101,  'the new row id comes back on the frame' );
+	is( $seen[-1]{type},           'suricata', 'the frame routed to the suricata type' );
+	is( $seen[-1]{row}{signature}, 'ET TEST',  'the streamed row reached insert_alert' );
+
+	# the connection stays open: a second alert streams over the same socket
+	$t->send_ok( { json => { instance => 'foo-pie', signature => 'ET TWO' } } )
+		->message_ok('a second alert over the same connection is answered')
+		->json_message_is( '/id', 102, 'the second insert id comes back' );
+
+	# a bad row is reported but does NOT tear the stream down
+	$t->send_ok( { json => { instance => 'foo-pie', not_a_column => 1 } } )
+		->message_ok('an unknown column is answered')
+		->json_message_is( '/status', 'error',           'a bad frame reports an error' )
+		->json_message_is( '/error',  'unknown columns', 'the unknown column is reported over the socket' );
+
+	# an instance outside the key scope is refused, still without closing
+	$t->send_ok( { json => { instance => 'bar-pie' } } )
+		->message_ok('a disallowed instance is answered')
+		->json_message_is( '/error', 'instance not permitted for this key', 'the scope refusal names its reason' );
+
+	# ...and a good frame after the bad ones still inserts, proving the stream survived
+	$t->send_ok( { json => { instance => 'foo-pie', signature => 'ET THREE' } } )
+		->message_ok('the stream survived the bad frames')
+		->json_message_is( '/status', 'ok', 'a later good frame is ok' );
+
+	# a frame that is not JSON at all is answered rather than dropped
+	$t->send_ok('this is not json')
+		->message_ok('a non-JSON frame is answered')
+		->json_message_is( '/error', 'frame must be JSON', 'a non-JSON frame is reported' );
+
+	$t->finish_ok;
+
+	# every insert seen was for a permitted instance
+	ok( ( !grep { $_->{row}{instance} !~ /^foo-/ } @seen ), 'only permitted instances ever reached insert_alert' );
+}
+
+# --- an unknown table closes the socket ------------------------------------
+{
+	my $t = _app();
+
+	my $inserted = 0;
+	no warnings qw(redefine once);
+	local *Lilith::receiver_apikey_auth = sub { return { id => 1, allowed_instances => undef }; };
+	local *Lilith::insert_alert         = sub { $inserted++; return 1; };
+	use warnings qw(redefine once);
+
+	# Auth passes, but an unroutable table refuses the handshake with the same
+	# 404 the POST path gives -- no socket is upgraded. Drive the UA directly so
+	# the refused handshake is something we assert rather than a failed test.
+	my ( $is_ws, $code, $body );
+	$t->ua->websocket(
+		'/eve/bogus_alerts' => { Authorization => 'Bearer k' } => sub {
+			my ( $ua, $tx ) = @_;
+			$is_ws = $tx->is_websocket;
+			$code  = $tx->res->code;
+			$body  = $tx->res->json;
+			Mojo::IOLoop->stop;
+		}
+	);
+	Mojo::IOLoop->start;
+
+	ok( !$is_ws, 'an unknown table does not upgrade to a WebSocket' );
+	is( $code,          404,                            'an unknown table refuses the handshake with 404' );
+	is( $body->{error}, "unknown table 'bogus_alerts'", 'the unknown table is named in the refusal' );
+	is( $inserted,      0,                              'no row is inserted for an unknown table' );
 }
 
 done_testing();

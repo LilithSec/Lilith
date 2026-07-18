@@ -1,0 +1,174 @@
+% layout 'default';
+% title 'Logs';
+
+% # Filter fields, each tagged with the sources it applies to. The JS below shows
+% # only those matching the selected source, mirroring the search page's cape toggle.
+% my @_fields = (
+%   { name => 'host',      label => 'Host',      sources => 'syslog http http_error http_all' },
+%   { name => 'program',   label => 'Program',   sources => 'syslog' },
+%   { name => 'facility',  label => 'Facility',  sources => 'syslog' },
+%   { name => 'priority',  label => 'Priority',  sources => 'syslog' },
+%   { name => 'vhost',     label => 'VHost',     sources => 'http http_error http_all' },
+%   { name => 'client_ip', label => 'Client IP', sources => 'http http_error http_all' },
+%   { name => 'method',    label => 'Method',    sources => 'http' },
+%   { name => 'status',    label => 'Status',    sources => 'http' },
+%   { name => 'loglevel',  label => 'Log Level', sources => 'http_error' },
+%   { name => 'code',      label => 'Code',      sources => 'http_error' },
+%   { name => 'message',   label => 'Message (substring)', sources => 'syslog http_all' },
+% );
+% my $show_filters = grep { my $v = param($_->{name}); defined($v) && $v ne '' } @_fields;
+
+<form method="GET" action="/logs" id="logs-form">
+  <input type="hidden" name="search" value="1">
+
+  <div class="card mb-2 border-secondary">
+    <div class="card-body py-2">
+      <div class="row g-2 align-items-end">
+
+        <div class="col-auto">
+          <label class="form-label">Source</label>
+          <select name="source" class="form-select form-select-sm" style="width:150px" id="source-sel" onchange="syncFilters()">
+            % for my $s (@$sources) {
+            <option value="<%= $s->{key} %>" <%= $source eq $s->{key} ? 'selected' : '' %>><%= $s->{label} %></option>
+            % }
+          </select>
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label">Minutes back</label>
+          <input type="number" name="go_back_minutes" class="form-control form-control-sm"
+                 value="<%= $go_back_minutes %>" style="width:100px" min="1">
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label">Limit</label>
+          <input type="number" name="limit" class="form-control form-control-sm"
+                 value="<%= $limit %>" style="width:80px" min="1" max="10000">
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label">Offset</label>
+          <input type="number" name="offset" class="form-control form-control-sm"
+                 value="<%= $offset %>" style="width:80px" min="0">
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label">Dir</label>
+          <select name="order_dir" class="form-select form-select-sm" style="width:88px">
+            <option value="DESC" <%= $order_dir eq 'DESC' ? 'selected' : '' %>>DESC</option>
+            <option value="ASC"  <%= $order_dir eq 'ASC'  ? 'selected' : '' %>>ASC</option>
+          </select>
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label d-block">&nbsp;</label>
+          <button type="button" class="btn btn-outline-secondary btn-sm"
+                  data-bs-toggle="collapse" data-bs-target="#logs-filter-panel">Filters</button>
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label d-block">&nbsp;</label>
+          <button type="submit" class="btn btn-danger btn-sm px-4">Search</button>
+        </div>
+
+        <div class="col-auto ms-auto">
+          <label class="form-label d-block">&nbsp;</label>
+          <div class="d-flex align-items-center gap-2">
+            <div class="form-check mb-0">
+              <input class="form-check-input" type="checkbox" id="logs-auto-refresh">
+              <label class="form-check-label small" for="logs-auto-refresh">Auto-refresh</label>
+            </div>
+            <input type="number" id="logs-auto-refresh-secs" class="form-control form-control-sm"
+                   value="30" min="1" style="width:70px" title="Refresh interval in seconds">
+            <span id="logs-ar-status" class="small text-muted" style="white-space:nowrap"></span>
+          </div>
+        </div>
+
+      </div><!-- /row -->
+    </div><!-- /card-body -->
+  </div><!-- /card -->
+
+  <div class="collapse <%= $show_filters ? 'show' : '' %>" id="logs-filter-panel">
+    <div class="card mb-2 border-secondary">
+      <div class="card-body py-2">
+        <div class="row g-2">
+          % for my $f (@_fields) {
+          <div class="col-md-2 log-filter-field" data-sources="<%= $f->{sources} %>">
+            <label class="form-label"><%= $f->{label} %></label>
+            <input type="text" name="<%= $f->{name} %>" class="form-control form-control-sm"
+                   value="<%= param($f->{name}) // '' %>">
+          </div>
+          % }
+        </div>
+      </div>
+    </div>
+  </div>
+
+</form>
+
+% if ($error) {
+<div class="alert alert-danger py-2"><strong>Error:</strong> <%= $error %></div>
+% }
+
+% if (defined $result) {
+%= include 'logs/_results'
+% }
+
+<script>
+// Show only the filter fields that apply to the selected source.
+function syncFilters() {
+  var source = document.getElementById('source-sel').value;
+  document.querySelectorAll('.log-filter-field').forEach(function(el) {
+    var list = (el.dataset.sources || '').split(/\s+/);
+    el.style.display = (list.indexOf(source) !== -1) ? '' : 'none';
+  });
+}
+
+function setLogsRefreshStatus(ok) {
+  var el = document.getElementById('logs-ar-status');
+  if (!el) { return; }
+  var now = new Date();
+  function p(n) { return (n < 10 ? '0' : '') + n; }
+  var t = p(now.getHours()) + ':' + p(now.getMinutes()) + ':' + p(now.getSeconds());
+  el.textContent = ok ? ('updated ' + t) : ('⚠ refresh failed ' + t + ' (stale)');
+  el.className = ok ? 'small text-muted' : 'small text-warning';
+}
+
+// Fetch just the results fragment (partial=1) and swap #log-results in place.
+function refreshLogs() {
+  var url = new URL(window.location.href);
+  url.searchParams.set('partial', '1');
+  fetch(url.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(function(r) { if (!r.ok) { throw new Error('HTTP ' + r.status); } return r.text(); })
+    .then(function(html) {
+      var fresh   = new DOMParser().parseFromString(html, 'text/html').getElementById('log-results');
+      var current = document.getElementById('log-results');
+      if (fresh && current) { current.innerHTML = fresh.innerHTML; setLogsRefreshStatus(true); }
+      else { setLogsRefreshStatus(false); }
+    })
+    .catch(function() { setLogsRefreshStatus(false); });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  syncFilters();
+
+  var arCb   = document.getElementById('logs-auto-refresh');
+  var arSecs = document.getElementById('logs-auto-refresh-secs');
+  var arTimer = null;
+  function interval() { var s = parseInt(arSecs.value, 10); return (!s || s < 1) ? 30 : s; }
+  function schedule() {
+    if (arTimer) { clearTimeout(arTimer); arTimer = null; }
+    if (!arCb.checked || document.hidden) { return; }
+    arTimer = setTimeout(function() { refreshLogs(); schedule(); }, interval() * 1000);
+  }
+  var storedSecs = localStorage.getItem('logsAutoRefreshSecs');
+  if (storedSecs) { arSecs.value = storedSecs; }
+  arCb.checked = localStorage.getItem('logsAutoRefresh') === 'true';
+  schedule();
+  arCb.addEventListener('change',   function() { localStorage.setItem('logsAutoRefresh', this.checked); schedule(); });
+  arSecs.addEventListener('change', function() { localStorage.setItem('logsAutoRefreshSecs', this.value); schedule(); });
+  document.addEventListener('visibilitychange', function() { if (!document.hidden && arCb.checked) { schedule(); } });
+
+  if (document.getElementById('log-results')) { setLogsRefreshStatus(true); }
+});
+</script>

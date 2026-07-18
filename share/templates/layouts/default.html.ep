@@ -27,6 +27,9 @@
       <!-- Primary views -->
       <a class="btn btn-sm btn-outline-secondary" href="/search" id="nav-search">Search</a>
       <a class="btn btn-sm btn-outline-secondary" href="/dashboard" id="nav-dashboard">Dashboard</a>
+      % if ($self->allani_enabled) {
+      <a class="btn btn-sm btn-outline-secondary" href="/logs" id="nav-logs">Logs</a>
+      % }
 
       <!-- IP Info -->
       <div class="dropdown">

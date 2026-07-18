@@ -61,6 +61,7 @@ my %WriteMakefileArgs = (
 			runtime => {
 				suggests => {
 					'Virani'                => '0',    # web: fetch flow PCAPs from remote Virani instances
+					'Allani'                => '0',    # web: browse the logs an Allani store holds (/logs page)
 					'IP::Geolocation::MMDB' => '0',    # web: GeoIP country/subdivision in the IP columns and modal
 					'Mozilla::PublicSuffix' => '0',    # web: accurate registrable-domain reduction for whois
 					'Net::IP'               => '0',    # web: IPv6 reverse-DNS lookups in the IP info modal

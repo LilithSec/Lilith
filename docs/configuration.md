@@ -105,6 +105,38 @@ and [security](security.md) for why you may not want them reachable.
 | `timeout`         | no       | Fetch timeout in seconds. Default `60`.                |
 | `verify_hostname` | no       | Verify the TLS certificate for HTTPS URLs. Default `true`. |
 
+## Allani log store: `[allani]`
+
+A single [Allani](https://github.com/LilithSec/Allani) log store to browse
+from the web UI. Allani keeps every log line (syslog-ng JSON in PostgreSQL);
+where Lilith keeps only the alerts, Allani keeps the lot. When an `[allani]`
+block with a `dsn` is present, a read-only **Logs** page (`/logs`) and a
+**Logs** navbar entry appear, letting you search the `syslog`, `http_access`,
+and `http_error` tables (plus an interleaved http view). Omit the block and
+the page and nav entry stay hidden.
+
+The connection is Allani's own, independent of Lilith's top-level `dsn`, so
+the two need not share a database (point it at the same one if they do).
+Lilith only ever reads. This needs [Allani](https://github.com/LilithSec/Allani)
+installed (it reuses `Allani::Sources` for the column/filter whitelist); it is
+an optional dependency, so a config without `[allani]` does not require it.
+
+| key    | required | description                                             |
+|--------|----------|----------------------------------------------------------|
+| `dsn`  | yes      | The DBI DSN of the Allani PostgreSQL database, e.g. `dbi:Pg:dbname=allani;host=192.168.1.2`. The whole feature is off unless this is set. |
+| `user` | no       | Database user. |
+| `pass` | no       | Database password. |
+
+```toml
+[allani]
+dsn="dbi:Pg:dbname=allani;host=192.168.1.2"
+user="allani"
+pass="WhateverYouSetAsApassword"
+```
+
+Like the other web features it is unauthenticated; log lines can carry
+sensitive data, so read [security](security.md) before exposing it.
+
 ## EVE receiver keys
 
 `mojo_lilith_receiver` (the daemon that accepts pushed alert rows over HTTP)
@@ -171,4 +203,10 @@ eve="/var/log/cape/eve.json"
 url="https://virani.example.net:7000/"
 apikey="whatever"
 set="default"
+
+# the Allani log store to browse from the /logs page
+[allani]
+dsn="dbi:Pg:dbname=allani;host=192.168.1.2"
+user="allani"
+pass="WhateverYouSetAsApassword"
 ```

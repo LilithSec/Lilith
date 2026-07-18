@@ -232,6 +232,28 @@ sub startup {
 	# virani command. Off by default because it exposes arbitrary captures.
 	$self->helper( virani_search_enable => sub { $toml->{virani_search_enable} ? 1 : 0 } );
 
+	# Allani log store. An [allani] block with a 'dsn' (plus optional user/pass)
+	# points at the PostgreSQL database Allani writes its logs to; when present,
+	# the read-only /logs page can browse them. The reader is built lazily and
+	# cached (it needs Allani installed for Allani::Sources), so a config without
+	# the block, or a missing Allani, simply leaves the feature off.
+	my $allani_cfg = ( ref $toml->{allani} eq 'HASH' ) ? $toml->{allani} : undef;
+	my $allani_reader;
+	$self->helper(
+		allani_enabled => sub { ( $allani_cfg && defined $allani_cfg->{dsn} && $allani_cfg->{dsn} ne '' ) ? 1 : 0 } );
+	$self->helper(
+		allani => sub {
+			return $allani_reader if $allani_reader;
+			require Lilith::Allani;
+			$allani_reader = Lilith::Allani->new(
+				dsn  => $allani_cfg->{dsn},
+				user => $allani_cfg->{user},
+				pass => $allani_cfg->{pass},
+			);
+			return $allani_reader;
+		}
+	);
+
 	# A ready Virani::Client for the named remote, or undef if unknown/unusable.
 	$self->helper(
 		virani_client_for => sub {
@@ -354,6 +376,8 @@ sub startup {
 	$r->get('/event/:table/:id')->to('event#view');
 	$r->get('/event/:table/:id/body/:which/zip')->to('event#body_zip');
 	$r->get('/event/:table/:id/pcap')->to('event#pcap');
+	$r->get('/logs')->to('logs#index');
+	$r->get('/logs/:source/:id')->to('logs#view');
 	$r->get('/api/ipinfo/*ip')->to('api#ipinfo');
 	$r->get('/api/domaininfo/*domain')->to('api#domaininfo');
 	$r->get('/api/httpsinfo/*domain')->to('api#httpsinfo');

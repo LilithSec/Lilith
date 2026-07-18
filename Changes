@@ -1,6 +1,18 @@
 Revision history for Lilith
 
 4.0.0	unreleased
+		 - Add a read-only Logs page (/logs) to the web UI for browsing the
+		   logs an Allani store holds (syslog / http_access / http_error,
+		   plus an interleaved http view). It reads Allani over its own
+		   [allani] connection (dsn/user/pass) and reuses Allani::Sources
+		   as the column/filter whitelist, so it neither touches Lilith's
+		   alert schema nor requires the two to share a database. The page,
+		   its record view, and the nav entry stay hidden unless [allani]
+		   is configured; Allani is an optional (suggested) prereq.
+		   The event view also grows a "Logs" dropdown when Allani is
+		   configured, deep-linking to /logs pre-filtered by the event's
+		   host (syslog) and source IP (interleaved http), windowed to
+		   reach back around the event.
 		 - Add MITRE ATT&CK tactic/technique as virtual Suricata dashboard
 		   dimensions, read from the alert.metadata a ruleset (e.g.
 		   Emerging Threats) tags on, with the underscored names spaced out
@@ -97,6 +109,15 @@ Revision history for Lilith
 		   the new shared Lilith::insert_alert; id, escalations, and
 		   auto_escalated cannot be set by a caller and a body carrying them
 		   is rejected.
+		 - The receiver also accepts alerts over a WebSocket at the same
+		   /eve/:table endpoint (and same bearer auth): a sensor opens one
+		   connection per table and streams each parsed row as a JSON frame,
+		   getting a JSON status frame back per alert, instead of a fresh
+		   HTTP request per alert. Both transports share one validate-and-
+		   insert path so they cannot drift; a bad frame is reported without
+		   dropping the stream and an unknown table refuses the handshake
+		   with the same 404 the POST gives. This is the receiving side of
+		   App::Lilu's lilith_websocket push mode.
 		 - Receiver API keys are stored in the database (schema version 4,
 		   new receiver_apikeys table) as their SHA-256, managed with the
 		   lilith receiver_key_create/list/get/update/delete commands. A key

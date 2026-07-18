@@ -14,11 +14,17 @@ LILITH_CONFIG=/etc/lilith.toml mojo_lilith_receiver daemon
 
 =head1 DESCRIPTION
 
-Starts the Lilith EVE receiver using Mojolicious. Remote sensors POST already
+Starts the Lilith EVE receiver using Mojolicious. Remote sensors push already
 parsed alert rows (the output of L<Lilith/parse_eve>, one key per ingestable
-column) as JSON and they are inserted into the Lilith PostgreSQL database. This
-is the network counterpart to the local EVE-file tailer driven by
-C<lilith monitor>.
+column) as JSON to C<< /eve/:table >> and they are inserted into the Lilith
+PostgreSQL database. This is the network counterpart to the local EVE-file
+tailer driven by C<lilith monitor>.
+
+Each alert may be pushed either as its own HTTP C<POST> or streamed as a JSON
+frame over a kept-open WebSocket to the same C</eve/:table> endpoint; both use
+the same bearer-key auth and the same per-row validation. A sensor running
+L<App::Lilu> chooses between them with its C<lilith_websocket> config value.
+See L<Lilith::Receiver> for the request and WebSocket protocol.
 
 The config file is read from the C<LILITH_CONFIG> env var, defaulting to
 C</usr/local/etc/lilith.toml>.

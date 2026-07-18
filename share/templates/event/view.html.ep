@@ -55,6 +55,18 @@
         </div>
       </div>
       % }
+      % if ($self->allani_enabled && @{ stash('log_links') || [] }) {
+      <div class="dropdown">
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                id="event-logs-toggle" data-bs-toggle="dropdown" aria-expanded="false"
+                title="Browse Allani logs around this event">Logs</button>
+        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="event-logs-toggle">
+          % for my $l (@{ stash('log_links') }) {
+          <li><a class="dropdown-item" href="<%= $l->{url} %>"><%= $l->{label} %></a></li>
+          % }
+        </ul>
+      </div>
+      % }
       % if ($self->escalation_enable) {
       <button type="button" class="btn btn-sm btn-danger" id="escalate-btn"
               data-bs-toggle="modal" data-bs-target="#escalate-modal">Escalate</button>
