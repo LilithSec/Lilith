@@ -77,7 +77,6 @@ sub _app {
         ->element_exists( 'select#source-sel option[value="http_all"]', 'http_all source option present' )
         ->element_exists( 'div#log-results',              'results container present' )
         ->element_exists( 'a[href="/logs/syslog/1"]',     'result row links to the record view' )
-        ->element_exists( 'a[href^="/logs/dashboard"]',   'search page links to the log dashboard' )
         ->element_exists( 'div.time-range select[data-role="preset"]', 'uses the reusable time-range control' )
         ->element_exists( 'script[src="/js/time-range.js"]', 'loads the shared time-range script' );
 
@@ -194,27 +193,8 @@ sub _app {
 
     my $t = _app(qq{[allani]\ndsn = "dbi:Pg:dbname=allani"\n});
 
-    # shell: source selector excludes the interleaved view; stat cards, canvases,
-    # the auto-bucket option, and the split-by / measure selectors are present.
-    # With no MMDB configured the countries panel stays hidden.
-    $t->get_ok('/logs/dashboard')->status_is( 200, 'log dashboard renders' )
-        ->element_exists( 'select[name="source"] option[value="syslog"]', 'syslog is a dashboard source' )
-        ->element_exists_not( 'select[name="source"] option[value="http_all"]',
-        'http_all is not offered on the dashboard' )
-        ->element_exists( 'div#stat-total',   'total stat card present' )
-        ->element_exists( 'div#stat-hosts',   'distinct-hosts stat card present' )
-        ->element_exists( 'select#ts-bucket option[value="auto"]', 'auto bucket option present' )
-        ->element_exists( 'select#ts-group option[value="program"]', 'split-by selector offers the dims' )
-        ->element_exists( 'select#ts-measure option[value="bytes"]', 'measure selector offers bytes' )
-        ->element_exists( 'canvas#chart-ts',      'timeseries canvas present' )
-        ->element_exists( 'canvas#chart-program', 'a top-dimension canvas present' )
-        ->element_exists( 'div.time-range select[data-role="preset"]', 'dashboard uses the time-range control' )
-        ->element_exists( 'script[src="/js/time-range.js"]', 'dashboard loads the shared time-range script' );
-
-    # JSON endpoints
-    $t->get_ok('/api/logs/summary?source=syslog')->status_is(200)
-        ->json_is( '/total',         1234, 'summary reports the total' )
-        ->json_is( '/distinct_host', 7,    'summary reports distinct hosts' );
+    # The log aggregation JSON endpoints (consumed by the configurable dashboard's
+    # log widgets): top/timeseries/countries/columns/measures/stat over a source.
     $t->get_ok('/api/logs/top?source=http&column=vhost&measure=bytes')->status_is(200)
         ->json_is( '/rows/0/value', 'sshd', 'top reports rows' );
     is( $top_opts{measure}, 'bytes', 'the measure param reaches the reader' );
@@ -250,12 +230,11 @@ sub _app {
         ->json_is( '/label', 'Total rows', 'log stat total label' );
 }
 
-# without [allani]: the dashboard renders a notice and the API is a 400
+# without [allani]: the log aggregation API is gated off (a 400 rather than
+# reaching a reader that isn't configured)
 {
     my $t = _app();
-    $t->get_ok('/logs/dashboard')->status_is( 200, 'dashboard renders without Allani' )
-        ->element_exists( 'div.alert-danger', 'not-configured notice on the dashboard' );
-    $t->get_ok('/api/logs/summary?source=syslog')->status_is( 400, 'dashboard API is 400 without Allani' );
+    $t->get_ok('/api/logs/stat?source=syslog&metric=total')->status_is( 400, 'log API is 400 without Allani' );
 }
 
 done_testing();

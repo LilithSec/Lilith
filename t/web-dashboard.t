@@ -31,9 +31,13 @@ sub app_for {
 	$t->get_ok('/dashboard')
 		->status_is( 200, 'GET /dashboard renders' )
 		->element_exists( 'select#db-table',                    'has the table selector' )
+		->element_exists( 'select#db-table option[value="cape"]', 'default-table selector offers the alert tables' )
+		->element_exists_not( 'select#db-table option[value="syslog"]', 'no log sources in the default-table selector without Allani' )
 		->element_exists( 'div.time-range select[data-role="preset"]', 'has the time-range control' )
 		->element_exists( 'script[src="/js/time-range.js"]',            'loads the shared time-range script' )
 		->element_exists_not( '#card-total', 'the fixed stat strip is gone (now stat widgets)' )
+		->element_exists( 'select#db-bucket option[value="week"]', 'has the board time-bucket selector' )
+		->element_exists( '#wm-bucket option[value="month"]',      'modal has a per-widget bucket override' )
 		->element_exists( 'input#db-gpcd[type="checkbox"]',     'has the Show GPCD checkbox' )
 		->element_exists_not( 'input#db-gpcd[checked]', 'Show GPCD is unchecked by default' )
 		->element_exists( 'div.grid-stack',                                   'has the (widget) gridstack container' )
@@ -47,7 +51,9 @@ sub app_for {
 		->element_exists( '#wm-metric option[value="distinct"]',              'stat widget has a metric picker' )
 		->element_exists( '#wm-style option[value="pie"]',                    'modal offers a pie style' )
 		->element_exists( 'input#wm-limit[type="number"][min="1"][max="50"]', 'modal has a 1-50 count input' )
-		->element_exists( '#db-reset',                                        'has the reset-layout button' )
+		->element_exists( '[data-preset="suricata"]',                         'reset menu offers the Suricata preset' )
+		->element_exists( '[data-preset="cape"]',                             'reset menu offers the CAPE preset' )
+		->element_exists_not( '[data-preset="syslog"]', 'no log presets in the reset menu without Allani' )
 		->element_exists( 'select#db-board',                                  'has the dashboard selector' )
 		->element_exists( '#db-edit',                                         'has the Edit toggle' )
 		->element_exists( '#db-new',                                          'has the New dashboard action' )
@@ -62,7 +68,13 @@ sub app_for {
 	my $ta = app_for( dsn => 'dbi:Pg:dbname=test', allani => 1 );
 	$ta->get_ok('/dashboard')->status_is( 200, 'dashboard renders with Allani configured' )
 		->element_exists( '#wm-table optgroup[label="Logs (Allani)"] option[value="syslog"]',
-		'widget table picker offers Allani log sources when configured' );
+		'widget table picker offers Allani log sources when configured' )
+		->element_exists( '[data-preset="syslog"]',     'reset menu offers the Syslog preset with Allani' )
+		->element_exists( '[data-preset="http"]',       'reset menu offers the combined HTTP preset with Allani' )
+		->element_exists( '[data-preset="http_access"]', 'reset menu offers the HTTP Access preset with Allani' )
+		->element_exists( '[data-preset="http_error"]',  'reset menu offers the HTTP Error preset with Allani' )
+		->element_exists( 'select#db-table optgroup[label="Logs (Allani)"] option[value="http_error"]',
+		'default-table selector offers log sources when Allani is configured' );
 
 	# The vendored Gridstack assets are served.
 	$t->get_ok('/vendor/gridstack/gridstack-all.js')->status_is( 200, 'Gridstack JS served' );
@@ -231,19 +243,22 @@ SKIP: {
 	# the board table.
 	my $mt = [
 		{ id => 'a', type => 'top',        config => { column => 'target',  table => 'cape' },  x => 0, y => 0, w => 4, h => 4 },
-		{ id => 'b', type => 'timeseries', config => { group_by => 'signature', table => 'sagan' }, x => 4, y => 0, w => 4, h => 4 },
+		{ id => 'b', type => 'timeseries', config => { group_by => 'signature', table => 'sagan', bucket => 'week' }, x => 4, y => 0, w => 4, h => 4 },
 		{ id => 'c', type => 'top',        config => { column => 'src_ip',  table => 'bogus' }, x => 8, y => 0, w => 4, h => 4 },
 		{ id => 'd', type => 'top',        config => { column => 'program', table => 'syslog' }, x => 0, y => 4, w => 4, h => 4 },
 		{ id => 'e', type => 'stat', config => { metric => 'distinct', column => 'src_ip', label => 'My hosts', abbrev => 1 }, x => 4, y => 4, w => 2, h => 2 },
 		{ id => 'f', type => 'stat', config => { metric => 'nonsense' }, x => 6, y => 4, w => 2, h => 2 },
 		{ id => 'g', type => 'stat', config => { metric => 'total', abbrev => 'yes' }, x => 8, y => 4, w => 2, h => 2 },
+		{ id => 'h', type => 'timeseries', config => { group_by => 'proto', bucket => 'fortnight' }, x => 0, y => 8, w => 4, h => 4 },
 	];
 	$t->post_ok( '/api/dashboard/layout' => json => { layout => $mt } )
 		->status_is( 200, 'multi-table layout saved' )
-		->json_is( '/count', 7, 'all seven widgets kept' );
+		->json_is( '/count', 8, 'all eight widgets kept' );
 	$t->get_ok('/api/dashboard/layout')
 		->json_is( '/layout/0/config/table',   'cape',   'a valid per-widget table round-trips (cape)' )
 		->json_is( '/layout/1/config/table',   'sagan',  'a valid per-widget table round-trips (sagan)' )
+		->json_is( '/layout/1/config/bucket',  'week',   'a valid per-widget bucket round-trips' )
+		->json_hasnt( '/layout/7/config/bucket', 'an invalid per-widget bucket is dropped' )
 		->json_is( '/layout/2/config/column',  'src_ip', 'the widget with a bad table is still kept' )
 		->json_hasnt( '/layout/2/config/table', 'an invalid per-widget table is dropped' )
 		->json_is( '/layout/3/config/table',   'syslog', 'an Allani log source round-trips as a widget table' )
@@ -268,14 +283,29 @@ SKIP: {
 		'/api/dashboard/layout' => json => {
 			name     => 'default',
 			layout   => [],
-			settings => { table => 'cape', go_back_minutes => 360, show_gpcd => 1, bogus => 'x' }
+			settings => { table => 'cape', go_back_minutes => 360, show_gpcd => 1, bucket => 'day', bogus => 'x' }
 		}
 	)->status_is( 200, 'default board settings saved' );
 	$t->get_ok('/api/dashboard/layout')
 		->json_is( '/settings/table',           'cape', 'saved board table round-trips' )
 		->json_is( '/settings/go_back_minutes', 360,    'saved board range round-trips' )
 		->json_is( '/settings/show_gpcd',       1,      'saved board gpcd round-trips' )
+		->json_is( '/settings/bucket',          'day',  'saved board bucket round-trips' )
 		->json_hasnt( '/settings/bogus', 'unknown settings key was stripped' );
+
+	# A bad board bucket is dropped rather than stored.
+	$t->post_ok( '/api/dashboard/layout' => json => { name => 'default', layout => [], settings => { bucket => 'fortnight' } } )
+		->status_is( 200, 'board with a bad bucket accepted' );
+	$t->get_ok('/api/dashboard/layout')->json_hasnt( '/settings/bucket', 'an invalid board bucket is dropped' );
+
+	# The board Default table may also be an Allani log source (a following widget
+	# then reads that log); a bad value is dropped.
+	$t->post_ok( '/api/dashboard/layout' => json => { name => 'default', layout => [], settings => { table => 'syslog' } } )
+		->status_is( 200, 'log-source board table saved' );
+	$t->get_ok('/api/dashboard/layout')->json_is( '/settings/table', 'syslog', 'a log-source board table round-trips' );
+	$t->post_ok( '/api/dashboard/layout' => json => { name => 'default', layout => [], settings => { table => 'nope' } } )
+		->status_is( 200, 'bad board table accepted but dropped' );
+	$t->get_ok('/api/dashboard/layout')->json_hasnt( '/settings/table', 'an invalid board table is dropped' );
 
 	# Create a second board; it appears, empty and non-default.
 	$t->post_ok( '/api/dashboard/boards' => json => { name => 'ops' } )

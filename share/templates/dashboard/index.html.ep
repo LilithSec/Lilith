@@ -33,13 +33,34 @@
       </div>
       <div class="col-auto">
         <label class="form-label">Default table</label>
-        <select id="db-table" class="form-select form-select-sm" style="width:120px">
-          <option value="suricata" <%= $table eq 'suricata' ? 'selected' : '' %>>Suricata</option>
-          <option value="sagan"    <%= $table eq 'sagan'    ? 'selected' : '' %>>Sagan</option>
-          <option value="cape"     <%= $table eq 'cape'     ? 'selected' : '' %>>CAPE</option>
+        <select id="db-table" class="form-select form-select-sm" style="width:140px">
+          <optgroup label="Alerts">
+            <option value="suricata" <%= $table eq 'suricata' ? 'selected' : '' %>>Suricata</option>
+            <option value="sagan"    <%= $table eq 'sagan'    ? 'selected' : '' %>>Sagan</option>
+            <option value="cape"     <%= $table eq 'cape'     ? 'selected' : '' %>>CAPE</option>
+          </optgroup>
+          % if ($self->allani_enabled) {
+          <optgroup label="Logs (Allani)">
+            <option value="syslog"     <%= $table eq 'syslog'     ? 'selected' : '' %>>syslog</option>
+            <option value="http"       <%= $table eq 'http'       ? 'selected' : '' %>>http (access)</option>
+            <option value="http_error" <%= $table eq 'http_error' ? 'selected' : '' %>>http error</option>
+          </optgroup>
+          % }
         </select>
       </div>
       %= include 'partials/_time_range', tr_minutes => $go_back_minutes
+      <div class="col-auto">
+        <label class="form-label">Bucket</label>
+        <select id="db-bucket" class="form-select form-select-sm" style="width:100px"
+                title="Time bucket for the over-time charts (auto sizes it to the window)">
+          <option value="auto">auto</option>
+          <option value="minute">minute</option>
+          <option value="hour">hour</option>
+          <option value="day">day</option>
+          <option value="week">week</option>
+          <option value="month">month</option>
+        </select>
+      </div>
       <div class="col-auto ms-auto d-flex align-items-center gap-3">
         <div class="form-check mb-0">
           <input class="form-check-input" type="checkbox" id="db-gpcd" <%= $show_gpcd ? 'checked' : '' %>>
@@ -47,8 +68,23 @@
                  title="Generic Protocol Command Decode">Show GPCD</label>
         </div>
         <button type="button" id="db-add-widget" class="btn btn-sm btn-outline-success db-edit-only">+ Add widget</button>
-        <button type="button" id="db-reset" class="btn btn-sm btn-outline-secondary db-edit-only"
-                title="Replace this dashboard's widgets with the built-in set">Reset layout</button>
+        <div class="btn-group btn-group-sm db-edit-only">
+          <button type="button" class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown"
+                  aria-expanded="false" title="Replace this dashboard's widgets with a built-in preset">Reset to&hellip;</button>
+          <ul class="dropdown-menu dropdown-menu-end">
+            <li><h6 class="dropdown-header">Alerts</h6></li>
+            <li><a class="dropdown-item" href="#" data-preset="suricata">Suricata</a></li>
+            <li><a class="dropdown-item" href="#" data-preset="cape">CAPE</a></li>
+            % if ($self->allani_enabled) {
+            <li><hr class="dropdown-divider"></li>
+            <li><h6 class="dropdown-header">Logs (Allani)</h6></li>
+            <li><a class="dropdown-item" href="#" data-preset="syslog">Syslog</a></li>
+            <li><a class="dropdown-item" href="#" data-preset="http">HTTP (access + error)</a></li>
+            <li><a class="dropdown-item" href="#" data-preset="http_access">HTTP Access</a></li>
+            <li><a class="dropdown-item" href="#" data-preset="http_error">HTTP Error</a></li>
+            % }
+          </ul>
+        </div>
         <button type="button" id="db-refresh" class="btn btn-sm btn-outline-danger">Refresh</button>
         <div class="btn-group btn-group-sm">
           <button type="button" id="db-edit" class="btn btn-outline-primary"
@@ -141,6 +177,18 @@
           <label class="form-label small text-muted mb-1">Group by</label>
           <select id="wm-group" class="form-select form-select-sm"></select>
         </div>
+        <div class="mb-2" id="wm-bucket-wrap">
+          <label class="form-label small text-muted mb-1">Time bucket</label>
+          <select id="wm-bucket" class="form-select form-select-sm">
+            <option value="">Follow dashboard</option>
+            <option value="auto">auto (size to window)</option>
+            <option value="minute">minute</option>
+            <option value="hour">hour</option>
+            <option value="day">day</option>
+            <option value="week">week</option>
+            <option value="month">month</option>
+          </select>
+        </div>
         <div class="mb-2" id="wm-label-wrap">
           <label class="form-label small text-muted mb-1">Label (optional)</label>
           <input type="text" id="wm-label" class="form-control form-control-sm" maxlength="40" placeholder="defaults from the metric">
@@ -199,34 +247,128 @@
   function apiBase(s) { return isLogSource(s) ? '/api/logs' : '/api/dashboard'; }
   var PALETTE = ['#dc3545','#0d6efd','#fd7e14','#20c997','#6f42c1','#ffc107','#0dcaf0','#d63384','#198754','#adb5bd'];
 
-  // The widget set a fresh (or reset) dashboard starts with -- a Suricata-shaped
-  // SIEM overview. Every panel is an ordinary widget, so it can be reconfigured,
-  // removed, or added to; on Sagan/CAPE a panel whose column does not exist just
-  // notes so.
-  var DEFAULT_WIDGETS = [
-    { type: 'stat', config: { metric: 'total' },                                                     x: 0, y: 0, w: 2, h: 1 },
-    { type: 'stat', config: { metric: 'distinct', column: 'src_ip', label: 'Unique sources' },       x: 2, y: 0, w: 2, h: 1 },
-    { type: 'stat', config: { metric: 'distinct', column: 'signature', label: 'Unique signatures' }, x: 4, y: 0, w: 2, h: 1 },
-    { type: 'stat', config: { metric: 'escalated' },                                                 x: 6, y: 0, w: 2, h: 1 },
-    { type: 'stat', config: { metric: 'busiest', column: 'instance', label: 'Busiest sensor' },      x: 8, y: 0, w: 4, h: 1 },
-    { type: 'timeseries', config: { group_by: 'classification' },         x: 0,  y: 1, w: 10, h: 4 },
-    { type: 'top',        config: { column: 'mitre_tactic', style: 'pie' },x: 10, y: 1, w: 2,  h: 4 },
-    { type: 'top',        config: { column: 'classification' },        x: 0, y: 5,  w: 4,  h: 4 },
-    { type: 'top',        config: { column: 'signature' },             x: 4, y: 5,  w: 4,  h: 4 },
-    { type: 'top',        config: { column: 'severity', style: 'pie' },      x: 8,  y: 5, w: 2, h: 4 },
-    { type: 'top',        config: { column: 'mitre_technique', style: 'pie' },x: 10, y: 5, w: 2, h: 4 },
-    { type: 'top',        config: { column: 'src_ip' },                x: 0, y: 9,  w: 4,  h: 4 },
-    { type: 'top',        config: { column: 'dest_ip' },               x: 4, y: 9,  w: 4,  h: 4 },
-    { type: 'top',        config: { column: 'dest_port' },             x: 8, y: 9,  w: 4,  h: 4 },
-    { type: 'top',        config: { column: 'app_proto', style: 'pie' },x: 0, y: 13, w: 4, h: 4 },
-    { type: 'top',        config: { column: 'instance' },              x: 4, y: 13, w: 4,  h: 4 },
-    { type: 'countries',  config: {},                                  x: 8, y: 13, w: 4,  h: 4 },
-    { type: 'timeseries', config: { measure: 'bytes' },                x: 0, y: 17, w: 12, h: 4 },
-    { type: 'top',        config: { column: 'src_ip', measure: 'bytes' },             x: 0, y: 21, w: 6, h: 4 },
-    { type: 'top',        config: { column: 'src_ip', measure: 'distinct_dest_port' },x: 6, y: 21, w: 6, h: 4 }
+  // Built-in dashboard presets the Reset menu offers. Each is a list of ordinary
+  // widgets, so anything seeded can still be reconfigured, moved, or removed. An
+  // alert preset sets the board's Default table; a log preset pins each widget's
+  // own Allani source, so it reads that log regardless of the Default table. A
+  // panel whose column does not exist for its table just notes so.
+  var PRESETS = [
+    // Suricata -- the SIEM overview (also the default board's seed).
+    { key: 'suricata', label: 'Suricata (SIEM overview)', table: 'suricata', widgets: [
+      { type: 'stat', config: { metric: 'total' },                                                     x: 0, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { metric: 'distinct', column: 'src_ip', label: 'Unique sources' },       x: 2, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { metric: 'distinct', column: 'signature', label: 'Unique signatures' }, x: 4, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { metric: 'escalated' },                                                 x: 6, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { metric: 'busiest', column: 'instance', label: 'Busiest sensor' },      x: 8, y: 0, w: 4, h: 1 },
+      { type: 'timeseries', config: { group_by: 'classification' },         x: 0,  y: 1, w: 10, h: 4 },
+      { type: 'top',        config: { column: 'mitre_tactic', style: 'pie' },x: 10, y: 1, w: 2,  h: 4 },
+      { type: 'top',        config: { column: 'classification' },        x: 0, y: 5,  w: 4,  h: 4 },
+      { type: 'top',        config: { column: 'signature' },             x: 4, y: 5,  w: 4,  h: 4 },
+      { type: 'top',        config: { column: 'severity', style: 'pie' },      x: 8,  y: 5, w: 2, h: 4 },
+      { type: 'top',        config: { column: 'mitre_technique', style: 'pie' },x: 10, y: 5, w: 2, h: 4 },
+      { type: 'top',        config: { column: 'src_ip' },                x: 0, y: 9,  w: 4,  h: 4 },
+      { type: 'top',        config: { column: 'dest_ip' },               x: 4, y: 9,  w: 4,  h: 4 },
+      { type: 'top',        config: { column: 'dest_port' },             x: 8, y: 9,  w: 4,  h: 4 },
+      { type: 'top',        config: { column: 'app_proto', style: 'pie' },x: 0, y: 13, w: 4, h: 4 },
+      { type: 'top',        config: { column: 'instance' },              x: 4, y: 13, w: 4,  h: 4 },
+      { type: 'countries',  config: {},                                  x: 8, y: 13, w: 4,  h: 4 },
+      { type: 'timeseries', config: { measure: 'bytes' },                x: 0, y: 17, w: 12, h: 4 },
+      { type: 'top',        config: { column: 'src_ip', measure: 'bytes' },             x: 0, y: 21, w: 6, h: 4 },
+      { type: 'top',        config: { column: 'src_ip', measure: 'distinct_dest_port' },x: 6, y: 21, w: 6, h: 4 }
+    ] },
+    // CAPE -- malware sandbox detonations.
+    { key: 'cape', label: 'CAPE (malware sandbox)', table: 'cape', widgets: [
+      { type: 'stat', config: { metric: 'total', label: 'Total detonations' },              x: 0, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { metric: 'distinct', column: 'src_ip', label: 'Unique sources' }, x: 2, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { metric: 'distinct', column: 'target', label: 'Unique targets' }, x: 4, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { metric: 'distinct', column: 'md5', label: 'Unique samples' },     x: 6, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { metric: 'busiest', column: 'instance', label: 'Busiest sensor' }, x: 8, y: 0, w: 4, h: 1 },
+      { type: 'timeseries', config: {},                             x: 0, y: 1, w: 8, h: 4 },
+      { type: 'top',        config: { column: 'malscore', style: 'pie' }, x: 8, y: 1, w: 4, h: 4 },
+      { type: 'top',        config: { column: 'target' },       x: 0, y: 5, w: 4, h: 4 },
+      { type: 'top',        config: { column: 'pkg', style: 'pie' }, x: 4, y: 5, w: 4, h: 4 },
+      { type: 'top',        config: { column: 'url_hostname' }, x: 8, y: 5, w: 4, h: 4 },
+      { type: 'top',        config: { column: 'src_ip' },       x: 0, y: 9, w: 4, h: 4 },
+      { type: 'top',        config: { column: 'md5' },          x: 4, y: 9, w: 4, h: 4 },
+      { type: 'top',        config: { column: 'sha256' },       x: 8, y: 9, w: 4, h: 4 },
+      { type: 'top',        config: { column: 'target', measure: 'max_malscore' }, x: 0, y: 13, w: 6, h: 4 },
+      { type: 'top',        config: { column: 'instance' },     x: 6, y: 13, w: 3, h: 4 },
+      { type: 'countries',  config: {},                         x: 9, y: 13, w: 3, h: 4 },
+      { type: 'timeseries', config: { measure: 'sum_size' },    x: 0, y: 17, w: 12, h: 4 }
+    ] },
+    // Syslog (Allani log store).
+    { key: 'syslog', label: 'Syslog', widgets: [
+      { type: 'stat', config: { table: 'syslog', metric: 'total' },                                       x: 0, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { table: 'syslog', metric: 'distinct', column: 'host', label: 'Unique hosts' },       x: 2, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { table: 'syslog', metric: 'distinct', column: 'program', label: 'Unique programs' }, x: 4, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { table: 'syslog', metric: 'busiest', column: 'host', label: 'Busiest host' },        x: 6, y: 0, w: 3, h: 1 },
+      { type: 'stat', config: { table: 'syslog', metric: 'busiest', column: 'program', label: 'Busiest program' },  x: 9, y: 0, w: 3, h: 1 },
+      { type: 'timeseries', config: { table: 'syslog', group_by: 'priority' },      x: 0, y: 1, w: 8, h: 4 },
+      { type: 'top',        config: { table: 'syslog', column: 'priority', style: 'pie' }, x: 8, y: 1, w: 4, h: 4 },
+      { type: 'top',        config: { table: 'syslog', column: 'program' },  x: 0, y: 5, w: 4, h: 4 },
+      { type: 'top',        config: { table: 'syslog', column: 'facility', style: 'pie' }, x: 4, y: 5, w: 4, h: 4 },
+      { type: 'top',        config: { table: 'syslog', column: 'host' },     x: 8, y: 5, w: 4, h: 4 },
+      { type: 'top',        config: { table: 'syslog', column: 'host_from' },x: 0, y: 9, w: 6, h: 4 },
+      { type: 'countries',  config: { table: 'syslog' },                     x: 6, y: 9, w: 6, h: 4 }
+    ] },
+    // HTTP -- a combined overview covering both access and error logs.
+    { key: 'http', label: 'HTTP (access + error)', widgets: [
+      { type: 'stat', config: { table: 'http', metric: 'total', label: 'Access rows' },        x: 0, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { table: 'http_error', metric: 'total', label: 'Error rows' },   x: 2, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { table: 'http', metric: 'distinct', column: 'vhost', label: 'Unique vhosts' },      x: 4, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { table: 'http', metric: 'distinct', column: 'client_ip', label: 'Unique clients' }, x: 6, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { table: 'http_error', metric: 'busiest', column: 'code', label: 'Top error code' }, x: 8, y: 0, w: 4, h: 1 },
+      { type: 'timeseries', config: { table: 'http', group_by: 'status' },          x: 0, y: 1, w: 6, h: 4 },
+      { type: 'timeseries', config: { table: 'http_error', group_by: 'loglevel' },  x: 6, y: 1, w: 6, h: 4 },
+      { type: 'top',        config: { table: 'http', column: 'status', style: 'pie' },   x: 0, y: 5, w: 3, h: 4 },
+      { type: 'top',        config: { table: 'http', column: 'vhost' },                  x: 3, y: 5, w: 5, h: 4 },
+      { type: 'top',        config: { table: 'http_error', column: 'loglevel', style: 'pie' }, x: 8, y: 5, w: 4, h: 4 },
+      { type: 'top',        config: { table: 'http', column: 'method', style: 'pie' },   x: 0, y: 9, w: 3, h: 4 },
+      { type: 'top',        config: { table: 'http_error', column: 'code', style: 'pie' }, x: 3, y: 9, w: 3, h: 4 },
+      { type: 'top',        config: { table: 'http', column: 'vhost', measure: 'bytes' },x: 6, y: 9, w: 6, h: 4 },
+      { type: 'top',        config: { table: 'http', column: 'client_ip' },              x: 0, y: 13, w: 4, h: 4 },
+      { type: 'top',        config: { table: 'http_error', column: 'client_ip' },        x: 4, y: 13, w: 4, h: 4 },
+      { type: 'countries',  config: { table: 'http' },                                   x: 8, y: 13, w: 4, h: 4 },
+      { type: 'timeseries', config: { table: 'http', measure: 'bytes' },                 x: 0, y: 17, w: 12, h: 4 }
+    ] },
+    // HTTP Access -- the access log on its own.
+    { key: 'http_access', label: 'HTTP Access', widgets: [
+      { type: 'stat', config: { table: 'http', metric: 'total' },                                          x: 0, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { table: 'http', metric: 'distinct', column: 'vhost', label: 'Unique vhosts' },       x: 2, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { table: 'http', metric: 'distinct', column: 'client_ip', label: 'Unique clients' },  x: 4, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { table: 'http', metric: 'busiest', column: 'vhost', label: 'Busiest vhost' },        x: 6, y: 0, w: 3, h: 1 },
+      { type: 'stat', config: { table: 'http', metric: 'busiest', column: 'status', label: 'Top status' },          x: 9, y: 0, w: 3, h: 1 },
+      { type: 'timeseries', config: { table: 'http', group_by: 'status' },        x: 0, y: 1, w: 8, h: 4 },
+      { type: 'top',        config: { table: 'http', column: 'status', style: 'pie' }, x: 8, y: 1, w: 4, h: 4 },
+      { type: 'top',        config: { table: 'http', column: 'vhost' },  x: 0, y: 5, w: 4, h: 4 },
+      { type: 'top',        config: { table: 'http', column: 'method', style: 'pie' }, x: 4, y: 5, w: 4, h: 4 },
+      { type: 'top',        config: { table: 'http', column: 'host' },   x: 8, y: 5, w: 4, h: 4 },
+      { type: 'top',        config: { table: 'http', column: 'vhost', measure: 'bytes' }, x: 0, y: 9, w: 6, h: 4 },
+      { type: 'top',        config: { table: 'http', column: 'client_ip' }, x: 6, y: 9, w: 3, h: 4 },
+      { type: 'countries',  config: { table: 'http' },                      x: 9, y: 9, w: 3, h: 4 },
+      { type: 'timeseries', config: { table: 'http', measure: 'bytes' },    x: 0, y: 13, w: 12, h: 4 }
+    ] },
+    // HTTP Error -- the error log on its own.
+    { key: 'http_error', label: 'HTTP Error', widgets: [
+      { type: 'stat', config: { table: 'http_error', metric: 'total' },                                            x: 0, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { table: 'http_error', metric: 'distinct', column: 'client_ip', label: 'Unique clients' }, x: 2, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { table: 'http_error', metric: 'distinct', column: 'server', label: 'Unique servers' },    x: 4, y: 0, w: 2, h: 1 },
+      { type: 'stat', config: { table: 'http_error', metric: 'busiest', column: 'loglevel', label: 'Top level' },        x: 6, y: 0, w: 3, h: 1 },
+      { type: 'stat', config: { table: 'http_error', metric: 'busiest', column: 'code', label: 'Top code' },             x: 9, y: 0, w: 3, h: 1 },
+      { type: 'timeseries', config: { table: 'http_error', group_by: 'loglevel' },     x: 0, y: 1, w: 8, h: 4 },
+      { type: 'top',        config: { table: 'http_error', column: 'loglevel', style: 'pie' }, x: 8, y: 1, w: 4, h: 4 },
+      { type: 'top',        config: { table: 'http_error', column: 'server' }, x: 0, y: 5, w: 4, h: 4 },
+      { type: 'top',        config: { table: 'http_error', column: 'code', style: 'pie' }, x: 4, y: 5, w: 4, h: 4 },
+      { type: 'top',        config: { table: 'http_error', column: 'host' },   x: 8, y: 5, w: 4, h: 4 },
+      { type: 'top',        config: { table: 'http_error', column: 'client_ip' }, x: 0, y: 9, w: 6, h: 4 },
+      { type: 'countries',  config: { table: 'http_error' },                      x: 6, y: 9, w: 6, h: 4 }
+    ] }
   ];
+  var PRESET = {}; PRESETS.forEach(function(p) { PRESET[p.key] = p; });
+  // The default board (and any legacy caller) seeds the Suricata preset.
+  var DEFAULT_WIDGETS = PRESET.suricata.widgets;
 
-  var state   = { board: 'default', table: '<%= $table %>', mins: <%= $go_back_minutes %>, start: '', end: '', showGpcd: <%= $show_gpcd ? 'true' : 'false' %> };
+  var state   = { board: 'default', table: '<%= $table %>', mins: <%= $go_back_minutes %>, start: '', end: '', showGpcd: <%= $show_gpcd ? 'true' : 'false' %>, bucket: 'auto' };
   var widgets = [];      // [{ id, type, config, x, y, w, h }]
   var charts  = {};      // widget id -> Chart
   var colsCache = {};    // table -> [columns]
@@ -256,18 +398,34 @@
     return String.fromCodePoint.apply(null, countryCode.toUpperCase().split('').map(function(c) { return 0x1F1E6 + c.charCodeAt(0) - 65; }));
   }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
-  function bucketLabel(epoch) {
+  function bucketLabel(epoch, unit) {
     var d = new Date(epoch * 1000);
     var hourMin = pad(d.getHours()) + ':' + pad(d.getMinutes());
-    return state.mins <= 1440 ? hourMin : (pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + hourMin);
+    var monthDay = pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    if (unit === 'month') { return d.getFullYear() + '-' + pad(d.getMonth() + 1); }
+    if (unit === 'week' || unit === 'day') { return monthDay; }
+    // minute / hour: prepend the date when the window spans more than a day
+    return state.mins <= 1440 ? hourMin : (monthDay + ' ' + hourMin);
   }
+  // 'auto' sizes the bucket to the window, matching the log reader's thresholds
+  // (minute <=3h, hour <=2d, day <=90d, week <=~2y, else month).
   function bucketUnit() {
     var mins = state.mins;
     if (state.start && state.end) {
       var span = (new Date(state.end.replace(' ', 'T')) - new Date(state.start.replace(' ', 'T'))) / 60000;
       if (span > 0) { mins = span; }
     }
-    return mins <= 180 ? 'minute' : (mins <= 20160 ? 'hour' : 'day');
+    if (mins <= 180)     { return 'minute'; }
+    if (mins <= 2880)    { return 'hour'; }
+    if (mins <= 129600)  { return 'day'; }
+    if (mins <= 1051200) { return 'week'; }
+    return 'month';
+  }
+  // A widget's own bucket wins, else the board bucket, else auto; 'auto' resolves
+  // to a concrete unit here so the API never has to.
+  function resolveBucket(widget) {
+    var b = (widget && widget.config && widget.config.bucket) || state.bucket || 'auto';
+    return (b === 'auto') ? bucketUnit() : b;
   }
 
   function qsFor(source, extra) {
@@ -394,7 +552,7 @@
       });
     }
   }
-  function renderTimeseries(id, canvas, data) {
+  function renderTimeseries(id, canvas, data, unit) {
     destroyChart(id);
     var rows = data.rows || [], bucketSet = {}, groupSet = {};
     rows.forEach(function(r) { bucketSet[r.bucket] = 1; if (r.group !== undefined) { groupSet[r.group] = 1; } });
@@ -414,7 +572,7 @@
       datasets = [{ label: 'alerts', data: seriesData, backgroundColor: PALETTE[1], borderColor: PALETTE[1] }];
     }
     charts[id] = new Chart(canvas, {
-      type: 'bar', data: { labels: buckets.map(bucketLabel), datasets: datasets },
+      type: 'bar', data: { labels: buckets.map(function(b) { return bucketLabel(b, unit); }), datasets: datasets },
       options: baseOpts({
         interaction: { mode: 'index', intersect: false },
         scales: { x: { stacked: true, ticks: { maxRotation: 0, autoSkip: true } },
@@ -463,11 +621,12 @@
         .then(function(data) { clearNote(widget); renderTop(widget, canvas, data.rows || []); })
         .catch(function(err) { showNote(widget, err.message); });
     } else if (widget.type === 'timeseries') {
-      getJSON(base + '/timeseries' + qsFor(wtable, { bucket: bucketUnit(), group_by: widget.config.group_by, top_groups: 6, measure: widget.config.measure }))
+      var unit = resolveBucket(widget);
+      getJSON(base + '/timeseries' + qsFor(wtable, { bucket: unit, group_by: widget.config.group_by, top_groups: 6, measure: widget.config.measure }))
         .then(function(data) {
           // log timeseries buckets are ISO strings; the renderer wants epoch seconds
           if (isLogSource(wtable)) { (data.rows || []).forEach(function(r) { r.bucket = Math.floor(new Date(r.bucket).getTime() / 1000); }); }
-          clearNote(widget); renderTimeseries(widget.id, canvas, data);
+          clearNote(widget); renderTimeseries(widget.id, canvas, data, unit);
         })
         .catch(function(err) { showNote(widget, err.message); });
     } else if (widget.type === 'countries') {
@@ -500,7 +659,7 @@
   }
   // The board's view state travels with its layout, so switching to a board
   // restores its own table / time range / GPCD setting.
-  function currentSettings() { return { table: state.table, go_back_minutes: state.mins, show_gpcd: state.showGpcd ? 1 : 0 }; }
+  function currentSettings() { return { table: state.table, go_back_minutes: state.mins, show_gpcd: state.showGpcd ? 1 : 0, bucket: state.bucket }; }
   function postLayout(layout) {
     return fetch('/api/dashboard/layout', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                             body: JSON.stringify({ name: state.board, layout: layout, settings: currentSettings() }) });
@@ -574,6 +733,7 @@
     document.getElementById('wm-style-wrap').style.display   = (type === 'top') ? '' : 'none';
     document.getElementById('wm-limit-wrap').style.display   = (type === 'top') ? '' : 'none';
     document.getElementById('wm-group-wrap').style.display   = (type === 'timeseries') ? '' : 'none';
+    document.getElementById('wm-bucket-wrap').style.display  = (type === 'timeseries') ? '' : 'none';
     document.getElementById('wm-measure-wrap').style.display = (type === 'top' || type === 'timeseries') ? '' : 'none';
   }
   // Fill the column/group/measure pickers from $table's columns/measures. With a
@@ -610,6 +770,7 @@
     document.getElementById('wm-metric').value = (widget && widget.config.metric) ? widget.config.metric : 'total';
     document.getElementById('wm-label').value = (widget && widget.config.label) ? widget.config.label : '';
     document.getElementById('wm-abbrev').checked = !!(widget && widget.config.abbrev);
+    document.getElementById('wm-bucket').value = (widget && widget.config.bucket) ? widget.config.bucket : '';
     populateFields(pinned || state.table, widget).catch(function() {}).then(function() { syncModalFields(); getModal().show(); });
   }
   document.getElementById('wm-type').addEventListener('change', syncModalFields);
@@ -627,7 +788,10 @@
       if (isNaN(lim) || lim < 1) { lim = 1; } if (lim > 50) { lim = 50; }
       config.limit = lim;
     }
-    if (type === 'timeseries') { var group = document.getElementById('wm-group').value; if (group) { config.group_by = group; } }
+    if (type === 'timeseries') {
+      var group = document.getElementById('wm-group').value; if (group) { config.group_by = group; }
+      var bkt = document.getElementById('wm-bucket').value; if (bkt) { config.bucket = bkt; }
+    }
     if ((type === 'top' || type === 'timeseries') && measure && measure !== 'count') { config.measure = measure; }
     if (type === 'stat') {
       var metric = document.getElementById('wm-metric').value;
@@ -669,22 +833,32 @@
   document.getElementById('db-table').addEventListener('change', function() { state.table = this.value; viewChanged(); });
   if (trRoot) { trRoot.addEventListener('timerange:change', function() { readTimeRange(); viewChanged(); }); }
   document.getElementById('db-gpcd').addEventListener('change', function() { state.showGpcd = this.checked; viewChanged(); });
+  document.getElementById('db-bucket').addEventListener('change', function() { state.bucket = this.value; viewChanged(); });
   document.getElementById('db-refresh').addEventListener('click', refresh);
   document.getElementById('db-add-widget').addEventListener('click', function() { openModal(null); });
-  document.getElementById('db-reset').addEventListener('click', function() {
-    widgets = seedDefaults(); rebuildGrid(); refresh(); setTimeout(saveLayout, 50);
+  // Reset menu: replace the board with a named preset. An alert preset also sets
+  // the board's Default table; a log preset leaves it (its widgets pin a source).
+  Array.prototype.forEach.call(document.querySelectorAll('[data-preset]'), function(el) {
+    el.addEventListener('click', function(event) {
+      event.preventDefault();
+      var preset = PRESET[this.getAttribute('data-preset')]; if (!preset) { return; }
+      if (!window.confirm("Replace this dashboard's widgets with the " + preset.label + " preset?")) { return; }
+      widgets = seedPreset(preset.key); rebuildGrid(); refresh(); setTimeout(saveLayout, 50);
+    });
   });
   document.getElementById('db-edit').addEventListener('click', function() { setEditing(!editing); });
 
   // ---- dashboards (boards) ----
   function applySettings(s) {
     s = s || {};
-    if (s.table && /^(?:suricata|sagan|cape)$/.test(s.table)) { state.table = s.table; }
+    if (s.table && /^(?:suricata|sagan|cape|syslog|http|http_error)$/.test(s.table)) { state.table = s.table; }
     if (s.go_back_minutes) { state.mins = Number(s.go_back_minutes); }
     if (s.show_gpcd !== undefined) { state.showGpcd = !!s.show_gpcd; }
+    state.bucket = (s.bucket && /^(?:auto|minute|hour|day|week|month)$/.test(s.bucket)) ? s.bucket : 'auto';
     state.start = ''; state.end = '';
     document.getElementById('db-table').value = state.table;
     document.getElementById('db-gpcd').checked = state.showGpcd;
+    document.getElementById('db-bucket').value = state.bucket;
     if (window.LilithTimeRange) { window.LilithTimeRange.set(trRoot, { go_back_minutes: state.mins }); }
   }
   // (Re)load the board list into the picker; select `want` (or the default).
@@ -764,7 +938,15 @@
   });
 
   // ---- boot ----
-  function seedDefaults() { return DEFAULT_WIDGETS.map(function(widget) { return { id: uid(), type: widget.type, config: widget.config, x: widget.x, y: widget.y, w: widget.w, h: widget.h }; }); }
+  function seedWidgets(list) { return list.map(function(widget) { return { id: uid(), type: widget.type, config: widget.config, x: widget.x, y: widget.y, w: widget.w, h: widget.h }; }); }
+  function seedDefaults() { return seedWidgets(DEFAULT_WIDGETS); }
+  // Seed a named preset; alert presets also point the board's Default table at
+  // their table so the widgets that follow it read the right annal.
+  function seedPreset(key) {
+    var preset = PRESET[key] || PRESET.suricata;
+    if (preset.table) { state.table = preset.table; document.getElementById('db-table').value = state.table; }
+    return seedWidgets(preset.widgets);
+  }
   setEditing(false);
   loadBoards().then(function(name) { return loadBoard(name); }).catch(function() {
     widgets = seedDefaults(); rebuildGrid(); refresh();

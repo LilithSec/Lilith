@@ -12,13 +12,21 @@ Along the top:
 
 - **Dashboard** — which saved board to show. Pick another to switch to it; the
   star (★) marks the default board (the one loaded first).
-- **Default table** — the default annal for any widget that does not set its
-  own: Suricata, Sagan, or CAPE. Each widget can override it (see the widget
-  config below), so one board can span tables.
+- **Default table** — the default source for any widget that does not set its
+  own: Suricata, Sagan, or CAPE, and — when an [Allani](#allani-log-widgets)
+  store is configured — the log sources `syslog`, `http (access)`, or
+  `http error`. Each widget can override it (see the widget config below), so one
+  board can span tables; a widget left to follow the default reads whichever it
+  is set to.
 - **Time range** — a preset relative window (Last hour … Last 30 days) or a
   **Custom range** with From/To pickers (native date plus 24-hour hour/minute).
   A relative window is what the board saves; a custom absolute range is a live
   override that is not persisted with the board.
+- **Bucket** — the time bucket the over-time charts use: `auto` (the default),
+  or a fixed `minute` / `hour` / `day` / `week` / `month`. `auto` sizes the
+  bucket to the window (minute up to 3h, hour up to 2d, day up to 90d, week up to
+  ~2y, month beyond) so a long window does not produce a giant series. Each
+  **Alerts over time** widget can override it (see the widget config below).
 - **Show GPCD** — off by default. When off, `Generic Protocol Command Decode`
   alerts are excluded everywhere (as the search page hides them). Tick it to
   include them. Only affects tables with a classification (Suricata/Sagan).
@@ -26,9 +34,9 @@ Along the top:
 - **Edit** — toggles edit mode (see below). Its dropdown holds the board actions:
   **New dashboard**, **Rename**, **Set as default**, and **Delete**.
 
-The **Default table**, **Time range**, and **Show GPCD** controls are per-board: each
-board remembers its own, restored when you switch to it. Changing them just
-re-draws until you save (in edit mode).
+The **Default table**, **Time range**, **Bucket**, and **Show GPCD** controls are
+per-board: each board remembers its own, restored when you switch to it. Changing
+them just re-draws until you save (in edit mode).
 
 Below the controls is the widget grid. The built-in board opens with a row of
 **stat widgets** across the top (total alerts, unique sources, unique
@@ -43,7 +51,13 @@ overwrites the saved layout. Clicking **Edit** unlocks it and reveals the
 editing controls:
 
 - **+ Add widget** — opens the widget picker (see below).
-- **Reset layout** — replaces this board's widgets with the built-in set.
+- **Reset to…** — replaces this board's widgets with a built-in **preset**
+  (after a confirm). The menu offers **Suricata** (the SIEM overview seeded on
+  the default board) and **CAPE**; when an [Allani](#allani-log-widgets) store is
+  configured it also offers **Syslog**, **HTTP (access + error)** — a combined
+  overview — **HTTP Access**, and **HTTP Error**. An alert preset also points the
+  board's **Default table** at its table; a log preset instead pins each widget's
+  own source, so it reads that log whatever the Default table is.
 - Each widget grows a gear (reconfigure) and an × (remove), **drags by its
   title** to reorder, and **resizes from the bottom-right corner**.
 
@@ -52,12 +66,15 @@ While editing, layout and control changes are saved automatically; click
 
 Boards are stored in the database and, because the web UI has no accounts, are
 **shared, not per-user**. They persist across reloads. A brand-new board starts
-empty; the built-in `default` board comes seeded with the widget set below.
+empty; the built-in `default` board comes seeded with the Suricata preset (the
+widget set below).
 
 ## Widget types
 
 - **Alerts over time** — a stacked bar over the time range, optionally split by a
-  column (the default splits by classification/target).
+  column (the default splits by classification/target). Its **Time bucket** field
+  defaults to *Follow dashboard* (the board's Bucket control) but can pin its own
+  `auto` / `minute` / `hour` / `day` / `week` / `month`.
 - **Top values** — the most common values of any column, as a **bar or pie**,
   showing between 1 and 50 values.
 - **Source countries** — the busiest source IPs resolved to countries through the

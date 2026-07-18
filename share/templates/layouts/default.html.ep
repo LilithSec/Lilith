@@ -28,14 +28,7 @@
       <a class="btn btn-sm btn-outline-secondary" href="/search" id="nav-search">Search</a>
       <a class="btn btn-sm btn-outline-secondary" href="/dashboard" id="nav-dashboard">Dashboard</a>
       % if ($self->allani_enabled) {
-      <div class="dropdown">
-        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
-                id="nav-logs-toggle" data-bs-toggle="dropdown" aria-expanded="false">Logs</button>
-        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="nav-logs-toggle">
-          <li><a class="dropdown-item" href="/logs"           id="nav-logs">Search</a></li>
-          <li><a class="dropdown-item" href="/logs/dashboard" id="nav-logs-dashboard">Dashboard</a></li>
-        </ul>
-      </div>
+      <a class="btn btn-sm btn-outline-secondary" href="/logs" id="nav-logs">Logs</a>
       % }
 
       <!-- IP Info -->

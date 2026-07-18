@@ -40,10 +40,8 @@ sensor boxes that hold no court of their own. See
   web frontend
 
 - [dashboard](dashboard.md) :: the configurable `/dashboard` overview —
-  its controls, widget types, and recipe panels per table
-
-- [log-dashboard](log-dashboard.md) :: the fixed `/logs/dashboard`
-  overview of an Allani log store — its controls, panels, and endpoints
+  its controls, widget types, and recipe panels per table (including
+  Allani log sources and the built-in per-source presets)
 
 - [escalation](escalation.md) :: sending word onward — targets, types,
   the escalation CLI, and the auto escalation rule DSL

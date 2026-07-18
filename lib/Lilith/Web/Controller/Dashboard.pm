@@ -13,7 +13,11 @@ my %WIDGET_TYPE = map { $_ => 1 } qw( timeseries top countries stat );
 # 'table', when a widget carries its own valid one, lets a single board span
 # tables; a widget with none reads the board's table. See layout_save for how
 # an invalid table value is dropped (unlike the free-string config keys).
-my %CONFIG_KEY = map { $_ => 1 } qw( column group_by limit style measure table metric label abbrev );
+my %CONFIG_KEY = map { $_ => 1 } qw( column group_by limit style measure table metric label abbrev bucket );
+
+# time buckets a board or a timeseries widget may request: a date_trunc unit, or
+# 'auto' (the frontend sizes that to the window before it reaches the API).
+my $BUCKET_RE = qr/\A(?:auto|minute|hour|day|week|month)\z/;
 
 =head1 NAME
 
@@ -93,13 +97,20 @@ sub _clean_settings {
 	return {} unless ref $settings eq 'HASH';
 
 	my %clean;
+	# the board default table: an alert table, or an Allani log source when one is
+	# configured (a following widget then reads that log). Same set as a widget's
+	# own table override.
 	my $table = $settings->{table};
-	$clean{table} = $table if defined $table && $table =~ /\A(?:suricata|sagan|cape)\z/;
+	$clean{table} = $table if defined $table && $table =~ /\A(?:suricata|sagan|cape|syslog|http|http_error)\z/;
 
 	my $mins = $settings->{go_back_minutes};
 	$clean{go_back_minutes} = int($mins) if defined $mins && $mins =~ /\A[0-9]+\z/ && $mins > 0;
 
 	$clean{show_gpcd} = ( $settings->{show_gpcd} ? 1 : 0 ) if exists $settings->{show_gpcd};
+
+	# the board's default time bucket (a timeseries widget may still override it)
+	my $bucket = $settings->{bucket};
+	$clean{bucket} = '' . $bucket if defined $bucket && $bucket =~ $BUCKET_RE;
 
 	return \%clean;
 } ## end sub _clean_settings
@@ -399,6 +410,10 @@ sub layout_save {
 					# stat (text) widget: numbers are exact by default; this opts into
 					# abbreviating them (2010 -> 2k)
 					$cfg{$k} = $v ? 1 : 0;
+				} elsif ( $k eq 'bucket' ) {
+					# timeseries widget's per-widget bucket override; invalid values are
+					# dropped so the widget falls back to the board bucket
+					$cfg{$k} = '' . $v if $v =~ $BUCKET_RE;
 				} else {
 					$cfg{$k} = '' . $v;
 				}

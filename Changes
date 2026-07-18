@@ -10,11 +10,32 @@ Revision history for Lilith
 		   fields, no picker library) -- with only the active mode's params
 		   submitted. The control is a reusable partial
 		   (templates/partials/_time_range.html.ep + /js/time-range.js), used
-		   on /search, /logs, and both dashboards (/dashboard and
-		   /logs/dashboard). Lilith::Stats and Lilith::Allani gained an
+		   on /search, /logs, and the /dashboard. Lilith::Stats and Lilith::Allani gained an
 		   explicit start/end absolute range (preferred over go_back_minutes);
 		   on the alert dashboard an absolute range is a live override, not
 		   saved with the board.
+		 - Remove the fixed log dashboard (/logs/dashboard) and its
+		   /api/logs/summary endpoint: the configurable /dashboard now covers
+		   logs entirely (log sources as the Default table, per-widget log
+		   sources, the Syslog/HTTP/HTTP Access/HTTP Error presets, and the
+		   adjustable bucket). The navbar's Logs entry is now a plain link to the
+		   /logs search page.
+		 - /dashboard gains an adjustable time Bucket (auto/minute/hour/day/week/
+		   month) like the log dashboard's, saved per board; auto sizes the
+		   bucket to the window (the same thresholds Lilith::Allani uses). Each
+		   Alerts over time widget can override it (or follow the board), stored
+		   as a per-widget bucket config key. The auto sizing now reaches week
+		   and month for very long windows instead of capping at day.
+		 - The /dashboard Default table selector can now be set to an Allani log
+		   source (syslog/http/http_error) as well as an alert table when
+		   [allani] is configured, so a widget left to follow the default reads
+		   that log; the board setting accepts the log sources too.
+		 - The /dashboard Reset control is now a "Reset to..." menu of built-in
+		   presets instead of a single layout: Suricata (the SIEM overview, still
+		   the default board's seed) and CAPE, plus Syslog, HTTP (a combined
+		   access+error overview), HTTP Access, and HTTP Error when an [allani]
+		   store is configured. An alert preset also sets the board's Default
+		   table; a log preset pins each widget's own Allani source.
 		 - Add a Stat (text) widget type to /dashboard: a single number --
 		   Total / Distinct-of-a-column / Escalated / Busiest-value -- with an
 		   optional custom label, backed by GET /api/{dashboard,logs}/stat.
@@ -43,10 +64,9 @@ Revision history for Lilith
 		   The event view also grows a "Logs" dropdown when Allani is
 		   configured, deep-linking to /logs pre-filtered by the event's
 		   host (syslog) and source IP (interleaved http), windowed to
-		   reach back around the event. A companion log dashboard
-		   (/logs/dashboard) charts row counts over time and the top
-		   values of each source's dimensions (top programs/hosts,
-		   vhosts/status codes, ...) via /api/logs/{summary,top,timeseries}.
+		   reach back around the event. The log aggregation endpoints
+		   (/api/logs/{top,timeseries,countries,columns,measures,stat})
+		   feed the configurable dashboard's log widgets.
 		 - Add MITRE ATT&CK tactic/technique as virtual Suricata dashboard
 		   dimensions, read from the alert.metadata a ruleset (e.g.
 		   Emerging Threats) tags on, with the underscored names spaced out
