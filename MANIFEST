@@ -52,6 +52,7 @@ lib/Lilith/Receiver.pm
 lib/Lilith/Schema.pm
 lib/Lilith/Stats.pm
 lib/Lilith/Schema/Result/AutoEscalation.pm
+lib/Lilith/Schema/Result/BaphometAlert.pm
 lib/Lilith/Schema/Result/CapeAlert.pm
 lib/Lilith/Schema/Result/Escalation.pm
 lib/Lilith/Schema/Result/EscalationTarget.pm
@@ -132,6 +133,7 @@ share/migrations/PostgreSQL/deploy/6/001-auto.sql
 share/migrations/PostgreSQL/deploy/7/001-auto.sql
 share/migrations/PostgreSQL/deploy/8/001-auto.sql
 share/migrations/PostgreSQL/deploy/9/001-auto.sql
+share/migrations/PostgreSQL/deploy/10/001-auto.sql
 share/migrations/PostgreSQL/downgrade/1-0/001-auto.sql
 share/migrations/PostgreSQL/downgrade/3-2/001-auto.sql
 share/migrations/PostgreSQL/downgrade/4-3/001-auto.sql
@@ -140,6 +142,7 @@ share/migrations/PostgreSQL/downgrade/6-5/001-auto.sql
 share/migrations/PostgreSQL/downgrade/7-6/001-auto.sql
 share/migrations/PostgreSQL/downgrade/8-7/001-auto.sql
 share/migrations/PostgreSQL/downgrade/9-8/001-auto.sql
+share/migrations/PostgreSQL/downgrade/10-9/001-auto.sql
 share/migrations/PostgreSQL/upgrade/0-1/001-auto.sql
 share/migrations/PostgreSQL/upgrade/1-2/001-auto.sql
 share/migrations/PostgreSQL/upgrade/2-3/001-auto.sql
@@ -149,6 +152,7 @@ share/migrations/PostgreSQL/upgrade/5-6/001-auto.sql
 share/migrations/PostgreSQL/upgrade/6-7/001-auto.sql
 share/migrations/PostgreSQL/upgrade/7-8/001-auto.sql
 share/migrations/PostgreSQL/upgrade/8-9/001-auto.sql
+share/migrations/PostgreSQL/upgrade/9-10/001-auto.sql
 share/fixtures/1/conf/keep
 share/fixtures/2/conf/keep
 share/fixtures/3/conf/keep
@@ -158,6 +162,7 @@ share/fixtures/6/conf/keep
 share/fixtures/7/conf/keep
 share/fixtures/8/conf/keep
 share/fixtures/9/conf/keep
+share/fixtures/10/conf/keep
 share/public/vendor/Chart.js
 share/public/js/time-range.js
 share/public/vendor/gridstack/gridstack-all.js

@@ -55,7 +55,19 @@ our %alert_columns = (
 			url url_hostname proto src_ip src_port dest_ip dest_port size raw
 		)
 	],
+	baphomet => [
+		qw(
+			instance host timestamp event_id event_type kur path score
+			signature severity classification src_ip dest_ip subject
+			ban_time recidive country raw
+		)
+	],
 );
+
+# The event types Baphomet emits in its EVE (eve_type "baphomet"); a record with
+# any other event_type is not ingested. baphomet_event_ignore (per instance)
+# narrows this further.
+my %BAPHOMET_EVENT_TYPES = map { $_ => 1 } qw( found banish noted alert sighting sighted );
 
 =head1 SYNOPSIS
 
@@ -188,6 +200,11 @@ sub new {
 		$opts{sagan_class_ignore} = \@empty_array;
 	}
 
+	if ( ref( $opts{baphomet_event_ignore} ) ne 'ARRAY' ) {
+		my @empty_array;
+		$opts{baphomet_event_ignore} = \@empty_array;
+	}
+
 	if ( ref( $opts{escalation_type_namespaces} ) ne 'ARRAY' ) {
 		my @empty_array;
 		$opts{escalation_type_namespaces} = \@empty_array;
@@ -201,6 +218,7 @@ sub new {
 		class_ignore               => $opts{class_ignore},
 		suricata_class_ignore      => $opts{suricata_class_ignore},
 		sagan_class_ignore         => $opts{sagan_class_ignore},
+		baphomet_event_ignore      => $opts{baphomet_event_ignore},
 		dsn                        => $opts{dsn},
 		user                       => $opts{user},
 		pass                       => $opts{pass},
@@ -282,6 +300,9 @@ sub new {
 		$self->{snmp_class_map}{$lc_key} =~ s/\ /\_/;
 	} ## end foreach my $key (@keys)
 
+	# O(1) lookup of the baphomet event types to skip on ingest
+	$self->{baphomet_event_ignore_map} = { map { $_ => 1 } @{ $self->{baphomet_event_ignore} } };
+
 	return $self;
 } ## end sub new
 
@@ -301,21 +322,24 @@ or undef if the record is not an C<alert> event and so should be skipped.
 
 Arguments.
 
-    - type :: 'suricata', 'sagan', or 'cape'. Required.
+    - type :: 'suricata', 'sagan', 'cape', or 'baphomet'. Required.
 
     - json :: The decoded EVE record, a hash ref. Required.
 
-    - instance :: Instance name recorded on the row.
+    - instance :: Instance name recorded on the row. For baphomet it falls back
+      to the record's C<kur> when not given.
 
     - host :: Host the instance runs on. Stored as C<host> for Suricata and as
-      C<instance_host> for Sagan and CAPE.
+      C<instance_host> for Sagan and CAPE. For baphomet the C<host> column is
+      the record's own C<hostname>, falling back to this argument.
 
     - raw :: The raw EVE line, stored verbatim in the C<raw> column.
 
 For Suricata and Sagan an C<event_id> is derived as the SHA256 (base64) of
 instance + host + timestamp + flow_id + in_iface. L<App::Lilu> uses the same
 recipe, so a sensor running Lilu and Lilith itself compute the same handle for
-a given event.
+a given event. Baphomet has no flow identity, so its C<event_id> uses a
+different recipe; see L</_parse_baphomet>.
 
 =cut
 
@@ -324,18 +348,28 @@ sub parse_eve {
 
 	my $json = $opts{json};
 
-	# only alert events are stored; anything else is skipped
-	if (  !defined($json)
-		|| ref($json) ne 'HASH'
-		|| !defined( $json->{event_type} )
-		|| $json->{event_type} ne 'alert' )
-	{
+	# every parser needs a decoded record to work from
+	if ( !defined($json) || ref($json) ne 'HASH' ) {
 		return undef;
 	}
 
 	my $type     = $opts{type};
 	my $instance = $opts{instance};
 	my $host     = $opts{host};
+
+	# Baphomet has its own event_type vocabulary (found/banish/noted/alert/
+	# sighting/sighted) and row shape, so it is dispatched on the configured type
+	# before the suricata/sagan/cape 'alert'-only guard below -- which would
+	# otherwise drop every Baphomet record.
+	if ( defined($type) && $type eq 'baphomet' ) {
+		return $self->_parse_baphomet( $json, \%opts );
+	}
+
+	# for the suricata/sagan/cape sources only alert events are stored;
+	# anything else is skipped
+	if ( !defined( $json->{event_type} ) || $json->{event_type} ne 'alert' ) {
+		return undef;
+	}
 
 	# stable per-event handle; undef parts stringify to '' just as before
 	my $event_id
@@ -469,6 +503,84 @@ sub _parse_cape {
 	};
 } ## end sub _parse_cape
 
+=head2 _parse_baphomet
+
+Pull a Baphomet judgment record (top-level C<eve_type> "baphomet") apart into a
+C<baphomet_alerts> row. Kept out of L</parse_eve> for the same reason as
+L</_parse_cape>. Returns undef for an C<event_type> outside the six Baphomet
+emits (found/banish/noted/alert/sighting/sighted) or one listed in this
+instance's C<baphomet_event_ignore>.
+
+Baphomet's offender IP maps to C<src_ip> so the existing top-talker /
+escalation / C<%INET> machinery reuse it; its C<subject> (a non-IP offender,
+e.g. a username) gets its own column. As with the suricata/sagan/cape sources,
+only the scalar fields worth filtering / sorting / grouping by are promoted to
+columns; the nested detail (C<attack>, C<rule>, C<found>, C<marks_set>,
+C<references>, ...) is left in C<raw> and reached via C<< raw->'...' >>.
+
+Baphomet has no flow identity, so C<event_id> is the SHA256 (base64) of
+hostname + kur + timestamp + event_type + rule name + offender (the ip, or the
+subject when there is no ip). The rule name is read from the C<raw> record even
+though C<rule> itself is not promoted to a column.
+
+=cut
+
+sub _parse_baphomet {
+	my ( $self, $json, $opts ) = @_;
+
+	my $event_type = $json->{event_type};
+	return undef unless defined($event_type) && $BAPHOMET_EVENT_TYPES{$event_type};
+	return undef if $self->{baphomet_event_ignore_map}{$event_type};
+
+	# instance is the configured name, falling back to the record's kur; host is
+	# the record's own hostname, falling back to the sensor host the caller passed
+	my $instance = defined( $opts->{instance} ) ? $opts->{instance} : $json->{kur};
+	my $host     = defined( $json->{hostname} ) ? $json->{hostname} : $opts->{host};
+
+	# offender is the ip when present, else the subject; it keeps the derived
+	# event_id stable for a subject-only verdict
+	my $rule_name = ref( $json->{rule} ) eq 'HASH' ? $json->{rule}{name} : undef;
+	my $offender  = defined( $json->{ip} ) ? $json->{ip} : $json->{subject};
+
+	my $event_id
+		= sha256_base64( ( defined($host)                ? $host              : '' )
+			. ( defined( $json->{kur} )       ? $json->{kur}       : '' )
+			. ( defined( $json->{timestamp} ) ? $json->{timestamp} : '' )
+			. ( defined($event_type)          ? $event_type        : '' )
+			. ( defined($rule_name)           ? $rule_name         : '' )
+			. ( defined($offender)            ? $offender          : '' ) );
+
+	return {
+		instance       => $instance,
+		host           => $host,
+		timestamp      => $json->{timestamp},
+		event_id       => $event_id,
+		event_type     => $event_type,
+		kur            => $json->{kur},
+		path           => $json->{path},
+		score          => $json->{score},
+		signature      => $json->{msg},
+		severity       => $json->{severity},
+		classification => $json->{classtype},
+		src_ip         => $json->{ip},
+		dest_ip        => $json->{dest_ip},
+		subject        => $json->{subject},
+		ban_time       => $json->{ban_time},
+		recidive       => _baphomet_bool( $json->{recidive} ),
+		country        => $json->{country},
+		raw            => $opts->{raw},
+	};
+} ## end sub _parse_baphomet
+
+# Coerce a Baphomet JSON boolean (a JSON::PP::Boolean, which stringifies to ''
+# for false and would not bind as a Postgres boolean) to 1/0, leaving undef as
+# SQL NULL. Plain function, not a method.
+sub _baphomet_bool {
+	my ($value) = @_;
+	return undef unless defined $value;
+	return $value ? 1 : 0;
+}
+
 =head2 insert_alert
 
 Insert one parsed alert row into its table and return the new C<id>.
@@ -480,7 +592,7 @@ Insert one parsed alert row into its table and return the new C<id>.
 
 Arguments.
 
-    - type :: 'suricata', 'sagan', or 'cape'. Required.
+    - type :: 'suricata', 'sagan', 'cape', or 'baphomet'. Required.
 
     - row :: Hash ref keyed by column name, the same keys as
       C<@{ $Lilith::alert_columns{$type} }>. Missing columns insert as NULL;
@@ -504,7 +616,8 @@ sub insert_alert {
 	my $table
 		= $type eq 'suricata' ? 'suricata_alerts'
 		: $type eq 'sagan'    ? 'sagan_alerts'
-		:                       'cape_alerts';
+		: $type eq 'cape'     ? 'cape_alerts'
+		:                       'baphomet_alerts';
 	my @cols = @{ $alert_columns{$type} };
 
 	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} );
@@ -804,8 +917,8 @@ Start processing. This method is not expected to return.
 One argument named 'files' is taken and it is hash of
 hashes. The keys are below.
 
-    - type :: Either 'suricata', 'sagan', or 'cape', depending
-              on the type it is.
+    - type :: Either 'suricata', 'sagan', 'cape', or 'baphomet',
+              depending on the type it is.
 
     - eve :: Path to the EVE file to read.
 
@@ -840,7 +953,11 @@ sub run {
 		if ( !defined( $item->{type} ) ) {
 			warn( 'No type specified for ' . $item->{instance} . '; skipping this instance' );
 			next;
-		} elsif ( $item->{type} ne 'suricata' && $item->{type} ne 'sagan' && $item->{type} ne 'cape' ) {
+		} elsif ($item->{type} ne 'suricata'
+			&& $item->{type} ne 'sagan'
+			&& $item->{type} ne 'cape'
+			&& $item->{type} ne 'baphomet' )
+		{
 			warn(     'Type, '
 					. $item->{type}
 					. ', for instance '
@@ -1132,10 +1249,10 @@ Searches the specified table and returns a array of found rows. This is a wrappe
 Lilith::Schema. If you are looking for something more complex, read L<DBIx::Class>,
 L<SQL::Abstract::Classic>, and L<Lilith::Schema>.
 
-    - table :: 'suricata', 'cape', 'sagan' depending on the desired table to
-               use. Will die if something other is specified. The table
-               name used is based on what was passed to new(if not the
-               default).
+    - table :: 'suricata', 'cape', 'sagan', or 'baphomet' depending on the
+               desired table to use. Will die if something other is specified.
+               The table name used is based on what was passed to new(if not
+               the default).
       Default :: suricata
 
     - go_back_minutes :: How far back to search in minutes.
@@ -1266,7 +1383,11 @@ sub search {
 	my ( $self, %opts ) = @_;
 
 	if ( defined( $opts{table} ) ) {
-		if ( $opts{table} ne 'suricata' && $opts{table} ne 'sagan' && $opts{table} ne 'cape' ) {
+		if (   $opts{table} ne 'suricata'
+			&& $opts{table} ne 'sagan'
+			&& $opts{table} ne 'cape'
+			&& $opts{table} ne 'baphomet' )
+		{
 			die( '"' . $opts{table} . '" is not a known table type' );
 		}
 	}
@@ -1277,6 +1398,8 @@ sub search {
 	} elsif ( $opts{table} eq 'cape' ) {
 		$table            = 'CapeAlert';
 		$default_order_by = 'id';
+	} elsif ( $opts{table} eq 'baphomet' ) {
+		$table = 'BaphometAlert';
 	}
 
 	if ( !defined( $opts{order_by} ) ) {
@@ -1540,9 +1663,10 @@ sub search {
 	} ## end if ( defined( $opts{class} ) && $table ne ...)
 
 	my @strings = (
-		'host',      'instance_host', 'instance', 'signature',
-		'app_proto', 'in_iface',      'url',      'url_hostname',
-		'slug',      'pkg',           'subbed_from_host'
+		'host',       'instance_host', 'instance', 'signature',
+		'app_proto',  'in_iface',      'url',      'url_hostname',
+		'slug',       'pkg',           'subbed_from_host',
+		'event_type', 'subject'
 	);
 	foreach my $item (@strings) {
 		if ( defined( $opts{$item} ) ) {
@@ -1803,7 +1927,11 @@ sub escalate {
 	if ( !defined( $opts{table} ) ) {
 		$opts{table} = 'suricata';
 	}
-	if ( $opts{table} ne 'suricata' && $opts{table} ne 'sagan' && $opts{table} ne 'cape' ) {
+	if (   $opts{table} ne 'suricata'
+		&& $opts{table} ne 'sagan'
+		&& $opts{table} ne 'cape'
+		&& $opts{table} ne 'baphomet' )
+	{
 		die( '"' . $opts{table} . '" is not a known table type' );
 	}
 
@@ -2008,7 +2136,11 @@ sub escalations_for {
 	if ( !defined( $opts{table} ) ) {
 		$opts{table} = 'suricata';
 	}
-	if ( $opts{table} ne 'suricata' && $opts{table} ne 'sagan' && $opts{table} ne 'cape' ) {
+	if (   $opts{table} ne 'suricata'
+		&& $opts{table} ne 'sagan'
+		&& $opts{table} ne 'cape'
+		&& $opts{table} ne 'baphomet' )
+	{
 		die( '"' . $opts{table} . '" is not a known table type' );
 	}
 
@@ -2260,7 +2392,7 @@ sub auto_escalation_preview {
 	Lilith::AutoEscalate->check_rule( $opts{rule} );
 
 	my $table = defined( $opts{table} ) ? $opts{table} : 'suricata';
-	if ( $table ne 'suricata' && $table ne 'sagan' && $table ne 'cape' ) {
+	if ( $table ne 'suricata' && $table ne 'sagan' && $table ne 'cape' && $table ne 'baphomet' ) {
 		die( '"' . $table . '" is not a known table type' );
 	}
 
@@ -2351,7 +2483,9 @@ time so it is considered exactly once, regardless of whether a rule
 matched.
 
 The C<table> option limits processing to a single table type; when
-omitted all three (suricata/sagan/cape) are processed.
+omitted all four (suricata/sagan/cape/baphomet) are processed. baphomet is
+scanned so a rule scoped to it can fire, but is not in the rule-tables default,
+so a rule that names no tables never escalates baphomet.
 C<go_back_minutes> bounds how far back to look for alerts that have not
 yet been considered (default 5). With C<dry_run> set, no escalation is
 sent and nothing is stamped; the returned summary shows what would have
@@ -2372,9 +2506,12 @@ and C<escalations> (a array ref of per-match details).
 sub auto_escalate {
 	my ( $self, %opts ) = @_;
 
-	my @tables = defined( $opts{table} ) ? ( $opts{table} ) : ( 'suricata', 'sagan', 'cape' );
+	# baphomet is scanned alongside the others so a rule scoped to it can fire;
+	# it is not in the rule-tables default, so an existing rule that named no
+	# tables (defaulting to suricata/sagan/cape) never escalates baphomet.
+	my @tables = defined( $opts{table} ) ? ( $opts{table} ) : ( 'suricata', 'sagan', 'cape', 'baphomet' );
 	foreach my $table (@tables) {
-		if ( $table ne 'suricata' && $table ne 'sagan' && $table ne 'cape' ) {
+		if ( $table ne 'suricata' && $table ne 'sagan' && $table ne 'cape' && $table ne 'baphomet' ) {
 			die( '"' . $table . '" is not a known table type' );
 		}
 	}
@@ -2598,12 +2735,14 @@ sub _auto_decode_tables {
 	return [];
 } ## end sub _auto_decode_tables
 
-# validates a tables list against the known table types, defaulting to all
-# three when none are given; returns a de-duped array ref
+# validates a tables list against the known table types, returning a de-duped
+# array ref. baphomet is a valid table a rule may name, but it is deliberately
+# left out of the default (suricata/sagan/cape) returned when none are given, so
+# escalating baphomet stays opt-in: a rule must name it explicitly.
 sub _auto_check_tables {
 	my ( $self, $tables ) = @_;
 
-	my %valid = ( suricata => 1, sagan => 1, cape => 1 );
+	my %valid = ( suricata => 1, sagan => 1, cape => 1, baphomet => 1 );
 
 	if ( ref($tables) ne 'ARRAY' || !@{$tables} ) {
 		return [ 'suricata', 'sagan', 'cape' ];
@@ -2615,7 +2754,7 @@ sub _auto_check_tables {
 		if ( !defined($table) || !$valid{$table} ) {
 			die(      '"'
 					. ( defined($table) ? $table : 'undef' )
-					. '" is not a known table type; valid: suricata, sagan, cape' );
+					. '" is not a known table type; valid: suricata, sagan, cape, baphomet' );
 		}
 		push( @out, $table ) if !$seen{$table}++;
 	}

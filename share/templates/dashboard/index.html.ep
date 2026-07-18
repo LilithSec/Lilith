@@ -38,6 +38,7 @@
             <option value="suricata" <%= $table eq 'suricata' ? 'selected' : '' %>>Suricata</option>
             <option value="sagan"    <%= $table eq 'sagan'    ? 'selected' : '' %>>Sagan</option>
             <option value="cape"     <%= $table eq 'cape'     ? 'selected' : '' %>>CAPE</option>
+            <option value="baphomet" <%= $table eq 'baphomet' ? 'selected' : '' %>>Baphomet</option>
           </optgroup>
           % if ($self->allani_enabled) {
           <optgroup label="Logs (Allani)">
@@ -126,6 +127,7 @@
               <option value="suricata">Suricata</option>
               <option value="sagan">Sagan</option>
               <option value="cape">CAPE</option>
+              <option value="baphomet">Baphomet</option>
             </optgroup>
             % if ($self->allani_enabled) {
             <optgroup label="Logs (Allani)">
@@ -239,7 +241,7 @@
   Chart.defaults.borderColor = 'rgba(255,255,255,0.08)';
   Chart.defaults.font.size = 11;
 
-  var GROUP_COL = { suricata: 'classification', sagan: 'classification', cape: 'target' };
+  var GROUP_COL = { suricata: 'classification', sagan: 'classification', cape: 'target', baphomet: 'event_type' };
   // Allani log sources a widget may target alongside the alert tables; such a
   // widget fetches from /api/logs/* (source=) instead of /api/dashboard/* (table=).
   var LOG_SOURCES = { syslog: 1, http: 1, http_error: 1 };
@@ -851,7 +853,7 @@
   // ---- dashboards (boards) ----
   function applySettings(s) {
     s = s || {};
-    if (s.table && /^(?:suricata|sagan|cape|syslog|http|http_error)$/.test(s.table)) { state.table = s.table; }
+    if (s.table && /^(?:suricata|sagan|cape|baphomet|syslog|http|http_error)$/.test(s.table)) { state.table = s.table; }
     if (s.go_back_minutes) { state.mins = Number(s.go_back_minutes); }
     if (s.show_gpcd !== undefined) { state.showGpcd = !!s.show_gpcd; }
     state.bucket = (s.bucket && /^(?:auto|minute|hour|day|week|month)$/.test(s.bucket)) ? s.bucket : 'auto';

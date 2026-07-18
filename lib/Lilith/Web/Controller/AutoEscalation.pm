@@ -245,7 +245,7 @@ sub preview {
 	}
 
 	my $table = defined $json->{table} ? $json->{table} : 'suricata';
-	unless ( $table =~ /^(?:suricata|sagan|cape)$/ ) {
+	unless ( $table =~ /^(?:suricata|sagan|cape|baphomet)$/ ) {
 		return $self->render( json => { error => 'invalid table' }, status => 400 );
 	}
 

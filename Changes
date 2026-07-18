@@ -1,6 +1,27 @@
 Revision history for Lilith
 
 4.0.0	unreleased
+		 - Ingest Baphomet's own judgment EVE (eve_type "baphomet"; event
+		   types found/banish/noted/alert/sighting/sighted) into a new
+		   baphomet_alerts table (schema version 10). A type=baphomet EVE
+		   instance is tailed the same way as suricata/sagan/cape; the
+		   offender IP maps to src_ip (so top-talkers/escalation/GeoIP reuse
+		   it) and a non-IP subject to its own column, and a per-instance
+		   baphomet_event_ignore knob drops chosen event types. As with the
+		   sibling tables only the scalar fields worth filtering/sorting/
+		   grouping by become columns; the nested detail (attack, rule, found,
+		   marks, references, ...) stays in raw. Baphomet is added to search,
+		   the CLI, Lilith::Stats, and the dashboard so it is viewable.
+		   Lilith::Receiver accepts pushed rows at /eve/baphomet_alerts over
+		   both the HTTP POST and WebSocket transports, so a sensor running
+		   App::Lilu can feed baphomet to a central receiver without database
+		   credentials.
+		 - Baphomet events can be escalated: manual escalation (the event
+		   page's Escalate button and the CLI) and auto-escalation both accept
+		   baphomet, and auto_escalate scans baphomet_alerts. baphomet is kept
+		   out of the default rule-tables set, so an auto-escalation rule only
+		   acts on baphomet when it names it explicitly; existing rules are
+		   unaffected.
 		 - Lilith::search now accepts an explicit start/end time window (any
 		   Time::Piece::Guess-parseable time, bound as values and read in the
 		   DB session timezone) as an alternative to the now-relative

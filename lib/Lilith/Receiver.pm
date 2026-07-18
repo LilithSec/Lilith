@@ -47,7 +47,8 @@ sensor. This is what L<App::Lilu> uses when its C<lilith_websocket> is set.
 
     { "instance": "...", "host": "...", "timestamp": "...", ..., "raw": { ... } }
 
-C<:table> is one of C<suricata_alerts>, C<sagan_alerts>, C<cape_alerts>. The
+C<:table> is one of C<suricata_alerts>, C<sagan_alerts>, C<cape_alerts>,
+C<baphomet_alerts>. The
 body must be a JSON object carrying at most the ingestable columns for that
 table (see C<%Lilith::alert_columns>). The generated/derived columns C<id>,
 C<escalations>, and C<auto_escalated> are B<not> accepted: a body containing
@@ -101,6 +102,7 @@ my %TABLE_TYPE = (
 	suricata_alerts => 'suricata',
 	sagan_alerts    => 'sagan',
 	cape_alerts     => 'cape',
+	baphomet_alerts => 'baphomet',
 );
 
 # Columns that exist on the alert tables but are never accepted from a caller:

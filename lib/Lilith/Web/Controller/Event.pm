@@ -29,7 +29,7 @@ sub view {
 	my $table = $self->param('table');
 	my $id    = $self->param('id');
 
-	$table = 'suricata' unless $table =~ /^(?:suricata|sagan|cape)$/;
+	$table = 'suricata' unless $table =~ /^(?:suricata|sagan|cape|baphomet)$/;
 
 	my ( $event, $error ) = $self->_load_event( $table, $id );
 
@@ -94,7 +94,7 @@ sub pcap {
 	my $id     = $self->param('id');
 	my $remote = $self->param('remote');
 
-	$table = 'suricata' unless $table =~ /^(?:suricata|sagan|cape)$/;
+	$table = 'suricata' unless $table =~ /^(?:suricata|sagan|cape|baphomet)$/;
 
 	unless ( $self->virani_enabled ) {
 		return $self->render( text => 'PCAP retrieval is not configured', status => 404 );
@@ -252,7 +252,7 @@ sub body_zip {
 	my $id    = $self->param('id');
 	my $which = $self->param('which');
 
-	$table = 'suricata' unless $table =~ /^(?:suricata|sagan|cape)$/;
+	$table = 'suricata' unless $table =~ /^(?:suricata|sagan|cape|baphomet)$/;
 
 	unless ( $which =~ /^(?:request|response)$/ ) {
 		return $self->render( text => 'invalid body', status => 400 );

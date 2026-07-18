@@ -297,4 +297,159 @@ is( $lilith->parse_eve( type => 'bogus',    json => { event_type => 'alert' } ),
 	is( $row->{dest_ip},        '8.8.8.8',                 'dest_ip parsed from a real decoded EVE line' );
 }
 
+# ===========================================================================
+# Baphomet: its own event_type vocabulary, ip -> src_ip / subject columns,
+# jsonb-field encoding, the derived event_id, and the ignore knob.
+# ===========================================================================
+
+# -- a banish: has ip/ban_time/recidive/country, and every jsonb field --
+{
+	my $eve = {
+		eve_type   => 'baphomet',
+		event_type => 'banish',
+		timestamp  => '2026-07-15T12:00:00+0000',
+		hostname   => 'ids1',
+		kur        => 'baphomet-sshd',
+		ip         => '203.0.113.66',
+		dest_ip    => '198.51.100.9',
+		ban_time   => 3600,
+		recidive   => JSON::true,
+		country    => 'US',
+		msg        => 'SSH brute force',
+		severity   => 'high',
+		classtype  => 'attempted-admin',
+		score      => 9.5,
+		path       => '/var/log/auth.log',
+		references => [ 'https://example/1', 'https://example/2' ],
+		attack     => { tactic => 'credential-access' },
+		rule       => { name => 'sshd-bruteforce', id => 42 },
+		found      => { count => 12 },
+		marks_set  => ['sshd'],
+	};
+	my $raw = encode_json($eve);
+
+	my $row = $lilith->parse_eve(
+		type     => 'baphomet',
+		json     => $eve,
+		instance => 'baphomet-sshd',
+		host     => 'sensor1',
+		raw      => $raw,
+	);
+
+	is( ref($row), 'HASH', 'baphomet banish parses to a row hash' );
+
+	# the row's keys are exactly the baphomet_alerts columns -- nothing missing,
+	# nothing stray
+	is_deeply(
+		[ sort keys %{$row} ],
+		[ sort @{ $Lilith::alert_columns{baphomet} } ],
+		'baphomet row keys match the baphomet_alerts column set exactly'
+	);
+
+	is( $row->{host},           'ids1',            'baphomet host is the record hostname, not the sensor host' );
+	is( $row->{kur},            'baphomet-sshd',   'kur carried through' );
+	is( $row->{event_type},     'banish',          'event_type carried through' );
+	is( $row->{src_ip},         '203.0.113.66',    'offender ip -> src_ip' );
+	is( $row->{dest_ip},        '198.51.100.9',    'dest_ip carried through' );
+	is( $row->{subject},        undef,             'no subject on a banish' );
+	is( $row->{ban_time},       3600,              'ban_time carried through' );
+	is( $row->{recidive},       1,                 'recidive JSON true coerced to 1' );
+	is( $row->{country},        'US',              'country carried through' );
+	is( $row->{path},           '/var/log/auth.log', 'path carried through' );
+	is( $row->{signature},      'SSH brute force', 'msg -> signature' );
+	is( $row->{classification}, 'attempted-admin', 'classtype -> classification' );
+	is( $row->{severity},       'high',            'severity carried through' );
+	is( $row->{score},          9.5,               'score carried through' );
+	is( $row->{raw},            $raw,              'raw stored verbatim' );
+
+	# the nested detail is not promoted to columns (the exact-keys check above
+	# guarantees that); it is preserved only in raw, reachable via raw->'...'
+	my $raw_decoded = decode_json( $row->{raw} );
+	is_deeply( $raw_decoded->{attack}, { tactic => 'credential-access' }, 'nested attack detail is kept in raw' );
+	is_deeply( $raw_decoded->{rule}, { name => 'sshd-bruteforce', id => 42 }, 'nested rule detail is kept in raw' );
+	is_deeply( $raw_decoded->{references}, [ 'https://example/1', 'https://example/2' ], 'references kept in raw' );
+
+	# event_id = SHA256 (base64) of hostname + kur + timestamp + event_type +
+	# rule name + offender (the ip when present)
+	my $expect_eid
+		= sha256_base64( 'ids1' . 'baphomet-sshd' . $eve->{timestamp} . 'banish' . 'sshd-bruteforce' . '203.0.113.66' );
+	is( $row->{event_id}, $expect_eid, 'event_id follows the baphomet recipe' );
+}
+
+# -- a sighting: has a subject and no ip; event_id falls back to the subject --
+{
+	my $eve = {
+		eve_type   => 'baphomet',
+		event_type => 'sighted',
+		timestamp  => '2026-07-15T12:05:00+0000',
+		hostname   => 'ids1',
+		kur        => 'baphomet-web',
+		subject    => 'eviluser',
+		msg        => 'suspicious login',
+		rule       => { name => 'web-login' },
+	};
+
+	my $row = $lilith->parse_eve(
+		type     => 'baphomet',
+		json     => $eve,
+		instance => 'baphomet-web',
+		host     => 'sensor1',
+		raw      => 'RAW2',
+	);
+
+	is( $row->{event_type}, 'sighted',  'sighted event_type parses' );
+	is( $row->{subject},    'eviluser', 'subject carried through' );
+	is( $row->{src_ip},     undef,      'no ip => src_ip is undef' );
+	is( $row->{ban_time},   undef,      'no ban_time on a sighting' );
+
+	my $expect_eid
+		= sha256_base64( 'ids1' . 'baphomet-web' . $eve->{timestamp} . 'sighted' . 'web-login' . 'eviluser' );
+	is( $row->{event_id}, $expect_eid, 'event_id uses the subject when there is no ip' );
+}
+
+# -- a found: instance falls back to the record kur when not given --
+{
+	my $eve = {
+		eve_type   => 'baphomet',
+		event_type => 'found',
+		timestamp  => '2026-07-15T12:06:00+0000',
+		hostname   => 'ids1',
+		kur        => 'baphomet-sshd',
+		msg        => 'rule match',
+		found      => { hits => 3 },
+	};
+
+	my $raw = encode_json($eve);
+	my $row = $lilith->parse_eve( type => 'baphomet', json => $eve, host => 'sensor1', raw => $raw );
+
+	is( $row->{event_type}, 'found',         'found event_type parses' );
+	is( $row->{instance},   'baphomet-sshd', 'instance falls back to the record kur when not given' );
+	is_deeply( decode_json( $row->{raw} )->{found}, { hits => 3 }, 'nested found detail is kept in raw' );
+}
+
+# -- event types outside the six baphomet emits are skipped --
+is( $lilith->parse_eve( type => 'baphomet', json => { event_type => 'stats' } ),
+	undef, 'a baphomet event_type outside the known set is skipped' );
+
+# -- baphomet_event_ignore drops the configured event types --
+{
+	my $ignoring = Lilith->new( dsn => 'dbi:Pg:dbname=test', baphomet_event_ignore => ['noted'] );
+	is(
+		$ignoring->parse_eve(
+			type => 'baphomet',
+			json => { event_type => 'noted', timestamp => 't', hostname => 'h', kur => 'k' }
+		),
+		undef,
+		'a baphomet_event_ignore event_type is skipped'
+	);
+	isnt(
+		$ignoring->parse_eve(
+			type => 'baphomet',
+			json => { event_type => 'found', timestamp => 't', hostname => 'h', kur => 'k' }
+		),
+		undef,
+		'a non-ignored baphomet event_type still parses'
+	);
+}
+
 done_testing();

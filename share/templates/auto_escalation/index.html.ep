@@ -117,6 +117,7 @@
             <div class="form-check"><input class="form-check-input rule-table" type="checkbox" value="suricata" id="rule-table-suricata" checked><label class="form-check-label small" for="rule-table-suricata">suricata</label></div>
             <div class="form-check"><input class="form-check-input rule-table" type="checkbox" value="sagan" id="rule-table-sagan" checked><label class="form-check-label small" for="rule-table-sagan">sagan</label></div>
             <div class="form-check"><input class="form-check-input rule-table" type="checkbox" value="cape" id="rule-table-cape" checked><label class="form-check-label small" for="rule-table-cape">cape</label></div>
+            <div class="form-check"><input class="form-check-input rule-table" type="checkbox" value="baphomet" id="rule-table-baphomet"><label class="form-check-label small" for="rule-table-baphomet">baphomet</label></div>
           </div>
         </div>
 
@@ -176,6 +177,7 @@
                   <option value="suricata">suricata</option>
                   <option value="sagan">sagan</option>
                   <option value="cape">cape</option>
+                  <option value="baphomet">baphomet</option>
                 </select>
               </div>
             </div>

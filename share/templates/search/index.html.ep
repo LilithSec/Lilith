@@ -21,6 +21,7 @@
             <option value="suricata" <%= $table eq 'suricata' ? 'selected' : '' %>>Suricata</option>
             <option value="sagan"    <%= $table eq 'sagan'    ? 'selected' : '' %>>Sagan</option>
             <option value="cape"     <%= $table eq 'cape'     ? 'selected' : '' %>>CAPE</option>
+            <option value="baphomet" <%= $table eq 'baphomet' ? 'selected' : '' %>>Baphomet</option>
           </select>
         </div>
 

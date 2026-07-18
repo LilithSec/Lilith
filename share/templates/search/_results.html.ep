@@ -91,7 +91,7 @@
         % }
       </tbody>
 
-      % } else { # cape
+      % } elsif ($table eq 'cape') {
       <thead class="table-secondary">
         <tr>
           <th>ID</th><th>Instance</th><th class="col-host" style="display:none">Instance Host</th><th>Target</th><th>Malscore</th>
@@ -117,6 +117,32 @@
             <small class="text-muted">(<%= $row->{subbed_from_host} %>)</small>
             % }
           </td>
+        </tr>
+        % }
+      </tbody>
+
+      % } else { # baphomet
+      <thead class="table-secondary">
+        <tr>
+          <th>ID</th><th>Timestamp</th><th>Instance</th><th class="col-host" style="display:none">Host</th>
+          <th>Event</th><th>Src IP</th><th>Subject</th>
+          <th>Severity</th><th>Class</th><th>Signature</th><th>Score</th>
+        </tr>
+      </thead>
+      <tbody>
+        % for my $row (@$results) {
+        <tr>
+          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a><% if (my $ec = $escalated->{$row->{id}}) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $ec %> time<%= $ec == 1 ? '' : 's' %>">E</span><% } %></td>
+          <td><%= $row->{timestamp} // '' %></td>
+          <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
+          <td class="col-host" style="display:none"><% if (my $i = $row->{host}) { %><a href="#" class="host-filter" data-host="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><%= $row->{event_type} // '' %></td>
+          <td><% if (my $i = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $i %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $cc = $self->ip_country($i)) { %> <span class="text-muted small" title="<%= $cc %>"><%= $self->country_flag($cc) %> <%= $cc %><% if (my $sub = $self->ip_subdivision($i)) { %>/<%= $sub %><% } %><% if (my $city = $self->ip_city($i)) { %><span class="geoip-city"> <%= $city %></span><% } %></span><% } %><% } %></td>
+          <td><%= $row->{subject} // '' %></td>
+          <td><%= $row->{severity} // '' %></td>
+          <td title="<%= $row->{classification} // '' %>"><%= $row->{classification} // '' %></td>
+          <td><% if (my $i = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><%= $row->{score} // '' %></td>
         </tr>
         % }
       </tbody>

@@ -36,6 +36,12 @@ my @V5_INDEXES = qw(
 	cape_alerts_src_stop_idx cape_alerts_target_stop_idx
 );
 
+# The 4 indexes the version-10 (baphomet_alerts) migration adds.
+my @V10_BAPHOMET_INDEXES = qw(
+	baphomet_alerts_ts_idx baphomet_alerts_event_ts_idx
+	baphomet_alerts_src_ts_idx baphomet_alerts_kur_ts_idx
+);
+
 # Every command reads dsn/user/pass through the base class config(); stub it to
 # return a hash we point at whichever database a phase uses.
 my %cfg = ( user => $pg->user, pass => $pg->pass );
@@ -119,6 +125,12 @@ sub column_exists {
 
 	# version 9: the per-dashboard settings column.
 	ok( column_exists( $dbh, 'dashboards', 'settings' ), 'deploy added the dashboards.settings column' );
+
+	# version 10: the baphomet_alerts table and its indexes.
+	ok( table_exists( $dbh, 'baphomet_alerts' ), 'deploy created baphomet_alerts' );
+	my @baph_missing = grep { !index_exists( $dbh, $_ ) } @V10_BAPHOMET_INDEXES;
+	is_deeply( \@baph_missing, [], 'deploy created all 4 baphomet_alerts indexes' )
+		or diag( 'missing: ' . join( ', ', @baph_missing ) );
 	$dbh->disconnect;
 
 	my ($sv_after) = run_cmd('Lilith::CLI::Command::SchemaVersion');
@@ -160,10 +172,51 @@ sub column_exists {
 	ok( index_exists( $dbh, 'suricata_alerts_severity_ts_idx' ),  'the upgrade created the severity index' );
 	ok( index_exists( $dbh, 'suricata_alerts_mitre_tactic_idx' ), 'the upgrade created the MITRE tactic index' );
 	ok( column_exists( $dbh, 'dashboards', 'settings' ),          'the upgrade added the dashboards.settings column' );
+	ok( table_exists( $dbh, 'baphomet_alerts' ),                  'the upgrade created baphomet_alerts' );
 	$dbh->disconnect;
 
 	my ($sv) = run_cmd('Lilith::CLI::Command::SchemaVersion');
 	like( $sv, qr/status:\s+current/, 'schema_version reports current after the upgrade' );
+}
+
+# ---------------------------------------------------------------------------
+# Phase 3: the 9 -> 10 -> 9 round trip. Seed a database at version 9 (before
+# baphomet_alerts), upgrade it to 10 and confirm the table and its indexes
+# appear, then downgrade back to 9 and confirm the table is dropped -- so the
+# upgrade/9-10 and downgrade/10-9 scripts are exercised as a pair.
+# ---------------------------------------------------------------------------
+{
+	my $rt_dsn = $pg->create_db('lilith_roundtrip');
+
+	my $mig = DBIx::Class::Migration->new(
+		schema_class => 'Lilith::Schema',
+		schema_args  => [ $rt_dsn, $pg->user, $pg->pass ],
+	);
+	$mig->dbic_dh->install( { version => 9 } );
+
+	my $dbh = $pg->dbh($rt_dsn);
+	ok( !table_exists( $dbh, 'baphomet_alerts' ), 'baphomet_alerts absent at version 9' );
+
+	$mig->dbic_dh->upgrade;    # 9 -> 10
+	ok( table_exists( $dbh, 'baphomet_alerts' ), 'the 9 -> 10 upgrade created baphomet_alerts' );
+	my @rt_missing = grep { !index_exists( $dbh, $_ ) } @V10_BAPHOMET_INDEXES;
+	is_deeply( \@rt_missing, [], 'the 9 -> 10 upgrade created the baphomet_alerts indexes' )
+		or diag( 'missing: ' . join( ', ', @rt_missing ) );
+
+	# DeploymentHandler downgrades toward the schema's own version, so pretend the
+	# schema is at 9 to drive the 10 -> 9 step; a fresh handler reads the version
+	# at build time.
+	{
+		no warnings qw(redefine once);
+		local $Lilith::Schema::VERSION = 9;
+		my $down = DBIx::Class::Migration->new(
+			schema_class => 'Lilith::Schema',
+			schema_args  => [ $rt_dsn, $pg->user, $pg->pass ],
+		);
+		$down->dbic_dh->downgrade;    # 10 -> 9
+	}
+	ok( !table_exists( $dbh, 'baphomet_alerts' ), 'the 10 -> 9 downgrade dropped baphomet_alerts' );
+	$dbh->disconnect;
 }
 
 $pg->stop;

@@ -156,6 +156,12 @@ sub execute {
 				if ( $column_set eq 'default' ) {
 					$columns = 'id,instance,slug,target,size,pkg,malscore,subbed_from_ip,subbed_from_host';
 				}
+			} elsif ( $table eq 'baphomet' ) {
+				if ( $column_set eq 'default' ) {
+					$columns = 'id,instance,event_type,src_ip,subject,severity,signature,classification,score';
+				} elsif ( $column_set eq 'default_timestamp' ) {
+					$columns = 'timestamp,instance,event_type,src_ip,subject,severity,signature,classification,score';
+				}
 			}
 		} ## end if ( !defined($columns) )
 
@@ -199,6 +205,12 @@ sub execute {
 			'malscore'            => 'malscore',
 			'subbed_from_ip'      => 'subbed_from_ip',
 			'subbed_from_host'    => 'subbed_from_host',
+			'event_type'          => 'event_type',
+			'subject'             => 'subject',
+			'severity'            => 'severity',
+			'score'               => 'score',
+			'kur'                 => 'kur',
+			'country'             => 'country',
 		};
 
 		#

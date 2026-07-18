@@ -75,4 +75,32 @@ ok( ( grep { $_ eq 'Spam' } @$list ), 'list includes "Spam"' );
 my @bang = grep { /^\!/ } @$list;
 is( scalar(@bang), 0, 'no SNMP class names start with "!"' );
 
+#
+# _auto_check_tables: the auto-escalation rule-tables validator. baphomet is a
+# valid table a rule may name, but is deliberately left out of the default
+# returned when a rule names none, so escalating baphomet stays opt-in.
+#
+
+# no tables given => the three defaults, without baphomet
+is_deeply(
+	$lilith->_auto_check_tables(undef),
+	[ 'suricata', 'sagan', 'cape' ],
+	'_auto_check_tables defaults to suricata/sagan/cape (baphomet is not a default)'
+);
+is_deeply( $lilith->_auto_check_tables( [] ), [ 'suricata', 'sagan', 'cape' ],
+	'an empty tables list falls back to the same default' );
+
+# baphomet is accepted when named explicitly (opt-in), and de-duped/preserved
+is_deeply( $lilith->_auto_check_tables( ['baphomet'] ), ['baphomet'], 'a rule may scope itself to baphomet' );
+is_deeply(
+	$lilith->_auto_check_tables( [ 'cape', 'baphomet', 'cape' ] ),
+	[ 'cape', 'baphomet' ],
+	'baphomet mixes with other tables and duplicates are dropped'
+);
+
+# an unknown table still dies, and the message advertises baphomet as valid
+eval { $lilith->_auto_check_tables( ['bogus'] ); };
+like( $@, qr/not a known table type/, '_auto_check_tables rejects an unknown table' );
+like( $@, qr/baphomet/,               'the rejection lists baphomet among the valid tables' );
+
 done_testing();

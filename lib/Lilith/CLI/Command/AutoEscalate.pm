@@ -26,10 +26,12 @@ sub execute {
 
 	my $lilith = $self->lilith;
 
-	# --tables scopes which alert tables are scanned; all three by default
+	# --tables scopes which alert tables are scanned; all four by default. baphomet
+	# is scanned so a rule scoped to it can fire, but stays out of the rule-tables
+	# default, so a rule that names no tables never escalates baphomet.
 	my @tables = grep { $_ ne '' } split( /\s*,\s*/, defined( $opt->{tables} ) ? $opt->{tables} : '' );
 	if ( !@tables ) {
-		@tables = ( 'suricata', 'sagan', 'cape' );
+		@tables = ( 'suricata', 'sagan', 'cape', 'baphomet' );
 	}
 
 	my $by = $opt->{by};

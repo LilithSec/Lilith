@@ -23,7 +23,7 @@ sub index {
 	my $order_by        = $self->param('order_by')        // '';
 
 	# Sanitize
-	$table     = 'suricata'                                  unless $table     =~ /^(?:suricata|sagan|cape)$/;
+	$table     = 'suricata'                                  unless $table     =~ /^(?:suricata|sagan|cape|baphomet)$/;
 	$order_dir = 'DESC'                                      unless $order_dir =~ /^(?:ASC|DESC)$/;
 	$order_by  = ( $table eq 'cape' ? 'stop' : 'timestamp' ) unless $order_by;
 

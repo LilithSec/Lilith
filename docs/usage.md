@@ -42,8 +42,8 @@ do the same jobs without the rest of Lilith; see
 
 ### search
 
-Search the annals. Which table via `-t` (`suricata` (default), `sagan`, or
-`cape`); output as an ANSI table or `--output json`.
+Search the annals. Which table via `-t` (`suricata` (default), `sagan`,
+`cape`, or `baphomet`); output as an ANSI table or `--output json`.
 
 ```shell
 # everything from the last day (the default window)
@@ -197,7 +197,8 @@ does the same `parse_eve` work `lilith run` does and POSTs the row as JSON;
 only the receiver touches the database.
 
 - **Endpoint** — `POST /eve/:table`, where `:table` is `suricata_alerts`,
-  `sagan_alerts`, or `cape_alerts`. An unknown table is a `404`.
+  `sagan_alerts`, `cape_alerts`, or `baphomet_alerts`. An unknown table is a
+  `404`.
 - **Auth** — `Authorization: Bearer <key>`, checked against the keys in the
   database (see below). No/invalid key, or a key not permitted for the
   client's IP, is a `401`; a key not permitted for the row's instance is a

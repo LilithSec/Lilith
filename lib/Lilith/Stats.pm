@@ -27,9 +27,10 @@ Lilith::Stats - aggregation queries over the alert tables for the dashboard.
 
 =head1 DESCRIPTION
 
-Read-only aggregation helpers over C<suricata_alerts>, C<sagan_alerts>, and
-C<cape_alerts> for the web dashboard. Each method takes a short table type
-(C<suricata>, C<sagan>, or C<cape>) and a C<go_back_minutes> window (default
+Read-only aggregation helpers over C<suricata_alerts>, C<sagan_alerts>,
+C<cape_alerts>, and C<baphomet_alerts> for the web dashboard. Each method takes
+a short table type (C<suricata>, C<sagan>, C<cape>, or C<baphomet>) and a
+C<go_back_minutes> window (default
 1440) and runs a single grouped query, leaning on the version-5 indexes so a
 time-windowed C<GROUP BY> range-scans rather than reading the whole table.
 
@@ -55,6 +56,7 @@ my %TABLE = (
 	suricata => 'suricata_alerts',
 	sagan    => 'sagan_alerts',
 	cape     => 'cape_alerts',
+	baphomet => 'baphomet_alerts',
 );
 
 # The column each table is windowed and time-bucketed on. CAPE has no ingest
@@ -64,6 +66,7 @@ my %TIME_COL = (
 	suricata => 'timestamp',
 	sagan    => 'timestamp',
 	cape     => 'stop',
+	baphomet => 'timestamp',
 );
 
 # Columns that may be grouped/counted by, per table. Deliberately excludes raw,
@@ -84,6 +87,11 @@ my %DIMENSION = (
 		map { $_ => 1 }
 			qw( instance target pkg md5 sha1 sha256 slug url_hostname
 			proto src_ip dest_ip src_port dest_port malscore )
+	},
+	baphomet => {
+		map { $_ => 1 }
+			qw( instance host kur event_type severity classification
+			src_ip dest_ip subject signature country )
 	},
 );
 
@@ -173,6 +181,13 @@ my %MEASURE = (
 		{ name => 'avg_malscore', label => 'Average malscore', agg => 'avg', expr => 'malscore' },
 		{ name => 'max_malscore', label => 'Max malscore',     agg => 'max', expr => 'malscore' },
 		{ name => 'sum_size',     label => 'Total size',       agg => 'sum', expr => 'size' },
+	],
+	baphomet => [
+		{ name => 'count',            label => 'Count of judgments' },
+		{ name => 'avg_score',        label => 'Average score',         agg => 'avg',      expr => 'score' },
+		{ name => 'max_score',        label => 'Max score',             agg => 'max',      expr => 'score' },
+		{ name => 'distinct_src_ip',  label => 'Distinct source IPs',      agg => 'distinct', col => 'src_ip' },
+		{ name => 'distinct_dest_ip', label => 'Distinct destination IPs', agg => 'distinct', col => 'dest_ip' },
 	],
 );
 

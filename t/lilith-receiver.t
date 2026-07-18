@@ -191,8 +191,14 @@ ok( !$lilith->receiver_apikey_instance_ok( { allowed_instances => ['foo.pie'] },
 	# body is not JSON at all
 	$t->post_ok( '/eve/suricata_alerts' => $H => 'this is not json' )->status_is( 400, 'non-JSON body => 400' );
 
-	# each of the three table names routes to the right type
-	for my $case ( [ 'suricata_alerts', 'suricata' ], [ 'sagan_alerts', 'sagan' ], [ 'cape_alerts', 'cape' ], ) {
+	# each of the four table names routes to the right type
+	for my $case (
+		[ 'suricata_alerts', 'suricata' ],
+		[ 'sagan_alerts',    'sagan' ],
+		[ 'cape_alerts',     'cape' ],
+		[ 'baphomet_alerts', 'baphomet' ],
+		)
+	{
 		my ( $table, $type ) = @$case;
 		%got = ();
 		$t->post_ok( "/eve/$table" => $H => json => { instance => 'x' } )

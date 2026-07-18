@@ -40,7 +40,7 @@ sub _params {
 	my $self = shift;
 
 	my $table = $self->param('table') // 'suricata';
-	$table = 'suricata' unless $table =~ /^(?:suricata|sagan|cape)$/;
+	$table = 'suricata' unless $table =~ /^(?:suricata|sagan|cape|baphomet)$/;
 
 	my $mins = $self->param('go_back_minutes');
 	$mins = 1440 unless defined $mins && $mins =~ /^[0-9]+$/;
@@ -101,7 +101,7 @@ sub _clean_settings {
 	# configured (a following widget then reads that log). Same set as a widget's
 	# own table override.
 	my $table = $settings->{table};
-	$clean{table} = $table if defined $table && $table =~ /\A(?:suricata|sagan|cape|syslog|http|http_error)\z/;
+	$clean{table} = $table if defined $table && $table =~ /\A(?:suricata|sagan|cape|baphomet|syslog|http|http_error)\z/;
 
 	my $mins = $settings->{go_back_minutes};
 	$clean{go_back_minutes} = int($mins) if defined $mins && $mins =~ /\A[0-9]+\z/ && $mins > 0;
@@ -400,7 +400,7 @@ sub layout_save {
 					# a widget's own source lets one board mix alert tables and Allani
 					# log sources; an invalid value is dropped so the widget falls back
 					# to the board table
-					$cfg{$k} = '' . $v if $v =~ /\A(?:suricata|sagan|cape|syslog|http|http_error)\z/;
+					$cfg{$k} = '' . $v if $v =~ /\A(?:suricata|sagan|cape|baphomet|syslog|http|http_error)\z/;
 				} elsif ( $k eq 'metric' ) {
 					# the stat (text) widget's metric; invalid values are dropped
 					$cfg{$k} = '' . $v if $v =~ /\A(?:total|distinct|escalated|busiest)\z/;

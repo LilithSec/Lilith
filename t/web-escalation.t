@@ -307,6 +307,11 @@ my $sample_target = sub {
 		->json_is( '/results/0/status',      'sent',     'first result status' )
 		->json_is( '/results/1/target_name', 'target-2', 'second result target name' );
 
+	# baphomet is a valid escalation table (manual escalation is enabled for it)
+	$t->post_ok( '/api/escalation/escalate' => json => { table => 'baphomet', id => 7, target_ids => [1] } )
+		->status_is( 200, 'escalate accepts the baphomet table' )
+		->json_is( '/results/0/status', 'sent', 'baphomet escalate result status' );
+
 	$t->post_ok( '/api/escalation/escalate' => json => { table => 'bad', id => 1, target_ids => [1] } )
 		->status_is( 400, 'bad table is a 400' );
 	$t->post_ok( '/api/escalation/escalate' => json => { table => 'suricata', id => 'x', target_ids => [1] } )

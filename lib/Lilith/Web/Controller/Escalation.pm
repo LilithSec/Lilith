@@ -289,7 +289,7 @@ sub escalate {
 	}
 
 	my $table = $json->{table};
-	unless ( defined $table && $table =~ /^(?:suricata|sagan|cape)$/ ) {
+	unless ( defined $table && $table =~ /^(?:suricata|sagan|cape|baphomet)$/ ) {
 		return $self->render( json => { error => 'invalid table' }, status => 400 );
 	}
 
@@ -355,7 +355,7 @@ sub history {
 	return unless $self->_require_view;
 
 	my $table = $self->param('table');
-	unless ( defined $table && $table =~ /^(?:suricata|sagan|cape)$/ ) {
+	unless ( defined $table && $table =~ /^(?:suricata|sagan|cape|baphomet)$/ ) {
 		return $self->render( json => { error => 'invalid table' }, status => 400 );
 	}
 
