@@ -149,6 +149,60 @@ my $reader = Lilith::Allani->new( dsn => 'dbi:Pg:dbname=bogus' );
     like( $@, qr/not a valid bucket/, 'timeseries rejects a bad bucket' );
     eval { $reader->total( source => 'http_all' ) };
     like( $@, qr/no aggregate view/, 'aggregation rejects http_all' );
+
+    @MockDbh::SQL = ();
+    $reader->distinct( source => 'syslog', column => 'host' );
+    like( $MockDbh::SQL[0], qr/SELECT count\(distinct host\) FROM syslog WHERE/,
+        'distinct counts distinct dimension values' );
+
+    # auto bucket sizes to the window; an explicit unit passes through
+    is( $reader->bucket( 'auto', 60 ),      'minute', 'auto: <=3h window -> minute' );
+    is( $reader->bucket( 'auto', 1440 ),    'hour',   'auto: day window -> hour' );
+    is( $reader->bucket( 'auto', 10000 ),   'day',    'auto: ~7d window -> day' );
+    is( $reader->bucket( 'auto', 2000000 ), 'month',  'auto: multi-year window -> month' );
+    is( $reader->bucket( 'day',  60 ),      'day',    'an explicit bucket passes through' );
+
+    @MockDbh::SQL = ();
+    $reader->timeseries( source => 'syslog', bucket => 'auto', go_back_minutes => 60 );
+    like( $MockDbh::SQL[0], qr/date_trunc\('minute', s_isodate\)/, 'auto bucket is applied to the query' );
+}
+
+# ---------------------------------------------------------------------------
+# Measures, stacked split, and source-IP aggregation.
+# ---------------------------------------------------------------------------
+
+{
+    is_deeply( $reader->measures('http'), [ { name => 'count', label => 'Count' }, { name => 'bytes', label => 'Total bytes' } ],
+        'http_access offers count + bytes measures' );
+    is_deeply( $reader->measures('syslog'), [ { name => 'count', label => 'Count' } ], 'syslog offers count only' );
+    is_deeply( $reader->measures('http_all'), [], 'http_all has no measures' );
+
+    # bytes measure sums the column instead of counting rows
+    @MockDbh::SQL = ();
+    $reader->top( source => 'http', column => 'vhost', measure => 'bytes' );
+    like( $MockDbh::SQL[0], qr/sum\(bytes\) AS count/, 'bytes measure sums the column' );
+    like( $MockDbh::SQL[0], qr/FROM http_access/,      'http source reads http_access' );
+
+    eval { $reader->top( source => 'http', column => 'vhost', measure => 'nope' ) };
+    like( $@, qr/not a known measure/, 'an unknown measure is rejected' );
+    eval { $reader->top( source => 'syslog', column => 'program', measure => 'bytes' ) };
+    like( $@, qr/not a known measure/, 'bytes is not a measure for syslog' );
+
+    # stacked split: a per-group query restricted to the top-k groups
+    @MockDbh::SQL = ();
+    $reader->timeseries( source => 'syslog', group_by => 'program', top_groups => 3 );
+    my $sql = $MockDbh::SQL[0];
+    like( $sql, qr/\(program\)::text AS "group"/,          'grouped timeseries carries the group value' );
+    like( $sql, qr/program IN \(SELECT program FROM syslog/, 'grouped timeseries restricts to top-k groups' );
+    like( $sql, qr/GROUP BY 1, 2/,                          'grouped timeseries groups by bucket and group' );
+
+    # top_ips reads the source's IP column, not a dimension
+    @MockDbh::SQL = ();
+    $reader->top_ips( source => 'syslog' );
+    like( $MockDbh::SQL[0], qr/host\(sourceip\) AS value.*FROM syslog/, 'top_ips uses host(sourceip) for syslog' );
+    @MockDbh::SQL = ();
+    $reader->top_ips( source => 'http' );
+    like( $MockDbh::SQL[0], qr/host\(client_ip\) AS value.*FROM http_access/, 'top_ips uses host(client_ip) for http' );
 }
 
 done_testing();

@@ -83,12 +83,6 @@
           <button type="submit" class="btn btn-danger btn-sm px-4">Search</button>
         </div>
 
-        <div class="col-auto">
-          <label class="form-label d-block">&nbsp;</label>
-          <a href="/logs/dashboard?source=<%= $source eq 'http_all' ? 'syslog' : $source %>"
-             class="btn btn-outline-secondary btn-sm">Dashboard</a>
-        </div>
-
         <div class="col-auto ms-auto">
           <label class="form-label d-block">&nbsp;</label>
           <div class="d-flex align-items-center gap-2">

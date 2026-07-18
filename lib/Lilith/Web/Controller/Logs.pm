@@ -176,7 +176,9 @@ sub dashboard {
 	$self->stash(
 		sources         => \@sources,
 		source          => $source,
-		dims            => ( $reader ? $reader->dims($source) : [] ),
+		dims            => ( $reader                        ? $reader->dims($source)     : [] ),
+		measures        => ( $reader                        ? $reader->measures($source) : [] ),
+		geoip           => ( scalar @{ $self->geoip_mmdbs } ? 1                          : 0 ),
 		go_back_minutes => $mins,
 		error           => $error,
 	);
@@ -186,33 +188,38 @@ sub dashboard {
 
 =head2 summary
 
-C<GET /api/logs/summary> -- C<< { total } >> for the source/window.
+C<GET /api/logs/summary> -- C<< { total, distinct_host } >> for the source/window.
 
 =cut
 
 sub summary {
 	my $self = shift;
-	my ( $source, $mins ) = _dparams($self);
+	my ( $source, $mins ) = $self->_dparams;
 	return $self->_ljson(
 		sub {
 			my $r = shift;
-			return { total => $r->total( source => $source, go_back_minutes => $mins ) };
+			return {
+				total         => $r->total( source => $source, go_back_minutes => $mins ),
+				distinct_host => $r->distinct( source => $source, column => 'host', go_back_minutes => $mins ),
+			};
 		}
 	);
 } ## end sub summary
 
 =head2 top
 
-C<GET /api/logs/top?column=&limit=> -- the most common values of a dimension,
-as C<< { rows => [ { value, count }, ... ] } >>.
+C<GET /api/logs/top?column=&limit=&measure=> -- the top values of a dimension,
+as C<< { rows => [ { value, count }, ... ] } >>. C<measure> (default count)
+selects what C<count> holds.
 
 =cut
 
 sub top {
 	my $self = shift;
-	my ( $source, $mins ) = _dparams($self);
-	my $column = $self->param('column');
-	my $limit  = $self->param('limit');
+	my ( $source, $mins ) = $self->_dparams;
+	my $column  = $self->param('column');
+	my $limit   = $self->param('limit');
+	my $measure = $self->param('measure');
 	return $self->_ljson(
 		sub {
 			my $r    = shift;
@@ -220,7 +227,8 @@ sub top {
 				source          => $source,
 				column          => $column,
 				go_back_minutes => $mins,
-				( defined $limit && $limit ne '' ? ( limit => $limit ) : () ),
+				( defined $limit   && $limit ne ''   ? ( limit   => $limit )   : () ),
+				( defined $measure && $measure ne '' ? ( measure => $measure ) : () ),
 			);
 			return { rows => $rows };
 		}
@@ -229,27 +237,71 @@ sub top {
 
 =head2 timeseries
 
-C<GET /api/logs/timeseries?bucket=> -- row counts bucketed over time, as
-C<< { rows => [ { bucket, count }, ... ] } >>.
+C<GET /api/logs/timeseries?bucket=&group_by=&measure=> -- counts bucketed over
+time, as C<< { rows, bucket, grouped } >>. With C<group_by> each row carries a
+C<group> and C<grouped> is 1 (for a stacked chart); C<bucket> is the unit
+actually used, so an C<auto> request can be labelled.
 
 =cut
 
 sub timeseries {
 	my $self = shift;
-	my ( $source, $mins ) = _dparams($self);
-	my $bucket = $self->param('bucket');
+	my ( $source, $mins ) = $self->_dparams;
+	my $bucket   = $self->param('bucket');
+	my $group_by = $self->param('group_by');
+	my $measure  = $self->param('measure');
+	my $grouped  = ( defined $group_by && $group_by ne '' ) ? 1 : 0;
 	return $self->_ljson(
 		sub {
 			my $r    = shift;
 			my $rows = $r->timeseries(
 				source          => $source,
 				go_back_minutes => $mins,
-				( defined $bucket && $bucket ne '' ? ( bucket => $bucket ) : () ),
+				( defined $bucket && $bucket ne ''   ? ( bucket   => $bucket )   : () ),
+				( $grouped                           ? ( group_by => $group_by ) : () ),
+				( defined $measure && $measure ne '' ? ( measure  => $measure )  : () ),
 			);
-			return { rows => $rows };
+			return { rows => $rows, bucket => $r->bucket( $bucket, $mins ), grouped => $grouped };
 		}
 	);
 } ## end sub timeseries
+
+=head2 countries
+
+C<GET /api/logs/countries> -- the busiest source countries for the source/window,
+resolved from the top source IPs through the GeoIP databases the web UI opens, as
+C<< { enabled => 0|1, rows => [ { country, count }, ... ] } >>. C<enabled> is 0
+(rows empty) when no MMDB is configured. Mirrors the alert dashboard's panel.
+
+=cut
+
+sub countries {
+	my $self = shift;
+	my ( $source, $mins ) = $self->_dparams;
+
+	return $self->render( json => { enabled => 0, rows => [] } )
+		unless scalar @{ $self->geoip_mmdbs };
+
+	return $self->_ljson(
+		sub {
+			my $r   = shift;
+			my $ips = $r->top_ips( source => $source, go_back_minutes => $mins, limit => 500 );
+
+			my %by;
+			for my $row (@$ips) {
+				my $cc = $self->ip_country( $row->{value} );
+				$cc = '??' unless defined $cc && $cc ne '';
+				$by{$cc} += $row->{count};
+			}
+
+			my @rows = map { { country => $_, count => $by{$_} } }
+				sort { $by{$b} <=> $by{$a} || $a cmp $b } keys %by;
+			@rows = @rows[ 0 .. 14 ] if @rows > 15;
+
+			return { enabled => 1, rows => \@rows };
+		}
+	);
+} ## end sub countries
 
 # Shared source/window parsing for the dashboard API. The source is validated by
 # the reader (a bad one dies -> 400 via _ljson), so it is passed through as-is.

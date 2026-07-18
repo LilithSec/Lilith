@@ -167,29 +167,61 @@ sub _app {
             { key => 'http_all', label => 'http (interleaved)' },
         ];
     };
-    local *Lilith::Allani::dims       = sub { return [qw( program host )] };
-    local *Lilith::Allani::total      = sub { return 1234 };
-    local *Lilith::Allani::top        = sub { return [ { value => 'sshd', count => 10 } ] };
-    local *Lilith::Allani::timeseries = sub { return [ { bucket => '2026-07-17T00:00:00', count => 5 } ] };
+    my %top_opts;
+    local *Lilith::Allani::dims     = sub { return [qw( program host )] };
+    local *Lilith::Allani::measures = sub {
+        return [ { name => 'count', label => 'Count' }, { name => 'bytes', label => 'Total bytes' } ];
+    };
+    local *Lilith::Allani::total    = sub { return 1234 };
+    local *Lilith::Allani::distinct = sub { return 7 };
+    local *Lilith::Allani::top      = sub { my ( $s, %o ) = @_; %top_opts = %o; return [ { value => 'sshd', count => 10 } ] };
+    local *Lilith::Allani::timeseries = sub {
+        my ( $s, %o ) = @_;
+        return $o{group_by}
+            ? [ { bucket => '2026-07-17T00:00:00', group => 'sshd', count => 5 } ]
+            : [ { bucket => '2026-07-17T00:00:00', count => 5 } ];
+    };
+    local *Lilith::Allani::top_ips = sub { return [ { value => '8.8.8.8', count => 3 } ] };
     use warnings qw(redefine once);
 
     my $t = _app(qq{[allani]\ndsn = "dbi:Pg:dbname=allani"\n});
 
-    # shell: source selector excludes the interleaved view; canvases per dim
+    # shell: source selector excludes the interleaved view; stat cards, canvases,
+    # the auto-bucket option, and the split-by / measure selectors are present.
+    # With no MMDB configured the countries panel stays hidden.
     $t->get_ok('/logs/dashboard')->status_is( 200, 'log dashboard renders' )
         ->element_exists( 'select[name="source"] option[value="syslog"]', 'syslog is a dashboard source' )
         ->element_exists_not( 'select[name="source"] option[value="http_all"]',
         'http_all is not offered on the dashboard' )
+        ->element_exists( 'div#stat-total',   'total stat card present' )
+        ->element_exists( 'div#stat-hosts',   'distinct-hosts stat card present' )
+        ->element_exists( 'select#ts-bucket option[value="auto"]', 'auto bucket option present' )
+        ->element_exists( 'select#ts-group option[value="program"]', 'split-by selector offers the dims' )
+        ->element_exists( 'select#ts-measure option[value="bytes"]', 'measure selector offers bytes' )
         ->element_exists( 'canvas#chart-ts',      'timeseries canvas present' )
         ->element_exists( 'canvas#chart-program', 'a top-dimension canvas present' );
 
     # JSON endpoints
     $t->get_ok('/api/logs/summary?source=syslog')->status_is(200)
-        ->json_is( '/total', 1234, 'summary reports the total' );
-    $t->get_ok('/api/logs/top?source=syslog&column=program')->status_is(200)
+        ->json_is( '/total',         1234, 'summary reports the total' )
+        ->json_is( '/distinct_host', 7,    'summary reports distinct hosts' );
+    $t->get_ok('/api/logs/top?source=http&column=vhost&measure=bytes')->status_is(200)
         ->json_is( '/rows/0/value', 'sshd', 'top reports rows' );
+    is( $top_opts{measure}, 'bytes', 'the measure param reaches the reader' );
     $t->get_ok('/api/logs/timeseries?source=syslog&bucket=hour')->status_is(200)
-        ->json_is( '/rows/0/count', 5, 'timeseries reports rows' );
+        ->json_is( '/rows/0/count', 5,      'timeseries reports rows' )
+        ->json_is( '/bucket',       'hour', 'timeseries reports the resolved bucket' )
+        ->json_is( '/grouped',      0,      'ungrouped timeseries is flagged grouped=0' );
+    $t->get_ok('/api/logs/timeseries?source=syslog&group_by=program')->status_is(200)
+        ->json_is( '/grouped',        1,      'grouped timeseries is flagged grouped=1' )
+        ->json_is( '/rows/0/group', 'sshd', 'grouped rows carry the group value' );
+    $t->get_ok('/api/logs/timeseries?source=syslog&bucket=auto&go_back_minutes=60')->status_is(200)
+        ->json_is( '/bucket', 'minute', 'auto bucket resolves to minute for a short window' );
+
+    # countries endpoint: always 200 with an 'enabled' flag (0 when no MMDB is
+    # configured, 1 otherwise -- GeoIP availability is environment-dependent).
+    $t->get_ok('/api/logs/countries?source=syslog')->status_is( 200, 'countries endpoint renders' )
+        ->json_has( '/enabled', 'countries reports an enabled flag' );
 }
 
 # without [allani]: the dashboard renders a notice and the API is a 400

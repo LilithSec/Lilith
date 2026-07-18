@@ -23,11 +23,30 @@
         </div>
         <div class="col-auto">
           <label class="form-label">Bucket</label>
-          <select id="ts-bucket" class="form-select form-select-sm" style="width:110px">
+          <select id="ts-bucket" class="form-select form-select-sm" style="width:100px">
+            <option value="auto" selected>auto</option>
             <option value="minute">minute</option>
-            <option value="hour" selected>hour</option>
+            <option value="hour">hour</option>
             <option value="day">day</option>
             <option value="week">week</option>
+            <option value="month">month</option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <label class="form-label">Split by</label>
+          <select id="ts-group" class="form-select form-select-sm" style="width:130px">
+            <option value="">(none)</option>
+            % for my $d (@$dims) {
+            <option value="<%= $d %>"><%= $d %></option>
+            % }
+          </select>
+        </div>
+        <div class="col-auto">
+          <label class="form-label">Measure</label>
+          <select id="ts-measure" class="form-select form-select-sm" style="width:130px">
+            % for my $m (@$measures) {
+            <option value="<%= $m->{name} %>"><%= $m->{label} %></option>
+            % }
           </select>
         </div>
         <div class="col-auto">
@@ -48,7 +67,7 @@
 % }
 
 <div class="row g-3 mb-3">
-  <div class="col-md-3">
+  <div class="col-md-2">
     <div class="card border-secondary h-100">
       <div class="card-body text-center">
         <div class="text-muted small">Total log rows</div>
@@ -56,9 +75,17 @@
       </div>
     </div>
   </div>
-  <div class="col-md-9">
+  <div class="col-md-2">
     <div class="card border-secondary h-100">
-      <div class="card-header py-1 small text-muted">Rows over time</div>
+      <div class="card-body text-center">
+        <div class="text-muted small">Distinct hosts</div>
+        <div class="display-6" id="stat-hosts">—</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-8">
+    <div class="card border-secondary h-100">
+      <div class="card-header py-1 small text-muted">Over time <span id="ts-resolved" class="ms-1"></span></div>
       <div class="card-body"><canvas id="chart-ts" height="90"></canvas></div>
     </div>
   </div>
@@ -73,6 +100,14 @@
     </div>
   </div>
   % }
+  % if ($geoip) {
+  <div class="col-md-6 col-xl-3">
+    <div class="card border-secondary h-100">
+      <div class="card-header py-1 small text-muted">Source countries</div>
+      <div class="card-body"><canvas id="chart-countries" height="220"></canvas></div>
+    </div>
+  </div>
+  % }
 </div>
 
 <script src="/vendor/Chart.js"></script>
@@ -83,7 +118,11 @@
 
   var SOURCE = '<%= $source %>';
   var MINS   = '<%= $go_back_minutes %>';
+  var GEOIP  = <%= $geoip ? 1 : 0 %>;
   var PANEL_DIMS = [<% for my $d (@panel_dims) { %>'<%= $d %>',<% } %>];
+  // dimensions with few distinct values read better as a doughnut than a bar
+  var DOUGHNUT_DIMS = { priority:1, facility:1, method:1, status:1, loglevel:1, code:1 };
+  var PALETTE = ['#dc3545','#0d6efd','#198754','#ffc107','#6f42c1','#20c997','#fd7e14','#0dcaf0','#d63384','#6c757d'];
   var charts = {};
 
   function getJSON(url) {
@@ -91,39 +130,96 @@
       .then(function(r) { if (!r.ok) { throw new Error('HTTP ' + r.status); } return r.json(); });
   }
   function baseQs() { return 'source=' + encodeURIComponent(SOURCE) + '&go_back_minutes=' + encodeURIComponent(MINS); }
+  function measure() { return document.getElementById('ts-measure').value; }
   function draw(id, cfg) { if (charts[id]) { charts[id].destroy(); } var el = document.getElementById(id); if (el) { charts[id] = new Chart(el, cfg); } }
 
-  function loadTotal() {
+  function loadSummary() {
     getJSON('/api/logs/summary?' + baseQs())
-      .then(function(d) { document.getElementById('stat-total').textContent = d.total; })
-      .catch(function() { document.getElementById('stat-total').textContent = '!'; });
+      .then(function(d) {
+        document.getElementById('stat-total').textContent = Number(d.total).toLocaleString();
+        document.getElementById('stat-hosts').textContent = Number(d.distinct_host).toLocaleString();
+      })
+      .catch(function() {
+        document.getElementById('stat-total').textContent = '!';
+        document.getElementById('stat-hosts').textContent = '!';
+      });
   }
 
   function loadTimeseries() {
     var bucket = document.getElementById('ts-bucket').value;
-    getJSON('/api/logs/timeseries?' + baseQs() + '&bucket=' + bucket).then(function(d) {
-      draw('chart-ts', {
-        type: 'line',
-        data: {
-          labels: d.rows.map(function(r) { return r.bucket; }),
-          datasets: [{ data: d.rows.map(function(r) { return Number(r.count); }),
-                       borderColor: '#dc3545', backgroundColor: 'rgba(220,53,69,0.15)',
-                       fill: true, tension: 0.2, pointRadius: 0 }]
-        },
-        options: { responsive: true, maintainAspectRatio: false,
-                   plugins: { legend: { display: false } },
-                   scales: { x: { ticks: { maxTicksLimit: 12 } }, y: { beginAtZero: true } } }
-      });
+    var group  = document.getElementById('ts-group').value;
+    var label  = document.getElementById('ts-resolved');
+    var url = '/api/logs/timeseries?' + baseQs() + '&bucket=' + bucket + '&measure=' + encodeURIComponent(measure());
+    if (group) { url += '&group_by=' + encodeURIComponent(group); }
+    getJSON(url).then(function(d) {
+      label.textContent = (bucket === 'auto') ? ('(auto: ' + d.bucket + ')') : '';
+      if (d.grouped) { renderStacked(d.rows); } else { renderLine(d.rows); }
+    });
+  }
+
+  function renderLine(rows) {
+    draw('chart-ts', {
+      type: 'line',
+      data: {
+        labels: rows.map(function(r) { return r.bucket; }),
+        datasets: [{ data: rows.map(function(r) { return Number(r.count); }),
+                     borderColor: '#dc3545', backgroundColor: 'rgba(220,53,69,0.15)',
+                     fill: true, tension: 0.2, pointRadius: 0 }]
+      },
+      options: { responsive: true, maintainAspectRatio: false,
+                 plugins: { legend: { display: false } },
+                 scales: { x: { ticks: { maxTicksLimit: 12 } }, y: { beginAtZero: true } } }
+    });
+  }
+
+  function renderStacked(rows) {
+    var buckets = [], seenB = {}, groups = [], seenG = {}, idx = {};
+    rows.forEach(function(r) {
+      if (!seenB[r.bucket]) { seenB[r.bucket] = 1; buckets.push(r.bucket); }
+      if (!seenG[r.group])  { seenG[r.group]  = 1; groups.push(r.group); }
+      (idx[r.group] = idx[r.group] || {})[r.bucket] = Number(r.count);
+    });
+    var datasets = groups.map(function(g, i) {
+      return { label: g, data: buckets.map(function(b) { return idx[g][b] || 0; }),
+               backgroundColor: PALETTE[i % PALETTE.length] };
+    });
+    draw('chart-ts', {
+      type: 'bar',
+      data: { labels: buckets, datasets: datasets },
+      options: { responsive: true, maintainAspectRatio: false,
+                 plugins: { legend: { display: true, position: 'bottom' } },
+                 scales: { x: { stacked: true, ticks: { maxTicksLimit: 12 } }, y: { stacked: true, beginAtZero: true } } }
     });
   }
 
   function loadTop(dim) {
-    getJSON('/api/logs/top?' + baseQs() + '&column=' + encodeURIComponent(dim) + '&limit=10').then(function(d) {
+    var url = '/api/logs/top?' + baseQs() + '&column=' + encodeURIComponent(dim) + '&limit=10&measure=' + encodeURIComponent(measure());
+    getJSON(url).then(function(d) {
+      var doughnut = DOUGHNUT_DIMS[dim];
       draw('chart-' + dim, {
-        type: 'bar',
+        type: doughnut ? 'doughnut' : 'bar',
         data: {
           labels: d.rows.map(function(r) { return r.value; }),
-          datasets: [{ data: d.rows.map(function(r) { return Number(r.count); }), backgroundColor: '#0d6efd' }]
+          datasets: [{ data: d.rows.map(function(r) { return Number(r.count); }),
+                       backgroundColor: doughnut ? PALETTE : '#0d6efd' }]
+        },
+        options: doughnut
+          ? { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
+          : { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
+      });
+    });
+  }
+
+  function loadCountries() {
+    if (!GEOIP) { return; }
+    getJSON('/api/logs/countries?' + baseQs()).then(function(d) {
+      if (!d.enabled) { return; }
+      draw('chart-countries', {
+        type: 'bar',
+        data: {
+          labels: d.rows.map(function(r) { return r.country; }),
+          datasets: [{ data: d.rows.map(function(r) { return Number(r.count); }), backgroundColor: '#198754' }]
         },
         options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
                    plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
@@ -131,10 +227,14 @@
     });
   }
 
+  function reloadTops() { PANEL_DIMS.forEach(loadTop); loadCountries(); }
+
   document.addEventListener('DOMContentLoaded', function() {
-    loadTotal();
+    loadSummary();
     loadTimeseries();
-    PANEL_DIMS.forEach(loadTop);
+    reloadTops();
     document.getElementById('ts-bucket').addEventListener('change', loadTimeseries);
+    document.getElementById('ts-group').addEventListener('change', loadTimeseries);
+    document.getElementById('ts-measure').addEventListener('change', function() { loadTimeseries(); reloadTops(); });
   });
 </script>

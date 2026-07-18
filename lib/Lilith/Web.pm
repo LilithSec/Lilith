@@ -381,6 +381,7 @@ sub startup {
 	$r->get('/api/logs/summary')->to('logs#summary');
 	$r->get('/api/logs/top')->to('logs#top');
 	$r->get('/api/logs/timeseries')->to('logs#timeseries');
+	$r->get('/api/logs/countries')->to('logs#countries');
 	$r->get('/logs/:source/:id')->to('logs#view');
 	$r->get('/api/ipinfo/*ip')->to('api#ipinfo');
 	$r->get('/api/domaininfo/*domain')->to('api#domaininfo');
