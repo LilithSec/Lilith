@@ -77,7 +77,9 @@ sub _app {
         ->element_exists( 'select#source-sel option[value="http_all"]', 'http_all source option present' )
         ->element_exists( 'div#log-results',              'results container present' )
         ->element_exists( 'a[href="/logs/syslog/1"]',     'result row links to the record view' )
-        ->element_exists( 'a[href^="/logs/dashboard"]',   'search page links to the log dashboard' );
+        ->element_exists( 'a[href^="/logs/dashboard"]',   'search page links to the log dashboard' )
+        ->element_exists( 'div.time-range select[data-role="preset"]', 'uses the reusable time-range control' )
+        ->element_exists( 'script[src="/js/time-range.js"]', 'loads the shared time-range script' );
 
     # an unknown source is sanitized back to syslog
     $t->get_ok('/logs?source=bogus')->status_is( 200, 'unknown source is sanitized' );
@@ -98,6 +100,12 @@ sub _app {
         ->element_exists_not( 'input[name="go_back_minutes"]', 'minutes-back field hidden while anchored' );
     is( $search_opts{around},         '2026-07-17T00:00:00', 'around forwarded to the reader' );
     is( $search_opts{window_minutes}, '30',                  'window forwarded as window_minutes' );
+
+    # an absolute range from the time control flows through to the reader
+    $t->get_ok('/logs?source=syslog&start=2026-07-17+00:00&end=2026-07-17+12:00')
+        ->status_is( 200, 'ranged /logs renders' );
+    is( $search_opts{start}, '2026-07-17 00:00', 'start forwarded to the reader' );
+    is( $search_opts{end},   '2026-07-17 12:00', 'end forwarded to the reader' );
 
     # partial render returns just the fragment
     my $part = $t->get_ok('/logs?source=syslog&partial=1')

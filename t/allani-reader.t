@@ -205,4 +205,28 @@ my $reader = Lilith::Allani->new( dsn => 'dbi:Pg:dbname=bogus' );
     like( $MockDbh::SQL[0], qr/host\(client_ip\) AS value.*FROM http_access/, 'top_ips uses host(client_ip) for http' );
 }
 
+# ---------------------------------------------------------------------------
+# Absolute range: start/end bind bounds (server-local cast) and take precedence
+# over an anchor and the now-relative window.
+# ---------------------------------------------------------------------------
+
+{
+    @MockDbh::SQL = ();
+    $reader->search( source => 'syslog', start => '2026-07-18 00:00', end => '2026-07-18 12:00' );
+    my $sql = $MockDbh::SQL[0];
+    like( $sql, qr/s_isodate >= \?::timestamptz AND s_isodate <= \?::timestamptz/,
+        'start+end bind an absolute range on the source time column' );
+    unlike( $sql, qr/now\(\) - interval/, 'an absolute range is not now-relative' );
+    unlike( $sql, qr/2026-07-18/,         'the bounds are bound, not interpolated' );
+
+    @MockDbh::SQL = ();
+    $reader->search( source => 'syslog', start => '2026-07-18 00:00' );
+    like( $MockDbh::SQL[0],   qr/s_isodate >= \?::timestamptz/, 'start alone is a lower bound' );
+    unlike( $MockDbh::SQL[0], qr/<= \?::timestamptz/,           'and adds no upper bound' );
+
+    @MockDbh::SQL = ();
+    $reader->search( source => 'syslog', start => '2026-07-18 00:00', around => '2026-07-18 06:00', window_minutes => 30 );
+    unlike( $MockDbh::SQL[0], qr/BETWEEN/, 'start/end take precedence over an anchor' );
+}
+
 done_testing();

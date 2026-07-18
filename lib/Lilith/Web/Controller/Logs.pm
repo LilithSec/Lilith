@@ -55,6 +55,13 @@ sub index {
 	my $window = $self->param('window');
 	undef $around if defined $around && $around eq '';
 
+	# Optional absolute range from the time control (start/end); the reader binds
+	# them and prefers them over the now-relative go_back_minutes.
+	my $start = $self->param('start');
+	my $end   = $self->param('end');
+	undef $start if defined $start && $start eq '';
+	undef $end   if defined $end   && $end eq '';
+
 	# Forward only the filter params this source accepts (the reader derives that
 	# set of accepted filters from Allani::Sources), so a param meant for another
 	# source cannot reach the query.
@@ -77,6 +84,8 @@ sub index {
 				offset          => $offset,
 				filters         => \%filters,
 				( defined $around ? ( around => $around, window_minutes => $window ) : () ),
+				( defined $start  ? ( start  => $start )                             : () ),
+				( defined $end    ? ( end    => $end )                               : () ),
 			);
 		};
 		$error = $@ if $@;

@@ -167,11 +167,12 @@ Runs one windowed query and returns
 C<< { source => ..., headers => [...], rows => [ {header=>value,...}, ... ] } >>.
 Column names and the WHERE come from C<Allani::Sources>; every value is bound.
 
-The time window is either now-relative (C<go_back_minutes>, default a day) or,
-when C<around> is given a timestamp, anchored: rows within C<window_minutes>
-(default 60) on either side of it. The event view uses the anchored form to
-show the logs around an alert. Dies on a bad source, a filter invalid for the
-source, or a DB error.
+The time window is, in precedence: an explicit absolute range (C<start> and/or
+C<end> timestamps); an event-anchored window (C<around> a timestamp, within
+C<window_minutes> either side, default 60); or now-relative (C<go_back_minutes>,
+default a day). The event view uses the anchored form; the search page's time
+control uses start/end or go_back_minutes. Dies on a bad source, a filter
+invalid for the source, or a DB error.
 
 =cut
 
@@ -540,12 +541,23 @@ sub _dbh {
 } ## end sub _dbh
 
 # The time-window WHERE fragment for column $tscol, appending any binds to
-# @$binds in WHERE order. Anchored -- BETWEEN around +/- window_minutes -- when
-# opts{around} is a non-empty timestamp (bound as text and cast, so a malformed
-# value is a query error the caller reports, not an injection); otherwise
-# now-relative over opts{go_back_minutes}. window_minutes defaults to 60.
+# @$binds in WHERE order. Timestamps are bound as text and cast to timestamptz
+# (read in the DB session's timezone), so a malformed value is a query error the
+# caller reports rather than an injection. In precedence:
+#   1. explicit absolute bounds -- start and/or end;
+#   2. event-anchored window -- BETWEEN around +/- window_minutes (default 60);
+#   3. now-relative over go_back_minutes.
 sub _time_clause {
 	my ( $self, $tscol, $opts, $binds ) = @_;
+
+	my $has_start = defined $opts->{start} && $opts->{start} ne '';
+	my $has_end   = defined $opts->{end}   && $opts->{end} ne '';
+	if ( $has_start || $has_end ) {
+		my @conds;
+		if ($has_start) { push( @conds, "$tscol >= ?::timestamptz" ); push( @$binds, $opts->{start} ); }
+		if ($has_end)   { push( @conds, "$tscol <= ?::timestamptz" ); push( @$binds, $opts->{end} ); }
+		return join( ' AND ', @conds );
+	}
 
 	if ( defined $opts->{around} && $opts->{around} ne '' ) {
 		my $w = _int( $opts->{window_minutes}, 60, 1, 44_640 );
