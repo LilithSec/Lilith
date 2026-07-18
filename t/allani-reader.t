@@ -98,4 +98,25 @@ my $reader = Lilith::Allani->new( dsn => 'dbi:Pg:dbname=bogus' );
     unlike( $sql, qr/db1|sshd/,     'filter values are not interpolated into the SQL' );
 }
 
+# ---------------------------------------------------------------------------
+# Time anchor: around + window_minutes give a BETWEEN window (binding the
+# timestamp, not interpolating it) instead of the now-relative comparison.
+# ---------------------------------------------------------------------------
+
+{
+    @MockDbh::SQL = ();
+    $reader->search( source => 'syslog', around => '2026-07-17T00:00:00', window_minutes => 30 );
+    my $sql = $MockDbh::SQL[0];
+    like( $sql,
+        qr/s_isodate BETWEEN \?::timestamptz - interval '30 minutes' AND \?::timestamptz \+ interval '30 minutes'/,
+        'anchored syslog window is a BETWEEN sized by window_minutes' );
+    unlike( $sql, qr/now\(\) - interval/, 'anchored window is not now-relative' );
+    unlike( $sql, qr/2026-07-17/,         'the anchor timestamp is bound, not interpolated' );
+
+    @MockDbh::SQL = ();
+    $reader->search( source => 'http_all', around => '2026-07-17T00:00:00', window_minutes => 15 );
+    my @between = ( $MockDbh::SQL[0] =~ /BETWEEN/g );
+    is( scalar @between, 2, 'http_all anchors both halves of the union' );
+}
+
 done_testing();

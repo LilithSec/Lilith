@@ -189,27 +189,26 @@ sub _virani_fetch_args {
 Builds the "logs around this event" deep-links into the Allani C</logs> page,
 as an array ref of C<< { label, url } >>. Keys the links off the event's host
 (syslog on that host) and source IP (interleaved http on that client), each only
-when the event carries the field. The C<go_back_minutes> window is sized to
-reach from a little before the event up to now (falling back to a day when the
-event time will not parse), so the event's surrounding log lines fall inside the
-now-relative window C</logs> searches. Returns an empty list for no event.
+when the event carries the field. When the event time parses, the links anchor
+C</logs> on it (C<around>) with a C<window> of C<$LOG_WINDOW> minutes either
+side, so the view shows the log lines around the alert rather than merely those
+since it; otherwise they fall back to the default now-relative window. Returns
+an empty list for no event.
 
 =cut
+
+# minutes on each side of an event the "logs around this event" links span.
+my $LOG_WINDOW = 60;
 
 sub _log_links {
 	my ( $self, $event ) = @_;
 	return [] unless $event;
 
-	my $mins = 1440;
-	my $ts   = $event->{timestamp} // $event->{stop} // $event->{start};
-	if ( defined $ts ) {
-		my $t = eval { Time::Piece::Guess->guess_to_object( $ts, 1 ) };
-		if ( defined $t ) {
-			my $delta = int( ( time - $t->epoch ) / 60 ) + 60;    # +60 min buffer around the event
-			$mins = $delta if $delta > 0;
-			$mins = 44_640 if $mins > 44_640;                     # cap at ~31 days
-		}
-	}
+	# Anchor on the event time when it parses (query() encodes the value; the
+	# reader binds it). Fall back to no anchor -> /logs' default window.
+	my $ts     = $event->{timestamp} // $event->{stop} // $event->{start};
+	my $t      = ( defined $ts ) ? eval { Time::Piece::Guess->guess_to_object( $ts, 1 ) } : undef;
+	my @anchor = ( defined $t )  ? ( around => $ts, window => $LOG_WINDOW )               : ();
 
 	my @links;
 	if ( defined $event->{host} && $event->{host} ne '' ) {
@@ -217,9 +216,8 @@ sub _log_links {
 			@links,
 			{
 				label => 'syslog · host ' . $event->{host},
-				url   => $self->url_for('/logs')
-					->query( source => 'syslog', host => $event->{host}, go_back_minutes => $mins )
-					->to_string,
+				url   =>
+					$self->url_for('/logs')->query( source => 'syslog', host => $event->{host}, @anchor )->to_string,
 			}
 		);
 	} ## end if ( defined $event->{host} && $event->{host...})
@@ -229,7 +227,7 @@ sub _log_links {
 			{
 				label => 'http · client ' . $event->{src_ip},
 				url   => $self->url_for('/logs')
-					->query( source => 'http_all', client_ip => $event->{src_ip}, go_back_minutes => $mins )
+					->query( source => 'http_all', client_ip => $event->{src_ip}, @anchor )
 					->to_string,
 			}
 		);

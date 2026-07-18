@@ -139,7 +139,12 @@ sub filters {
 Runs one windowed query and returns
 C<< { source => ..., headers => [...], rows => [ {header=>value,...}, ... ] } >>.
 Column names and the WHERE come from C<Allani::Sources>; every value is bound.
-Dies on a bad source, a filter invalid for the source, or a DB error.
+
+The time window is either now-relative (C<go_back_minutes>, default a day) or,
+when C<around> is given a timestamp, anchored: rows within C<window_minutes>
+(default 60) on either side of it. The event view uses the anchored form to
+show the logs around an alert. Dies on a bad source, a filter invalid for the
+source, or a DB error.
 
 =cut
 
@@ -149,13 +154,12 @@ sub search {
 	my $key = $opts{source} // 'syslog';
 	die( '"' . $key . "\" is not a known log source\n" ) unless $self->valid_source($key);
 
-	my $mins  = _minutes( $opts{go_back_minutes} );
 	my $dir   = ( defined $opts{order_dir} && uc $opts{order_dir} eq 'ASC' ) ? 'ASC' : 'DESC';
 	my $limit = _int( $opts{limit},  100, 1, 10000 );
 	my $off   = _int( $opts{offset}, 0,   0 );
 	my $filt  = ( ref $opts{filters} eq 'HASH' ) ? $opts{filters} : {};
 
-	return $self->_search_http_all( $mins, $dir, $limit, $off, $filt )
+	return $self->_search_http_all( \%opts, $dir, $limit, $off, $filt )
 		if $key eq 'http_all';
 
 	my $entry = $SOURCE{$key};
@@ -164,15 +168,18 @@ sub search {
 	my $tscol = $meta->{default_ts};
 
 	# Reuse Allani's whitelist for both the WHERE (via an accessor shim) and the
-	# selected columns; we fetch positionally and zip against its headers.
-	my ( $where,  $binds )   = Allani::Sources::build_where( $meta, Lilith::Allani::_Opt->new(%$filt) );
+	# selected columns; we fetch positionally and zip against its headers. The
+	# time window (now-relative, or anchored around an event) appends its own
+	# binds after build_where's, in WHERE order.
+	my ( $where, $binds ) = Allani::Sources::build_where( $meta, Lilith::Allani::_Opt->new(%$filt) );
+	my $tclause = $self->_time_clause( $tscol, \%opts, $binds );
 	my ( $select, $headers ) = Allani::Sources::select_and_headers( $meta, $tscol, 0, 1 );
 
 	my $sql
 		= "SELECT $select FROM "
 		. $meta->{table}
 		. ' WHERE '
-		. join( ' AND ', @$where, "$tscol >= now() - interval '$mins minutes'" )
+		. join( ' AND ', @$where, $tclause )
 		. " ORDER BY id $dir LIMIT ? OFFSET ?";
 
 	my $rows = $self->_run( $sql, [ @$binds, $limit, $off ], $headers );
@@ -183,24 +190,28 @@ sub search {
 # normalized HTTP_ALL_HEADERS, ordered by the shared receive time. The same
 # filter set is applied to each half; all values are bound.
 sub _search_http_all {
-	my ( $self, $mins, $dir, $limit, $off, $filt ) = @_;
+	my ( $self, $opts, $dir, $limit, $off, $filt ) = @_;
 
 	my @binds;
 	# $key is the selector key emitted as the 'source' discriminator, so a row's
 	# id links to a record view the reader understands (/logs/<key>/<id>) rather
 	# than to the raw table name; $table is where the half actually reads from.
+	# Each half builds its own binds (time window first, then filters, in WHERE
+	# order) and appends them, so the two halves and the limit/offset line up.
 	my $half = sub {
 		my ( $key, $table, $status_col, $detail_col, $msg_col ) = @_;
-		my @where = ("r_isodate >= now() - interval '$mins minutes'");
+		my @hbinds;
+		my @where = ( $self->_time_clause( 'r_isodate', $opts, \@hbinds ) );
 		for my $col (qw( host vhost client_ip )) {
 			next unless defined $filt->{$col} && $filt->{$col} ne '';
-			push( @where, "$col = ?" );
-			push( @binds, $filt->{$col} );
+			push( @where,  "$col = ?" );
+			push( @hbinds, $filt->{$col} );
 		}
 		if ( defined $filt->{message} && $filt->{message} ne '' ) {
-			push( @where, "$msg_col ILIKE ?" );
-			push( @binds, '%' . $filt->{message} . '%' );
+			push( @where,  "$msg_col ILIKE ?" );
+			push( @hbinds, '%' . $filt->{message} . '%' );
 		}
+		push( @binds, @hbinds );
 		return
 			  "SELECT '$key' AS source, id, r_isodate AS time, host, client_ip AS client,"
 			. " vhost, ${status_col}::text AS status, $detail_col AS detail, $msg_col AS message"
@@ -278,6 +289,24 @@ sub _dbh {
 	}
 	return $dbh;
 } ## end sub _dbh
+
+# The time-window WHERE fragment for column $tscol, appending any binds to
+# @$binds in WHERE order. Anchored -- BETWEEN around +/- window_minutes -- when
+# opts{around} is a non-empty timestamp (bound as text and cast, so a malformed
+# value is a query error the caller reports, not an injection); otherwise
+# now-relative over opts{go_back_minutes}. window_minutes defaults to 60.
+sub _time_clause {
+	my ( $self, $tscol, $opts, $binds ) = @_;
+
+	if ( defined $opts->{around} && $opts->{around} ne '' ) {
+		my $w = _int( $opts->{window_minutes}, 60, 1, 44_640 );
+		push( @$binds, $opts->{around}, $opts->{around} );
+		return "$tscol BETWEEN ?::timestamptz - interval '$w minutes'" . " AND ?::timestamptz + interval '$w minutes'";
+	}
+
+	my $mins = _minutes( $opts->{go_back_minutes} );
+	return "$tscol >= now() - interval '$mins minutes'";
+} ## end sub _time_clause
 
 # minutes-back window, integer, defaulting to a day.
 sub _minutes {

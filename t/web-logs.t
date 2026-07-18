@@ -88,6 +88,16 @@ sub _app {
     is( $search_opts{filters}{message}, 'boom', 'message filter forwarded' );
     ok( !exists $search_opts{filters}{vhost}, 'a filter not valid for the source is dropped' );
 
+    # time-anchored view: around/window flow through to the reader, and the page
+    # shows the anchor badge with a clear link instead of the minutes-back field.
+    $t->get_ok('/logs?source=syslog&around=2026-07-17T00:00:00&window=30')
+        ->status_is( 200, 'anchored /logs renders' )
+        ->element_exists( 'span.badge.bg-info', 'anchor badge shown' )
+        ->element_exists( 'input[name="around"][type="hidden"]', 'around carried as a hidden input' )
+        ->element_exists_not( 'input[name="go_back_minutes"]', 'minutes-back field hidden while anchored' );
+    is( $search_opts{around},         '2026-07-17T00:00:00', 'around forwarded to the reader' );
+    is( $search_opts{window_minutes}, '30',                  'window forwarded as window_minutes' );
+
     # partial render returns just the fragment
     my $part = $t->get_ok('/logs?source=syslog&partial=1')
         ->status_is( 200, 'partial render 200' )->tx->res->body;
@@ -130,8 +140,8 @@ sub _app {
             'syslog-by-host deep-link present' )
             ->element_exists( 'a.dropdown-item[href*="source=http_all"][href*="client_ip=203.0.113.5"]',
             'http_all-by-client deep-link present' )
-            ->element_exists( 'a.dropdown-item[href*="go_back_minutes="]',
-            'deep-links carry a go_back_minutes window' );
+            ->element_exists( 'a.dropdown-item[href*="around="]', 'deep-links anchor around the event time' )
+            ->element_exists( 'a.dropdown-item[href*="window="]', 'deep-links carry a window' );
     }
 
     # not configured: no Logs dropdown

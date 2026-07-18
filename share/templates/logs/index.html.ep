@@ -34,11 +34,23 @@
           </select>
         </div>
 
+        % if (defined stash('around') && stash('around') ne '') {
+        <div class="col-auto">
+          <label class="form-label">Window</label>
+          <div class="d-flex align-items-center gap-2" style="height:31px">
+            <span class="badge bg-info text-dark" title="Anchored around this time">±<%= stash('window') %> min · <%= stash('around') %></span>
+            <a href="<%= url_with->query({around => undef, window => undef, partial => undef}) %>" class="small">clear</a>
+          </div>
+          <input type="hidden" name="around" value="<%= stash('around') %>">
+          <input type="hidden" name="window" value="<%= stash('window') %>">
+        </div>
+        % } else {
         <div class="col-auto">
           <label class="form-label">Minutes back</label>
           <input type="number" name="go_back_minutes" class="form-control form-control-sm"
                  value="<%= $go_back_minutes %>" style="width:100px" min="1">
         </div>
+        % }
 
         <div class="col-auto">
           <label class="form-label">Limit</label>

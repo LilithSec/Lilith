@@ -48,6 +48,13 @@ sub index {
 	my $order_dir       = $self->param('order_dir')       // 'DESC';
 	$order_dir = 'DESC' unless $order_dir =~ /^(?:ASC|DESC)$/;
 
+	# Optional time anchor (deep-linked from the event view): show rows within
+	# 'window' minutes either side of 'around' instead of the now-relative
+	# window. The reader validates/binds both; blank 'around' just means unset.
+	my $around = $self->param('around');
+	my $window = $self->param('window');
+	undef $around if defined $around && $around eq '';
+
 	# Forward only the filter params this source accepts (the reader derives that
 	# whitelist from Allani::Sources), so a param meant for another source cannot
 	# reach the query.
@@ -69,6 +76,7 @@ sub index {
 				limit           => $limit,
 				offset          => $offset,
 				filters         => \%filters,
+				( defined $around ? ( around => $around, window_minutes => $window ) : () ),
 			);
 		};
 		$error = $@ if $@;
@@ -84,6 +92,8 @@ sub index {
 		limit           => $limit,
 		offset          => $offset,
 		filters         => \%filters,
+		around          => $around,
+		window          => ( $window // 60 ),
 	);
 
 	if ( $self->param('partial') && defined $result ) {
