@@ -109,6 +109,7 @@ share/templates/event/view.html.ep
 share/templates/logs/index.html.ep
 share/templates/logs/_results.html.ep
 share/templates/logs/view.html.ep
+share/templates/logs/dashboard.html.ep
 share/templates/escalation/index.html.ep
 share/templates/auto_escalation/index.html.ep
 share/public/vendor/bootstrap-5.3.3/css/bootstrap.min.css

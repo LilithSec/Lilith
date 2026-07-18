@@ -153,8 +153,11 @@ All the standard Mojolicious server commands work. Read
   switches between syslog, http (access), http error, and an interleaved
   http view; per-source filters, a minutes-back window, paging, and
   optional auto-refresh mirror the search page, and each row opens the full
-  stored record with its raw JSON. The page and its navbar entry stay hidden
-  without `[allani]` — see [configuration](configuration.md).
+  stored record with its raw JSON. A companion **log dashboard**
+  (`/logs/dashboard`, linked from the search page) charts row counts over
+  time and the top values of each source's dimensions (top programs/hosts
+  for syslog, vhosts/status codes for http). The page and its navbar entry
+  stay hidden without `[allani]` — see [configuration](configuration.md).
 - **Event view** — the full event with the decoded EVE record. IPs open an
   info modal (reverse DNS, whois, GeoIP when databases are configured);
   domains an info panel with whois and DNS, plus an **HTTPS** button

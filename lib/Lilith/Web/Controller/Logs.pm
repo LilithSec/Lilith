@@ -144,4 +144,136 @@ sub view {
 	return;
 } ## end sub view
 
+=head2 dashboard
+
+C<GET /logs/dashboard> -- the log dashboard shell. Data is pulled by the browser
+from the C</api/logs/*> endpoints, so it renders even when the database is
+unreachable. Aggregation is over the real single-table sources only (syslog,
+http, http_error); the interleaved C<http_all> is not offered here.
+
+=cut
+
+sub dashboard {
+	my $self = shift;
+
+	my ( $reader, $error );
+	if ( $self->allani_enabled ) {
+		eval { $reader = $self->allani };
+		$error = $@ if $@;
+	} else {
+		$error = 'Allani is not configured; add an [allani] block to the config.';
+	}
+
+	# real (aggregatable) sources only
+	my @sources = $reader ? ( grep { $_->{key} ne 'http_all' } @{ $reader->sources } ) : ();
+
+	my $source = $self->param('source') // 'syslog';
+	$source = 'syslog' unless grep { $_->{key} eq $source } @sources;
+
+	my $mins = $self->param('go_back_minutes');
+	$mins = 1440 unless defined $mins && $mins =~ /^[0-9]+$/;
+
+	$self->stash(
+		sources         => \@sources,
+		source          => $source,
+		dims            => ( $reader ? $reader->dims($source) : [] ),
+		go_back_minutes => $mins,
+		error           => $error,
+	);
+
+	return;
+} ## end sub dashboard
+
+=head2 summary
+
+C<GET /api/logs/summary> -- C<< { total } >> for the source/window.
+
+=cut
+
+sub summary {
+	my $self = shift;
+	my ( $source, $mins ) = _dparams($self);
+	return $self->_ljson(
+		sub {
+			my $r = shift;
+			return { total => $r->total( source => $source, go_back_minutes => $mins ) };
+		}
+	);
+} ## end sub summary
+
+=head2 top
+
+C<GET /api/logs/top?column=&limit=> -- the most common values of a dimension,
+as C<< { rows => [ { value, count }, ... ] } >>.
+
+=cut
+
+sub top {
+	my $self = shift;
+	my ( $source, $mins ) = _dparams($self);
+	my $column = $self->param('column');
+	my $limit  = $self->param('limit');
+	return $self->_ljson(
+		sub {
+			my $r    = shift;
+			my $rows = $r->top(
+				source          => $source,
+				column          => $column,
+				go_back_minutes => $mins,
+				( defined $limit && $limit ne '' ? ( limit => $limit ) : () ),
+			);
+			return { rows => $rows };
+		}
+	);
+} ## end sub top
+
+=head2 timeseries
+
+C<GET /api/logs/timeseries?bucket=> -- row counts bucketed over time, as
+C<< { rows => [ { bucket, count }, ... ] } >>.
+
+=cut
+
+sub timeseries {
+	my $self = shift;
+	my ( $source, $mins ) = _dparams($self);
+	my $bucket = $self->param('bucket');
+	return $self->_ljson(
+		sub {
+			my $r    = shift;
+			my $rows = $r->timeseries(
+				source          => $source,
+				go_back_minutes => $mins,
+				( defined $bucket && $bucket ne '' ? ( bucket => $bucket ) : () ),
+			);
+			return { rows => $rows };
+		}
+	);
+} ## end sub timeseries
+
+# Shared source/window parsing for the dashboard API. The source is validated by
+# the reader (a bad one dies -> 400 via _ljson), so it is passed through as-is.
+sub _dparams {
+	my $self   = shift;
+	my $source = $self->param('source') // 'syslog';
+	my $mins   = $self->param('go_back_minutes');
+	$mins = 1440 unless defined $mins && $mins =~ /^[0-9]+$/;
+	return ( $source, $mins );
+}
+
+# Render whatever $code->($reader) returns as JSON, turning a reader die (bad
+# source/column, unreachable database) into a 400 with the message, and a
+# missing [allani] into a 400 rather than a 500.
+sub _ljson {
+	my ( $self, $code ) = @_;
+	return $self->render( json => { error => 'Allani is not configured' }, status => 400 )
+		unless $self->allani_enabled;
+	my $data = eval { $code->( $self->allani ) };
+	if ($@) {
+		( my $why = $@ ) =~ s/\s+\z//;
+		return $self->render( json => { error => $why }, status => 400 );
+	}
+	return $self->render( json => $data );
+} ## end sub _ljson
+
 1;

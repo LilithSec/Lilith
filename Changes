@@ -12,7 +12,10 @@ Revision history for Lilith
 		   The event view also grows a "Logs" dropdown when Allani is
 		   configured, deep-linking to /logs pre-filtered by the event's
 		   host (syslog) and source IP (interleaved http), windowed to
-		   reach back around the event.
+		   reach back around the event. A companion log dashboard
+		   (/logs/dashboard) charts row counts over time and the top
+		   values of each source's dimensions (top programs/hosts,
+		   vhosts/status codes, ...) via /api/logs/{summary,top,timeseries}.
 		 - Add MITRE ATT&CK tactic/technique as virtual Suricata dashboard
 		   dimensions, read from the alert.metadata a ruleset (e.g.
 		   Emerging Threats) tags on, with the underscored names spaced out

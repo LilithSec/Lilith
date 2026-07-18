@@ -18,6 +18,7 @@ plan skip_all => 'Allani (Allani::Sources) is not installed'
     sub execute           { 1 }
     sub fetchrow_arrayref { undef }
     sub fetchrow_hashref  { return { id => 5, host => 'w1' } }
+    sub fetchall_arrayref { return [] }
     sub finish            { 1 }
 
     package MockDbh;
@@ -117,6 +118,37 @@ my $reader = Lilith::Allani->new( dsn => 'dbi:Pg:dbname=bogus' );
     $reader->search( source => 'http_all', around => '2026-07-17T00:00:00', window_minutes => 15 );
     my @between = ( $MockDbh::SQL[0] =~ /BETWEEN/g );
     is( scalar @between, 2, 'http_all anchors both halves of the union' );
+}
+
+# ---------------------------------------------------------------------------
+# Dashboard aggregation: dims(), total(), top(), timeseries() build the right
+# SQL and whitelist their inputs against Allani::Sources.
+# ---------------------------------------------------------------------------
+
+{
+    is_deeply( $reader->dims('syslog'), [qw( program facility host host_from priority )],
+        'syslog dims list default_dim first, then the rest sorted' );
+    is_deeply( $reader->dims('http_all'), [], 'http_all has no aggregate dims' );
+
+    @MockDbh::SQL = ();
+    $reader->total( source => 'syslog', go_back_minutes => 60 );
+    like( $MockDbh::SQL[0], qr/SELECT count\(\*\) FROM syslog WHERE/, 'total counts the source table' );
+
+    @MockDbh::SQL = ();
+    $reader->top( source => 'syslog', column => 'program', limit => 5 );
+    like( $MockDbh::SQL[0], qr/GROUP BY program ORDER BY count DESC/, 'top groups by the dimension' );
+    like( $MockDbh::SQL[0], qr/LIMIT \?/,                             'top binds the limit' );
+
+    @MockDbh::SQL = ();
+    $reader->timeseries( source => 'syslog', bucket => 'day' );
+    like( $MockDbh::SQL[0], qr/date_trunc\('day', s_isodate\)/, 'timeseries buckets by the chosen unit' );
+
+    eval { $reader->top( source => 'syslog', column => 'raw' ) };
+    like( $@, qr/not an aggregatable column/, 'top rejects a non-dimension column' );
+    eval { $reader->timeseries( source => 'syslog', bucket => 'century' ) };
+    like( $@, qr/not a valid bucket/, 'timeseries rejects a bad bucket' );
+    eval { $reader->total( source => 'http_all' ) };
+    like( $@, qr/no aggregate view/, 'aggregation rejects http_all' );
 }
 
 done_testing();

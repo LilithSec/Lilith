@@ -76,7 +76,8 @@ sub _app {
         ->element_exists( 'select#source-sel option[value="syslog"]',   'syslog source option present' )
         ->element_exists( 'select#source-sel option[value="http_all"]', 'http_all source option present' )
         ->element_exists( 'div#log-results',              'results container present' )
-        ->element_exists( 'a[href="/logs/syslog/1"]',     'result row links to the record view' );
+        ->element_exists( 'a[href="/logs/syslog/1"]',     'result row links to the record view' )
+        ->element_exists( 'a[href^="/logs/dashboard"]',   'search page links to the log dashboard' );
 
     # an unknown source is sanitized back to syslog
     $t->get_ok('/logs?source=bogus')->status_is( 200, 'unknown source is sanitized' );
@@ -150,6 +151,53 @@ sub _app {
         $t->get_ok('/event/suricata/9')->status_is( 200, 'event view renders without Allani' )
             ->element_exists_not( 'button#event-logs-toggle', 'no Logs dropdown when Allani is not configured' );
     }
+}
+
+# ---------------------------------------------------------------------------
+# 4.  Log dashboard (Phase 3): shell page over real sources + JSON endpoints.
+# ---------------------------------------------------------------------------
+
+{
+    no warnings qw(redefine once);
+    local *Lilith::Allani::new     = sub { return bless {}, 'Lilith::Allani' };
+    local *Lilith::Allani::sources = sub {
+        return [
+            { key => 'syslog',   label => 'syslog' },
+            { key => 'http',     label => 'http (access)' },
+            { key => 'http_all', label => 'http (interleaved)' },
+        ];
+    };
+    local *Lilith::Allani::dims       = sub { return [qw( program host )] };
+    local *Lilith::Allani::total      = sub { return 1234 };
+    local *Lilith::Allani::top        = sub { return [ { value => 'sshd', count => 10 } ] };
+    local *Lilith::Allani::timeseries = sub { return [ { bucket => '2026-07-17T00:00:00', count => 5 } ] };
+    use warnings qw(redefine once);
+
+    my $t = _app(qq{[allani]\ndsn = "dbi:Pg:dbname=allani"\n});
+
+    # shell: source selector excludes the interleaved view; canvases per dim
+    $t->get_ok('/logs/dashboard')->status_is( 200, 'log dashboard renders' )
+        ->element_exists( 'select[name="source"] option[value="syslog"]', 'syslog is a dashboard source' )
+        ->element_exists_not( 'select[name="source"] option[value="http_all"]',
+        'http_all is not offered on the dashboard' )
+        ->element_exists( 'canvas#chart-ts',      'timeseries canvas present' )
+        ->element_exists( 'canvas#chart-program', 'a top-dimension canvas present' );
+
+    # JSON endpoints
+    $t->get_ok('/api/logs/summary?source=syslog')->status_is(200)
+        ->json_is( '/total', 1234, 'summary reports the total' );
+    $t->get_ok('/api/logs/top?source=syslog&column=program')->status_is(200)
+        ->json_is( '/rows/0/value', 'sshd', 'top reports rows' );
+    $t->get_ok('/api/logs/timeseries?source=syslog&bucket=hour')->status_is(200)
+        ->json_is( '/rows/0/count', 5, 'timeseries reports rows' );
+}
+
+# without [allani]: the dashboard renders a notice and the API is a 400
+{
+    my $t = _app();
+    $t->get_ok('/logs/dashboard')->status_is( 200, 'dashboard renders without Allani' )
+        ->element_exists( 'div.alert-danger', 'not-configured notice on the dashboard' );
+    $t->get_ok('/api/logs/summary?source=syslog')->status_is( 400, 'dashboard API is 400 without Allani' );
 }
 
 done_testing();

@@ -258,6 +258,98 @@ sub row {
 	return $r;
 } ## end sub row
 
+=head2 dims
+
+    my $names = $reader->dims('syslog');
+
+The dimensions a source may be grouped/counted by (its C<Allani::Sources>
+C<dims>), C<default_dim> first. Empty for C<http_all> (no single-table
+aggregate) or an unknown source. Drives the dashboard's panels.
+
+=cut
+
+sub dims {
+	my ( $self, $key ) = @_;
+	my $entry = $SOURCE{ $key // '' } or return [];
+	return [] unless defined $entry->{src};
+	my $meta = Allani::Sources::source( $entry->{src} ) or return [];
+	my $dd   = $meta->{default_dim};
+	my @rest = sort grep { $_ ne $dd } keys %{ $meta->{dims} };
+	return [ ( $meta->{dims}{$dd} ? ($dd) : () ), @rest ];
+}
+
+=head2 total
+
+    my $n = $reader->total( source => 'syslog', go_back_minutes => 1440 );
+
+Row count in the window (accepts the same window options as L</search>,
+now-relative or C<around>-anchored). Aggregate sources only (not C<http_all>).
+
+=cut
+
+sub total {
+	my ( $self, %opts )  = @_;
+	my ( $meta, $tscol ) = $self->_agg_meta( $opts{source} );
+	my @binds;
+	my $tc  = $self->_time_clause( $tscol, \%opts, \@binds );
+	my $sth = $self->_dbh->prepare("SELECT count(*) FROM $meta->{table} WHERE $tc");
+	$sth->execute(@binds);
+	my $r = $sth->fetchrow_arrayref;
+	$sth->finish;
+	return ( ( $r && defined $r->[0] ) ? $r->[0] : 0 ) + 0;
+} ## end sub total
+
+=head2 top
+
+    my $rows = $reader->top( source => 'syslog', column => 'program', limit => 10 );
+
+The most common non-null values of a dimension in the window, as an array ref
+of C<< { value, count } >> ordered by count descending (ties by value).
+C<column> is whitelisted against the source's C<dims>; C<limit> defaults to 10.
+
+=cut
+
+sub top {
+	my ( $self, %opts )  = @_;
+	my ( $meta, $tscol ) = $self->_agg_meta( $opts{source} );
+	my $col   = $self->_dim( $meta, $opts{column} );
+	my $limit = _int( $opts{limit}, 10, 1, 1000 );
+	my @binds;
+	my $tc = $self->_time_clause( $tscol, \%opts, \@binds );
+	push( @binds, $limit );
+	my $sth = $self->_dbh->prepare( "SELECT ($col)::text AS value, count(*) AS count FROM $meta->{table}"
+			. " WHERE $tc AND $col IS NOT NULL GROUP BY $col ORDER BY count DESC, value ASC LIMIT ?" );
+	$sth->execute(@binds);
+	my $rows = $sth->fetchall_arrayref( {} );
+	$sth->finish;
+	return $rows || [];
+} ## end sub top
+
+=head2 timeseries
+
+    my $rows = $reader->timeseries( source => 'syslog', bucket => 'hour' );
+
+Row counts bucketed over time, as an array ref of C<< { bucket, count } >>
+oldest first. C<bucket> is one of minute/hour/day/week/month (default hour).
+
+=cut
+
+sub timeseries {
+	my ( $self, %opts )  = @_;
+	my ( $meta, $tscol ) = $self->_agg_meta( $opts{source} );
+	my $bucket = $self->_bucket( $opts{bucket} );
+	my @binds;
+	my $tc = $self->_time_clause( $tscol, \%opts, \@binds );
+	my $sth
+		= $self->_dbh->prepare(
+			  "SELECT to_char(date_trunc('$bucket', $tscol), 'YYYY-MM-DD\"T\"HH24:MI:SS') AS bucket,"
+			. " count(*) AS count FROM $meta->{table} WHERE $tc GROUP BY 1 ORDER BY 1 ASC" );
+	$sth->execute(@binds);
+	my $rows = $sth->fetchall_arrayref( {} );
+	$sth->finish;
+	return $rows || [];
+} ## end sub timeseries
+
 #
 # internals
 #
@@ -307,6 +399,36 @@ sub _time_clause {
 	my $mins = _minutes( $opts->{go_back_minutes} );
 	return "$tscol >= now() - interval '$mins minutes'";
 } ## end sub _time_clause
+
+# date_trunc units the dashboard may bucket a timeseries on.
+my %BUCKET = map { $_ => 1 } qw( minute hour day week month );
+
+# Resolve an aggregate source to ( $meta, $timestamp_column ). Aggregation is
+# over a single real table, so http_all (a view) and unknown sources die.
+sub _agg_meta {
+	my ( $self, $key ) = @_;
+	$key = '' unless defined $key;
+	my $entry = $SOURCE{$key} or die( '"' . $key . "\" is not a known log source\n" );
+	die("http_all has no aggregate view\n") unless defined $entry->{src};
+	my $meta = Allani::Sources::source( $entry->{src} ) or die("unknown source\n");
+	return ( $meta, $meta->{default_ts} );
+}
+
+# A group/count dimension, whitelisted against the source's Allani::Sources dims.
+sub _dim {
+	my ( $self, $meta, $col ) = @_;
+	die("a column is required\n")                            unless defined $col && $col ne '';
+	die( '"' . $col . "\" is not an aggregatable column\n" ) unless $meta->{dims}{$col};
+	return $col;
+}
+
+# A whitelisted date_trunc bucket unit, defaulting to hour.
+sub _bucket {
+	my ( $self, $b ) = @_;
+	$b = 'hour' unless defined $b && $b ne '';
+	die( '"' . $b . "\" is not a valid bucket\n" ) unless $BUCKET{$b};
+	return $b;
+}
 
 # minutes-back window, integer, defaulting to a day.
 sub _minutes {

@@ -377,6 +377,10 @@ sub startup {
 	$r->get('/event/:table/:id/body/:which/zip')->to('event#body_zip');
 	$r->get('/event/:table/:id/pcap')->to('event#pcap');
 	$r->get('/logs')->to('logs#index');
+	$r->get('/logs/dashboard')->to('logs#dashboard');
+	$r->get('/api/logs/summary')->to('logs#summary');
+	$r->get('/api/logs/top')->to('logs#top');
+	$r->get('/api/logs/timeseries')->to('logs#timeseries');
 	$r->get('/logs/:source/:id')->to('logs#view');
 	$r->get('/api/ipinfo/*ip')->to('api#ipinfo');
 	$r->get('/api/domaininfo/*domain')->to('api#domaininfo');
