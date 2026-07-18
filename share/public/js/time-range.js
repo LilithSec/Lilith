@@ -17,88 +17,92 @@
  * window.LilithTimeRange.{init,initAll} for dynamically added ones.
  */
 (function () {
-  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function pad(num) { return (num < 10 ? '0' : '') + num; }
 
-  function clampInt(v, lo, hi) {
-    v = parseInt(v, 10);
-    if (isNaN(v)) { return lo; }
-    return Math.max(lo, Math.min(hi, v));
+  function clampInt(value, lo, hi) {
+    value = parseInt(value, 10);
+    if (isNaN(value)) { return lo; }
+    return Math.max(lo, Math.min(hi, value));
   }
 
   function initOne(root) {
     if (root.dataset.trReady) { return; }   // idempotent
     root.dataset.trReady = '1';
 
-    var q = function (role) { return root.querySelector('[data-role="' + role + '"]'); };
-    var preset  = q('preset');
-    var custom  = q('custom');
-    var minutes = q('minutes');
-    var startEl = q('start');
-    var endEl   = q('end');
-    if (!preset || !minutes || !startEl || !endEl) { return; }
-    var form = root.closest('form');
+    var byRole = function (role) { return root.querySelector('[data-role="' + role + '"]'); };
+    var presetEl  = byRole('preset');
+    var customEl  = byRole('custom');
+    var minutesEl = byRole('minutes');
+    var startEl   = byRole('start');
+    var endEl     = byRole('end');
+    if (!presetEl || !minutesEl || !startEl || !endEl) { return; }
+    var formEl = root.closest('form');
 
-    // def is the whole-day time a bound falls back to when its time is left
-    // unset: the start of the day for From, the end of it for To.
-    var parts = {
-      start: { date: q('start-date'), hour: q('start-hour'), min: q('start-min'), def: [0, 0] },
-      end:   { date: q('end-date'),   hour: q('end-hour'),   min: q('end-min'),   def: [23, 59] }
+    // Each end of the range: its date/hour/minute inputs and the whole-day time
+    // it falls back to when the time is left unset (From -> 00:00, To -> 23:59).
+    var bounds = {
+      start: { dateEl: byRole('start-date'), hourEl: byRole('start-hour'), minEl: byRole('start-min'), defaultTime: [0, 0] },
+      end:   { dateEl: byRole('end-date'),   hourEl: byRole('end-hour'),   minEl: byRole('end-min'),   defaultTime: [23, 59] }
     };
 
-    function isCustom() { return preset.value === 'custom'; }
+    function isCustom() { return presetEl.value === 'custom'; }
 
     // Show/hide the custom range and keep only the active mode's params live, so
     // the reader picks an explicit range over go_back_minutes accordingly.
-    function apply() {
-      if (custom) { custom.style.display = isCustom() ? '' : 'none'; }
-      minutes.disabled = isCustom();
+    function syncMode() {
+      if (customEl) { customEl.style.display = isCustom() ? '' : 'none'; }
+      minutesEl.disabled = isCustom();
       startEl.disabled = !isCustom();
       endEl.disabled   = !isCustom();
-      if (!isCustom()) { minutes.value = preset.value; }
+      if (!isCustom()) { minutesEl.value = presetEl.value; }
     }
 
-    // 'YYYY-MM-DD HH:MM' from a {date,hour,min} group, or '' with no date. An
-    // unset time falls back to the group's default (From 00:00, To 23:59).
-    function compose(g) {
-      if (!g || !g.date || !g.date.value) { return ''; }
-      var h = g.hour.value === '' ? g.def[0] : clampInt(g.hour.value, 0, 23);
-      var m = g.min.value === '' ? g.def[1] : clampInt(g.min.value, 0, 59);
-      return g.date.value + ' ' + pad(h) + ':' + pad(m);
+    // 'YYYY-MM-DD HH:MM' from one bound, or '' with no date. An unset time falls
+    // back to that bound's whole-day default (From 00:00, To 23:59).
+    function compose(bound) {
+      if (!bound || !bound.dateEl || !bound.dateEl.value) { return ''; }
+      var hour   = bound.hourEl.value === '' ? bound.defaultTime[0] : clampInt(bound.hourEl.value, 0, 23);
+      var minute = bound.minEl.value === ''  ? bound.defaultTime[1] : clampInt(bound.minEl.value, 0, 59);
+      return bound.dateEl.value + ' ' + pad(hour) + ':' + pad(minute);
     }
 
-    // Seed a {date,hour,min} group from a 'YYYY-MM-DD[ T]HH:MM' string.
-    function seed(g, val) {
-      var m = /^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}):(\d{2})/.exec(val || '');
-      if (m && g && g.date) { g.date.value = m[1]; g.hour.value = parseInt(m[2], 10); g.min.value = parseInt(m[3], 10); }
+    // Seed one bound's fields from a 'YYYY-MM-DD[ T]HH:MM' string.
+    function seedBound(bound, value) {
+      var match = /^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}):(\d{2})/.exec(value || '');
+      if (match && bound && bound.dateEl) {
+        bound.dateEl.value = match[1];
+        bound.hourEl.value = parseInt(match[2], 10);
+        bound.minEl.value  = parseInt(match[3], 10);
+      }
     }
 
-    // When a date is picked, surface the group's default time (only if the user
+    // When a date is picked, surface that bound's default time (only if the user
     // hasn't set one) so the whole-day bound is visible and still editable.
-    function wireDate(g) {
-      if (!g.date) { return; }
-      g.date.addEventListener('change', function () {
-        if (!g.date.value) { return; }
-        if (g.hour.value === '') { g.hour.value = g.def[0]; }
-        if (g.min.value === '') { g.min.value = g.def[1]; }
+    function wireDefaultTime(bound) {
+      if (!bound.dateEl) { return; }
+      bound.dateEl.addEventListener('change', function () {
+        if (!bound.dateEl.value) { return; }
+        if (bound.hourEl.value === '') { bound.hourEl.value = bound.defaultTime[0]; }
+        if (bound.minEl.value === '')  { bound.minEl.value = bound.defaultTime[1]; }
       });
     }
-    wireDate(parts.start);
-    wireDate(parts.end);
+    wireDefaultTime(bounds.start);
+    wireDefaultTime(bounds.end);
 
-    preset.addEventListener('change', apply);
-    if (form) {
-      form.addEventListener('submit', function () {
-        if (isCustom()) { startEl.value = compose(parts.start); endEl.value = compose(parts.end); }
+    presetEl.addEventListener('change', syncMode);
+    if (formEl) {
+      formEl.addEventListener('submit', function () {
+        if (isCustom()) { startEl.value = compose(bounds.start); endEl.value = compose(bounds.end); }
       });
     }
 
     // Open in Custom when an absolute bound is already present; seed its fields.
     if (startEl.value || endEl.value) {
-      preset.value = 'custom';
-      seed(parts.start, startEl.value);
-      seed(parts.end, endEl.value);
+      presetEl.value = 'custom';
+      seedBound(bounds.start, startEl.value);
+      seedBound(bounds.end, endEl.value);
     }
-    apply();
+    syncMode();
   }
 
   function initAll(scope) {
