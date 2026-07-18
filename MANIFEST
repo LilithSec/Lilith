@@ -104,6 +104,7 @@ lib/Lilith/Web/Controller/Event.pm
 lib/Lilith/Web/Controller/Logs.pm
 share/templates/layouts/default.html.ep
 share/templates/search/index.html.ep
+share/templates/partials/_time_range.html.ep
 share/templates/search/_results.html.ep
 share/templates/dashboard/index.html.ep
 share/templates/event/view.html.ep
@@ -160,5 +161,6 @@ share/fixtures/7/conf/keep
 share/fixtures/8/conf/keep
 share/fixtures/9/conf/keep
 share/public/vendor/Chart.js
+share/public/js/time-range.js
 share/public/vendor/gridstack/gridstack-all.js
 share/public/vendor/gridstack/gridstack.min.css

@@ -1,0 +1,55 @@
+% # Reusable time-window control (preset relative window + Custom absolute range).
+% # Pair with /js/time-range.js. Include like:
+% #   %= include 'partials/_time_range', tr_minutes => $go_back_minutes, tr_start => param('start'), tr_end => param('end')
+% # Optional: tr_minutes_name / tr_start_name / tr_end_name to change the emitted
+% # param names (default go_back_minutes / start / end).
+% my $minutes = stash('tr_minutes') // 1440;
+% my $start   = stash('tr_start')   // '';
+% my $end     = stash('tr_end')     // '';
+% my $mname   = stash('tr_minutes_name') // 'go_back_minutes';
+% my $sname   = stash('tr_start_name')   // 'start';
+% my $ename   = stash('tr_end_name')     // 'end';
+% # preset options (minutes => label), in order; select the one matching $minutes,
+% # else fall back to a day.
+% my @presets = ( [ 60, 'Last hour' ], [ 360, 'Last 6 hours' ], [ 1440, 'Last 24 hours' ],
+%                  [ 2880, 'Last 2 days' ], [ 10080, 'Last 7 days' ], [ 43200, 'Last 30 days' ] );
+% my $sel = ( grep { $_->[0] eq $minutes } @presets ) ? $minutes : 1440;
+
+% # display:contents lets the inner .col-auto items align with sibling controls
+% # in the surrounding row while still giving the JS a single root to scope to.
+<div class="time-range" style="display:contents">
+  <input type="hidden" name="<%= $mname %>" value="<%= $minutes %>" data-role="minutes">
+  <input type="hidden" name="<%= $sname %>" value="<%= $start %>" data-role="start">
+  <input type="hidden" name="<%= $ename %>" value="<%= $end %>" data-role="end">
+
+  <div class="col-auto">
+    <label class="form-label">When</label>
+    <select class="form-select form-select-sm" style="width:140px" data-role="preset">
+      % for my $p (@presets) {
+      <option value="<%= $p->[0] %>" <%= $p->[0] eq $sel ? 'selected' : '' %>><%= $p->[1] %></option>
+      % }
+      <option value="custom">Custom range&hellip;</option>
+    </select>
+  </div>
+
+  <div class="col-auto" data-role="custom" style="display:none">
+    <div class="d-flex gap-2 align-items-end">
+      <div>
+        <label class="form-label">From</label>
+        <div class="input-group input-group-sm" style="width:auto">
+          <input type="date"   class="form-control form-control-sm" style="width:135px" data-role="start-date">
+          <input type="number" class="form-control form-control-sm" style="width:55px" min="0" max="23" placeholder="hh" data-role="start-hour">
+          <input type="number" class="form-control form-control-sm" style="width:55px" min="0" max="59" placeholder="mm" data-role="start-min">
+        </div>
+      </div>
+      <div>
+        <label class="form-label">To</label>
+        <div class="input-group input-group-sm" style="width:auto">
+          <input type="date"   class="form-control form-control-sm" style="width:135px" data-role="end-date">
+          <input type="number" class="form-control form-control-sm" style="width:55px" min="0" max="23" placeholder="hh" data-role="end-hour">
+          <input type="number" class="form-control form-control-sm" style="width:55px" min="0" max="59" placeholder="mm" data-role="end-min">
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

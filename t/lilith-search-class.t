@@ -296,4 +296,40 @@ is_deeply(
 	'multiple ips are ORed across src_ip and dest_ip'
 );
 
+# ---------------------------------------------------------------------------
+# time window: relative (go_back_minutes) vs an explicit start/end range
+# ---------------------------------------------------------------------------
+
+# default is the now-relative window as literal SQL on the timestamp column
+$captured_search = undef;
+$lilith->search( table => 'suricata' );
+is( ref $captured_search->{timestamp}{'>='},
+	'SCALAR', 'default window is a now-relative literal on timestamp' );
+like( ${ $captured_search->{timestamp}{'>='} }, qr/CURRENT_TIMESTAMP - interval/, 'and uses go_back_minutes' );
+
+# an explicit start+end becomes a bound range (values, not literal SQL),
+# normalized to a canonical timestamp; the datetime-local 'T' is accepted
+$captured_search = undef;
+$lilith->search( table => 'suricata', start => '2026-07-18T00:00', end => '2026-07-18T12:00' );
+is_deeply(
+	$captured_search->{timestamp},
+	{ '>=' => '2026-07-18 00:00:00', '<=' => '2026-07-18 12:00:00' },
+	'start+end become a bound >= / <= range on timestamp'
+);
+
+# start alone is just a lower bound
+$captured_search = undef;
+$lilith->search( table => 'suricata', start => '2026-07-18 06:30:00' );
+is_deeply( $captured_search->{timestamp}, { '>=' => '2026-07-18 06:30:00' }, 'start alone is a lower bound' );
+
+# cape windows on its 'stop' column
+$captured_search = undef;
+$lilith->search( table => 'cape', start => '2026-07-18T00:00' );
+is_deeply( $captured_search->{stop}, { '>=' => '2026-07-18 00:00:00' }, 'cape ranges on the stop column' );
+ok( !exists $captured_search->{timestamp}, 'cape does not window on timestamp' );
+
+# an unparseable bound is rejected with a clear error
+eval { $lilith->search( table => 'suricata', start => 'not-a-time' ); };
+like( $@, qr/is not a parseable time/, 'an unparseable start is rejected' );
+
 done_testing();

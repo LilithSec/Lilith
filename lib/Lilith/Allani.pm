@@ -31,9 +31,9 @@ keeps every log line (syslog-ng JSON in PostgreSQL). This is a thin, read-only
 reader Lilith::Web uses to browse an Allani store over its own connection,
 without going through Lilith's own alert schema.
 
-The per-source whitelist (tables, timestamp columns, exact-match filter
-columns, and the display columns) is B<not> duplicated here: it is reused from
-C<Allani::Sources>, so Allani must be installed for the C</logs> page to work.
+The per-source definitions (tables, timestamp columns, exact-match filter
+columns, and the display columns) are B<not> duplicated here: they are reused
+from C<Allani::Sources>, so Allani must be installed for the C</logs> page to work.
 The only query this module authors itself is C<http_all>, the interleaved view
 of C<http_access> and C<http_error>.
 
@@ -60,8 +60,8 @@ my %BUCKET = map { $_ => 1 } qw( minute hour day week month );
 
 # What a top/timeseries panel may aggregate beyond counting rows, per underlying
 # source table. 'count' is always available; a measure names a numeric column to
-# sum. The column is server-defined here (never from the request), so only the
-# whitelisted measure name reaches SQL. Sources absent here get count only.
+# sum. The column is server-defined here (never from the request), so only a
+# measure name from this catalog reaches SQL. Sources absent here get count only.
 my @DEFAULT_MEASURE = ( { name => 'count', label => 'Count' } );
 my %MEASURE         = (
 	http_access => [
@@ -194,8 +194,8 @@ sub search {
 		or die( '"' . $entry->{src} . "\" is unknown to Allani::Sources\n" );
 	my $tscol = $meta->{default_ts};
 
-	# Reuse Allani's whitelist for both the WHERE (via an accessor shim) and the
-	# selected columns; we fetch positionally and zip against its headers. The
+	# Reuse Allani's column/filter definitions for the WHERE (via an accessor shim)
+	# and the selected columns; we fetch positionally and zip against its headers. The
 	# time window (now-relative, or anchored around an event) appends its own
 	# binds after build_where's, in WHERE order.
 	my ( $where, $binds ) = Allani::Sources::build_where( $meta, Lilith::Allani::_Opt->new(%$filt) );
@@ -378,7 +378,7 @@ sub total {
     my $n = $reader->distinct( source => 'syslog', column => 'host' );
 
 The number of distinct non-null values of a dimension in the window. C<column>
-is whitelisted against the source's C<dims>. Aggregate sources only.
+must be one of the source's C<dims>. Aggregate sources only.
 
 =cut
 
@@ -401,7 +401,7 @@ sub distinct {
 
 The top values of a dimension in the window, as an array ref of
 C<< { value, count } >> ordered by the measure descending (ties by value).
-C<column> is whitelisted against the source's C<dims>; C<limit> defaults to 10.
+C<column> must be one of the source's C<dims>; C<limit> defaults to 10.
 C<measure> (default C<count>) picks what C<count> holds -- row count, or a summed
 numeric column from the source's catalog (see L</measures>), so "top vhosts by
 Total bytes" is a traffic panel.
@@ -588,7 +588,7 @@ sub _val_expr {
 	return $INET{$col} ? "host($col)" : "($col)::text";
 }
 
-# A group/count dimension, whitelisted against the source's Allani::Sources dims.
+# A group/count dimension, checked against the source's Allani::Sources dims (dies otherwise).
 sub _dim {
 	my ( $self, $meta, $col ) = @_;
 	die("a column is required\n")                            unless defined $col && $col ne '';

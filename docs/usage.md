@@ -147,7 +147,9 @@ All the standard Mojolicious server commands work. Read
 [security](security.md) before exposing it — it is unauthenticated.
 
 - **/search** — the same filters as the CLI search, in a form. Escalated
-  events are badged with a red **E**.
+  events are badged with a red **E**. The **When** control switches the time
+  window between *Last N min* (relative) and *Range* (an explicit From/To); the
+  range bounds are read in the server's timezone.
 - **/logs** — browse the logs an [Allani](https://github.com/LilithSec/Allani)
   store holds, when an `[allani]` block is configured. A source selector
   switches between syslog, http (access), http error, and an interleaved

@@ -118,7 +118,7 @@ the page and nav entry stay hidden.
 The connection is Allani's own, independent of Lilith's top-level `dsn`, so
 the two need not share a database (point it at the same one if they do).
 Lilith only ever reads. This needs [Allani](https://github.com/LilithSec/Allani)
-installed (it reuses `Allani::Sources` for the column/filter whitelist); it is
+installed (it reuses `Allani::Sources` for the accepted columns and filters); it is
 an optional dependency, so a config without `[allani]` does not require it.
 
 | key    | required | description                                             |

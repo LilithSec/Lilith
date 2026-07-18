@@ -56,8 +56,8 @@ sub index {
 	undef $around if defined $around && $around eq '';
 
 	# Forward only the filter params this source accepts (the reader derives that
-	# whitelist from Allani::Sources), so a param meant for another source cannot
-	# reach the query.
+	# set of accepted filters from Allani::Sources), so a param meant for another
+	# source cannot reach the query.
 	my %filters;
 	if ($reader) {
 		for my $name ( @{ $reader->filters($source) } ) {

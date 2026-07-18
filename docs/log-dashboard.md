@@ -53,7 +53,7 @@ Along the top:
   databases the web UI opens. Shown only when an MMDB is configured (see
   [configuration](configuration.md)).
 
-The dimensions and measures come from Allani's own per-source whitelist, and
+The dimensions and measures come from Allani's own per-source definitions, and
 every value is bound, so a panel can only group by or sum a column that source
 actually has.
 

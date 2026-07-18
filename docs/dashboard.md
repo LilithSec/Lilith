@@ -12,8 +12,9 @@ Along the top:
 
 - **Dashboard** — which saved board to show. Pick another to switch to it; the
   star (★) marks the default board (the one loaded first).
-- **Table** — which annal the widgets read: Suricata, Sagan, or CAPE. Applies to
-  every widget and the stat cards on the current board.
+- **Default table** — the annal the stat cards read, and the default for any
+  widget that does not set its own: Suricata, Sagan, or CAPE. Each widget can
+  override it (see the widget config below), so one board can span tables.
 - **Time range** — 1h / 6h / 24h / 7d.
 - **Show GPCD** — off by default. When off, `Generic Protocol Command Decode`
   alerts are excluded everywhere (as the search page hides them). Tick it to
@@ -22,7 +23,7 @@ Along the top:
 - **Edit** — toggles edit mode (see below). Its dropdown holds the board actions:
   **New dashboard**, **Rename**, **Set as default**, and **Delete**.
 
-The **Table**, **Time range**, and **Show GPCD** controls are per-board: each
+The **Default table**, **Time range**, and **Show GPCD** controls are per-board: each
 board remembers its own, restored when you switch to it. Changing them just
 re-draws until you save (in edit mode).
 
@@ -59,8 +60,8 @@ empty; the built-in `default` board comes seeded with the widget set below.
   GeoIP databases (needs an MMDB configured, see [configuration](configuration.md);
   otherwise the panel notes it is unavailable).
 
-The column pickers are driven by the backend's own whitelist, so they only offer
-columns that table actually supports.
+The column pickers are driven by the backend's own list of accepted columns, so
+they only offer columns that table actually supports.
 
 ### Measures
 

@@ -6,7 +6,7 @@ use Test::More;
 
 use_ok('Lilith::Allani') or BAIL_OUT('Lilith::Allani failed to load');
 
-# The reader reuses Allani::Sources for its whitelist; without Allani installed
+# The reader reuses Allani::Sources for its accepted columns/filters; without Allani installed
 # there is nothing to exercise, so skip the query-building assertions.
 plan skip_all => 'Allani (Allani::Sources) is not installed'
     unless eval { require Allani::Sources; 1 };
@@ -82,7 +82,7 @@ my $reader = Lilith::Allani->new( dsn => 'dbi:Pg:dbname=bogus' );
 
 {
     is_deeply( $reader->filters('syslog'), [qw( facility host message priority program )],
-        'syslog filters come from the Allani::Sources whitelist plus message' );
+        'syslog filters come from the Allani::Sources definitions plus message' );
 
     # message maps to raw->>'MESSAGE' (only syslog populates it), so the free-text
     # filter is offered for syslog and http_all but not the individual http tabs.
@@ -122,7 +122,7 @@ my $reader = Lilith::Allani->new( dsn => 'dbi:Pg:dbname=bogus' );
 
 # ---------------------------------------------------------------------------
 # Dashboard aggregation: dims(), total(), top(), timeseries() build the right
-# SQL and whitelist their inputs against Allani::Sources.
+# SQL and check their inputs against Allani::Sources.
 # ---------------------------------------------------------------------------
 
 {

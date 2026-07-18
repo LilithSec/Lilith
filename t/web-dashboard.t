@@ -38,6 +38,8 @@ sub app_for {
 		->element_exists( '#db-add-widget',                                   'has the Add widget button' )
 		->element_exists( '#widget-modal',                                    'has the widget config modal' )
 		->element_exists( '#wm-type',                                         'modal has a widget type selector' )
+		->element_exists( '#wm-table option[value="cape"]',                   'modal has a per-widget table selector' )
+		->element_exists( '#wm-table option[value=""]',                       'and a Follow-default-table option' )
 		->element_exists( '#wm-style option[value="pie"]',                    'modal offers a pie style' )
 		->element_exists( 'input#wm-limit[type="number"][min="1"][max="50"]', 'modal has a 1-50 count input' )
 		->element_exists( '#db-reset',                                        'has the reset-layout button' )
@@ -79,7 +81,7 @@ sub app_for {
 		->content_type_like( qr/javascript/, 'Chart.js served as javascript' )
 		->content_like( qr/Chart/, 'Chart.js body looks like the library' );
 
-	# A non-whitelisted column is rejected before any SQL, so no DB is needed.
+	# A column not in the accepted set is rejected before any SQL, so no DB is needed.
 	$t->get_ok('/api/dashboard/top?column=bogus')
 		->status_is( 400, 'bad column is a 400' )
 		->json_like( '/error', qr/not an aggregatable column/, 'error explains the bad column' );
@@ -193,6 +195,23 @@ SKIP: {
 
 	# A malformed body is rejected.
 	$t->post_ok( '/api/dashboard/layout' => json => { nope => 1 } )->status_is( 400, 'bad layout body is a 400' );
+
+	# Per-widget table: a valid table on a widget round-trips (so one board can
+	# span tables); an invalid one is dropped, leaving the widget to fall back to
+	# the board table.
+	my $mt = [
+		{ id => 'a', type => 'top',        config => { column => 'target',  table => 'cape' },  x => 0, y => 0, w => 4, h => 4 },
+		{ id => 'b', type => 'timeseries', config => { group_by => 'signature', table => 'sagan' }, x => 4, y => 0, w => 4, h => 4 },
+		{ id => 'c', type => 'top',        config => { column => 'src_ip',  table => 'bogus' }, x => 8, y => 0, w => 4, h => 4 },
+	];
+	$t->post_ok( '/api/dashboard/layout' => json => { layout => $mt } )
+		->status_is( 200, 'multi-table layout saved' )
+		->json_is( '/count', 3, 'all three widgets kept' );
+	$t->get_ok('/api/dashboard/layout')
+		->json_is( '/layout/0/config/table',   'cape',   'a valid per-widget table round-trips (cape)' )
+		->json_is( '/layout/1/config/table',   'sagan',  'a valid per-widget table round-trips (sagan)' )
+		->json_is( '/layout/2/config/column',  'src_ip', 'the widget with a bad table is still kept' )
+		->json_hasnt( '/layout/2/config/table', 'an invalid per-widget table is dropped' );
 
 	# ---- multiple dashboards + per-board settings ----
 	# The list starts with just the seeded default board.

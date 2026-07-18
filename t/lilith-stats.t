@@ -25,7 +25,7 @@ use_ok('Lilith::Stats') or BAIL_OUT('Lilith::Stats failed to load');
 	like( $@, qr/a column is required/, 'top without a column dies' );
 
 	eval { $s->top( table => 'suricata', column => 'raw' ) };
-	like( $@, qr/not an aggregatable column/, 'non-whitelisted column dies' );
+	like( $@, qr/not an aggregatable column/, 'a column not in the accepted set dies' );
 
 	eval { $s->timeseries( table => 'suricata', bucket => 'century' ) };
 	like( $@, qr/not a valid bucket/, 'bad bucket dies' );
@@ -36,12 +36,12 @@ use_ok('Lilith::Stats') or BAIL_OUT('Lilith::Stats failed to load');
 	eval { $s->top( table => 'suricata', column => 'classification', limit => '0' ) };
 	like( $@, qr/positive integer limit/, 'non-positive limit dies' );
 
-	# columns() exposes the whitelist and needs no database.
+	# columns() exposes the accepted columns and needs no database.
 	my %sc = map { $_ => 1 } @{ $s->columns('suricata') };
 	ok( $sc{classification} && $sc{src_ip} && $sc{signature}, 'columns(suricata) lists the dimensions' );
 	ok( !$sc{raw},                                            'columns omits non-dimension columns' );
 	my %cc = map { $_ => 1 } @{ $s->columns('cape') };
-	ok( $cc{target} && $cc{malscore} && !$cc{classification}, 'columns(cape) reflects the cape whitelist' );
+	ok( $cc{target} && $cc{malscore} && !$cc{classification}, 'columns(cape) reflects the accepted cape columns' );
 	my %sg = map { $_ => 1 } @{ $s->columns('sagan') };
 	ok( $sc{severity}, 'severity is a (virtual) suricata dimension' );
 	ok( $sc{mitre_tactic} && $sc{mitre_technique}, 'MITRE tactic/technique are suricata dimensions' );

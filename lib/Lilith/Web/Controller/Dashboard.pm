@@ -10,7 +10,10 @@ my $GPCD = 'Generic Protocol Command Decode';
 # carry. Anything else is dropped when a layout is stored, so an arbitrary posted
 # body cannot smuggle unknown widget types or config into the database.
 my %WIDGET_TYPE = map { $_ => 1 } qw( timeseries top countries );
-my %CONFIG_KEY  = map { $_ => 1 } qw( column group_by limit style measure );
+# 'table', when a widget carries its own valid one, lets a single board span
+# tables; a widget with none reads the board's table. See layout_save for how
+# an invalid table value is dropped (unlike the free-string config keys).
+my %CONFIG_KEY = map { $_ => 1 } qw( column group_by limit style measure table );
 
 =head1 NAME
 
@@ -20,9 +23,9 @@ Lilith::Web::Controller::Dashboard - dashboard page and its aggregation API.
 
 Serves the C</dashboard> shell and the C</api/dashboard/*> JSON endpoints that
 back its charts. All aggregation runs through L<Lilith::Stats> (reached via the
-C<lilith> helper), which whitelists every table/column/bucket, so request
-parameters are passed straight through and a bad one comes back as a 400 rather
-than reaching SQL.
+C<lilith> helper), which checks every table/column/bucket against a fixed set of
+accepted values, so request parameters are passed straight through and a bad one
+comes back as a 400 rather than reaching SQL.
 
 =cut
 
@@ -74,7 +77,7 @@ sub _clean_name {
 	return $name;
 }
 
-# The view state a board may carry, whitelisted the same way widget config is:
+# The view state a board may carry, cleaned the same way widget config is:
 # the table type, the go_back_minutes window, and the show_gpcd flag. Unknown
 # keys and bad values are dropped, so a posted settings blob cannot smuggle
 # anything into storage.
@@ -294,7 +297,7 @@ sub layout {
 
 C<GET /api/dashboard/columns?table=> -- the columns a widget on that table may
 group/count by, as C<< { table, columns => [ ... ] } >>. Drives the widget
-config pickers from the same whitelist the API validates against.
+config pickers from the same set of accepted columns the API validates against.
 
 =cut
 
@@ -352,7 +355,7 @@ sub layout_save {
 			unless defined $name;
 	}
 
-	# Keep only known widget types, their whitelisted config keys, and the integer
+	# Keep only known widget types, their known config keys, and the integer
 	# geometry, so an arbitrary posted body cannot smuggle anything into storage.
 	my @clean;
 	for my $w ( @{ $body->{layout} } ) {
@@ -365,9 +368,17 @@ sub layout_save {
 				next unless $CONFIG_KEY{$k};
 				my $v = $w->{config}{$k};
 				next if ref $v;
-				$cfg{$k} = ( $k eq 'limit' ) ? int($v) : '' . $v;
-			}
-		}
+				if ( $k eq 'limit' ) {
+					$cfg{$k} = int($v);
+				} elsif ( $k eq 'table' ) {
+					# a widget's own table lets one board span tables; an invalid
+					# value is dropped so the widget falls back to the board table
+					$cfg{$k} = '' . $v if $v =~ /\A(?:suricata|sagan|cape)\z/;
+				} else {
+					$cfg{$k} = '' . $v;
+				}
+			} ## end for my $k ( keys %{ $w->{config} } )
+		} ## end if ( ref $w->{config} eq 'HASH' )
 
 		push(
 			@clean,

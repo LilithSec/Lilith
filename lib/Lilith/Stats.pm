@@ -33,10 +33,10 @@ C<cape_alerts> for the web dashboard. Each method takes a short table type
 1440) and runs a single grouped query, leaning on the version-5 indexes so a
 time-windowed C<GROUP BY> range-scans rather than reading the whole table.
 
-Every table name, column name, and time bucket a caller passes is validated
-against a fixed whitelist before it reaches SQL, and the only interpolated
-scalars (the window and any limit) are checked to be integers, so callers may
-pass request parameters straight through without an injection risk.
+Every table name, column name, and time bucket a caller passes is checked
+against a fixed set of accepted names before it reaches SQL, and the only
+interpolated scalars (the window and any limit) are checked to be integers, so
+callers may pass request parameters straight through without an injection risk.
 
 Every method also accepts an optional C<exclude_classification> value; when set,
 rows with that classification are left out (this backs the dashboard's "hide
@@ -127,7 +127,7 @@ my %VIRTUAL = (
 # rows. Each is a named preset resolved to a SQL aggregate: 'sum'/'avg'/'max' of
 # a numeric 'expr', or 'distinct' count of a dimension 'col'. Ordered per table
 # for the widget picker; 'count' is always first. expr/col are server-defined, so
-# only the whitelisted name reaches SQL. This is what turns the flow byte/packet
+# only a name defined here reaches SQL. This is what turns the flow byte/packet
 # counters into top-talker and bandwidth panels and the ports into fan-out ones.
 my %MEASURE = (
 	suricata => [
@@ -390,8 +390,8 @@ sub timeseries {
     my $cols = $stats->columns('suricata');
 
 The sorted list of columns that may be grouped/counted by for a table -- the
-same whitelist the other methods validate against, exposed so the dashboard's
-widget pickers stay in sync with what the backend will accept.
+same set of accepted columns the other methods validate against, exposed so the
+dashboard's widget pickers stay in sync with what the backend will accept.
 
 =cut
 
@@ -467,7 +467,7 @@ sub _measure_expr {
 	return $agg . '(' . $m->{expr} . ')';    # sum / max / min
 } ## end sub _measure_expr
 
-# The raw SQL reference for a (whitelisted) column: a virtual column's grouping
+# The raw SQL reference for an already-validated column: a virtual column's grouping
 # expression, or the bare column name. This is what null checks, distinct, and
 # the timeseries top-groups subquery reference.
 sub _col_expr {

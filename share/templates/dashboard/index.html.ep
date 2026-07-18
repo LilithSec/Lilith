@@ -13,7 +13,10 @@
   /* Edit-only controls (Add widget, Reset, per-widget gear/×) are hidden until
      the Edit toggle adds .db-editing to the body. */
   body:not(.db-editing) .db-edit-only { display: none; }
+  /* outside edit mode the grid is locked, so drop the drag affordances too:
+     the move cursor and the drag-handle glyph before each widget title. */
   body:not(.db-editing) .db-handle { cursor: default; }
+  body:not(.db-editing) .db-handle::before { content: none; }
 </style>
 
 <div class="card mb-3 border-secondary">
@@ -24,7 +27,7 @@
         <select id="db-board" class="form-select form-select-sm" style="width:170px"></select>
       </div>
       <div class="col-auto">
-        <label class="form-label">Table</label>
+        <label class="form-label">Default table</label>
         <select id="db-table" class="form-select form-select-sm" style="width:120px">
           <option value="suricata" <%= $table eq 'suricata' ? 'selected' : '' %>>Suricata</option>
           <option value="sagan"    <%= $table eq 'sagan'    ? 'selected' : '' %>>Sagan</option>
@@ -96,6 +99,15 @@
       </div>
       <div class="modal-body">
         <div class="mb-2">
+          <label class="form-label small text-muted mb-1">Table</label>
+          <select id="wm-table" class="form-select form-select-sm">
+            <option value="">Follow default table</option>
+            <option value="suricata">Suricata</option>
+            <option value="sagan">Sagan</option>
+            <option value="cape">CAPE</option>
+          </select>
+        </div>
+        <div class="mb-2">
           <label class="form-label small text-muted mb-1">Type</label>
           <select id="wm-type" class="form-select form-select-sm">
             <option value="timeseries">Alerts over time</option>
@@ -126,8 +138,8 @@
           <label class="form-label small text-muted mb-1">Group by</label>
           <select id="wm-group" class="form-select form-select-sm"></select>
         </div>
-        <div class="text-muted small">Uses the dashboard's current table (<span id="wm-table"></span>),
-          time range, and GPCD setting.</div>
+        <div class="text-muted small">Time range and GPCD come from the dashboard controls; each
+          widget can read a different table, or follow the dashboard's Default table.</div>
       </div>
       <div class="modal-footer py-2 border-secondary">
         <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -229,12 +241,14 @@
   }
   function bucketUnit() { return state.mins <= 180 ? 'minute' : (state.mins <= 20160 ? 'hour' : 'day'); }
 
-  function qs(extra) {
-    var s = '?table=' + encodeURIComponent(state.table) + '&go_back_minutes=' + encodeURIComponent(state.mins);
+  function qsFor(table, extra) {
+    var s = '?table=' + encodeURIComponent(table) + '&go_back_minutes=' + encodeURIComponent(state.mins);
     if (state.showGpcd) { s += '&show_gpcd=1'; }
     for (var k in (extra || {})) { if (extra[k] !== undefined && extra[k] !== '') { s += '&' + k + '=' + encodeURIComponent(extra[k]); } }
     return s;
   }
+  // board-level query string (stat cards); widgets build their own via qsFor
+  function qs(extra) { return qsFor(state.table, extra); }
   function getJSON(url) {
     return fetch(url).then(function(response) {
       return response.json().then(function(data) {
@@ -265,12 +279,15 @@
     return name.replace(/_/g, ' ');
   }
   function widgetTitle(widget) {
-    var measure = measureLabel(state.table, widget.config.measure);
+    var wtable  = widget.config.table || state.table;
+    var measure = measureLabel(wtable, widget.config.measure);
+    // note the table only when the widget pins one different from the board's
+    var suffix = widget.config.table ? (' · ' + wtable) : '';
     if (widget.type === 'timeseries') {
-      return (measure || 'Alerts') + ' over time' + (widget.config.group_by ? ' (by ' + widget.config.group_by + ')' : '');
+      return (measure || 'Alerts') + ' over time' + (widget.config.group_by ? ' (by ' + widget.config.group_by + ')' : '') + suffix;
     }
-    if (widget.type === 'top')       { return 'Top ' + (widget.config.column || '') + (measure ? ' by ' + measure : ''); }
-    if (widget.type === 'countries') { return 'Source countries'; }
+    if (widget.type === 'top')       { return 'Top ' + (widget.config.column || '') + (measure ? ' by ' + measure : '') + suffix; }
+    if (widget.type === 'countries') { return 'Source countries' + suffix; }
     return 'Widget';
   }
   function widgetEl(widget) {
@@ -284,8 +301,8 @@
       + '<div class="card border-secondary h-100 mb-0 db-card"><div class="card-body p-2 d-flex flex-column">'
       +   '<div class="d-flex align-items-center mb-1">'
       +     '<h6 class="card-title db-handle mb-0 flex-grow-1 text-truncate" data-role="title"></h6>'
-      +     '<a href="#" class="db-wbtn text-secondary ms-2" data-act="config" title="Configure">&#9881;</a>'
-      +     '<a href="#" class="db-wbtn text-secondary ms-2" data-act="remove" title="Remove">&times;</a>'
+      +     '<a href="#" class="db-wbtn db-edit-only text-secondary ms-2" data-act="config" title="Configure">&#9881;</a>'
+      +     '<a href="#" class="db-wbtn db-edit-only text-secondary ms-2" data-act="remove" title="Remove">&times;</a>'
       +   '</div>'
       +   '<div class="text-muted small" data-role="note" style="display:none"></div>'
       +   '<div class="db-chart"><canvas data-role="canvas"></canvas></div>'
@@ -388,16 +405,17 @@
   function loadWidget(widget) {
     var canvas = document.getElementById('chart-' + widget.id);
     if (!canvas) { return; }
+    var wtable = widget.config.table || state.table;
     if (widget.type === 'top') {
-      getJSON('/api/dashboard/top' + qs({ column: widget.config.column, limit: widget.config.limit || 10, measure: widget.config.measure }))
+      getJSON('/api/dashboard/top' + qsFor(wtable, { column: widget.config.column, limit: widget.config.limit || 10, measure: widget.config.measure }))
         .then(function(data) { clearNote(widget); renderTop(widget, canvas, data.rows || []); })
         .catch(function(err) { showNote(widget, err.message); });
     } else if (widget.type === 'timeseries') {
-      getJSON('/api/dashboard/timeseries' + qs({ bucket: bucketUnit(), group_by: widget.config.group_by, top_groups: 6, measure: widget.config.measure }))
+      getJSON('/api/dashboard/timeseries' + qsFor(wtable, { bucket: bucketUnit(), group_by: widget.config.group_by, top_groups: 6, measure: widget.config.measure }))
         .then(function(data) { clearNote(widget); renderTimeseries(widget.id, canvas, data); })
         .catch(function(err) { showNote(widget, err.message); });
     } else if (widget.type === 'countries') {
-      getJSON('/api/dashboard/countries' + qs())
+      getJSON('/api/dashboard/countries' + qsFor(wtable))
         .then(function(data) { renderCountries(widget, canvas, data); })
         .catch(function(err) { showNote(widget, err.message); });
     }
@@ -494,13 +512,11 @@
     document.getElementById('wm-group-wrap').style.display   = (type === 'timeseries') ? '' : 'none';
     document.getElementById('wm-measure-wrap').style.display = (type === 'top' || type === 'timeseries') ? '' : 'none';
   }
-  function openModal(id) {
-    editingId = id || null;
-    var widget = id ? widgets.filter(function(x) { return x.id === id; })[0] : null;
-    document.getElementById('widget-modal-title').textContent = id ? 'Configure widget' : 'Add widget';
-    document.getElementById('wm-table').textContent = state.table;
-    document.getElementById('wm-type').value = widget ? widget.type : 'timeseries';
-    Promise.all([loadColumns(state.table), loadMeasures(state.table)]).then(function(results) {
+  // Fill the column/group/measure pickers from $table's columns/measures. With a
+  // widget, its saved selections are restored; without one (e.g. after the Table
+  // picker changes) they reset to that table's defaults.
+  function populateFields(table, widget) {
+    return Promise.all([loadColumns(table), loadMeasures(table)]).then(function(results) {
       var cols = results[0], meas = results[1];
       var colSel = document.getElementById('wm-column'), grpSel = document.getElementById('wm-group');
       var measSel = document.getElementById('wm-measure');
@@ -517,9 +533,22 @@
       document.getElementById('wm-style').value = (widget && widget.config.style) ? widget.config.style : 'bar';
       document.getElementById('wm-limit').value = (widget && widget.config.limit) ? widget.config.limit : 10;
       measSel.value = (widget && widget.config.measure) ? widget.config.measure : 'count';
-    }).catch(function() {}).then(function() { syncModalFields(); getModal().show(); });
+    });
+  }
+  function openModal(id) {
+    editingId = id || null;
+    var widget = id ? widgets.filter(function(x) { return x.id === id; })[0] : null;
+    document.getElementById('widget-modal-title').textContent = id ? 'Configure widget' : 'Add widget';
+    // '' = follow the board default (unpinned); a concrete table pins the widget
+    var pinned = (widget && widget.config.table) || '';
+    document.getElementById('wm-table').value = pinned;
+    document.getElementById('wm-type').value = widget ? widget.type : 'timeseries';
+    populateFields(pinned || state.table, widget).catch(function() {}).then(function() { syncModalFields(); getModal().show(); });
   }
   document.getElementById('wm-type').addEventListener('change', syncModalFields);
+  // Changing the widget's table re-loads its columns/measures (using the board
+  // default when set to Follow) and resets column/group/measure to that table's.
+  document.getElementById('wm-table').addEventListener('change', function() { populateFields(this.value || state.table, null); });
   document.getElementById('wm-save').addEventListener('click', function() {
     var type = document.getElementById('wm-type').value, config = {};
     var measure = document.getElementById('wm-measure').value;
@@ -532,6 +561,10 @@
     }
     if (type === 'timeseries') { var group = document.getElementById('wm-group').value; if (group) { config.group_by = group; } }
     if ((type === 'top' || type === 'timeseries') && measure && measure !== 'count') { config.measure = measure; }
+    // a concrete table pins the widget (even if it equals the current default);
+    // the empty "Follow default table" option leaves it following the board
+    var wtable = document.getElementById('wm-table').value;
+    if (wtable) { config.table = wtable; }
     if (editingId) {
       var widget = widgets.filter(function(x) { return x.id === editingId; })[0];
       if (widget) { widget.type = type; widget.config = config; }

@@ -24,11 +24,7 @@
           </select>
         </div>
 
-        <div class="col-auto">
-          <label class="form-label">Minutes back</label>
-          <input type="number" name="go_back_minutes" class="form-control form-control-sm"
-                 value="<%= $go_back_minutes %>" style="width:100px" min="1">
-        </div>
+        %= include 'partials/_time_range', tr_minutes => $go_back_minutes, tr_start => ( param('start') // '' ), tr_end => ( param('end') // '' )
 
         <div class="col-auto">
           <label class="form-label">Limit</label>
@@ -370,6 +366,7 @@
 %= include 'search/_results'
 % }
 
+<script src="/js/time-range.js"></script>
 <script>
 var _orderByCols = {
   suricata: ['timestamp','id','src_ip','dest_ip','src_port','dest_port','proto','app_proto',
@@ -652,4 +649,5 @@ document.addEventListener('DOMContentLoaded', function() {
   // currently on screen, but only when a search actually produced results.
   if (document.getElementById('search-results')) { setRefreshStatus(true); }
 });
+
 </script>

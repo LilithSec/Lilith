@@ -10,6 +10,7 @@ use DBI                  ();
 use Digest::SHA          qw(sha256_base64);
 use Sys::Syslog          qw( closelog openlog syslog );
 use POSIX                qw( strftime );
+use Time::Piece::Guess   ();
 use Lilith::Schema       ();
 use Lilith::Escalate     ();
 use Lilith::AutoEscalate ();
@@ -1250,6 +1251,17 @@ and negated items are ANDed.
 
 =cut
 
+# Validate and normalize a search start/end time to a canonical
+# 'YYYY-MM-DD HH:MM:SS' string (a server-local wall clock, bound as a value and
+# cast by the DB in its session timezone). Accepts anything Time::Piece::Guess
+# parses -- including a datetime-local 'YYYY-MM-DDTHH:MM' value. Dies on garbage.
+sub _parse_search_time {
+	my ( $label, $str ) = @_;
+	my $t = eval { Time::Piece::Guess->guess_to_object( $str, 1 ) };
+	die( '"' . $str . '" for ' . $label . " is not a parseable time\n" ) unless defined $t;
+	return $t->strftime('%Y-%m-%d %H:%M:%S');
+}
+
 sub search {
 	my ( $self, %opts ) = @_;
 
@@ -1278,7 +1290,6 @@ sub search {
 			die( '"' . $opts{go_back_minutes} . '" for go_back_minutes is not numeric' );
 		}
 	}
-	my $go_back_time = 'CURRENT_TIMESTAMP - interval \'' . $opts{go_back_minutes} . ' minutes\'';
 
 	if ( defined( $opts{order_dir} ) && $opts{order_dir} ne 'ASC' && $opts{order_dir} ne 'DESC' ) {
 		die( '"' . $opts{order_dir} . '" for order_dir must by either ASC or DESC' );
@@ -1293,7 +1304,25 @@ sub search {
 
 	my $schema = Lilith::Schema->connect( $self->{dsn}, $self->{user}, $self->{pass}, );
 
-	my $search = { $go_back_column => { '>=', \$go_back_time } };
+	# Time window on the type's time column. An explicit start and/or end (any
+	# Time::Piece::Guess-parseable time, e.g. a datetime-local value) gives a
+	# bounded range, bound as values and read in the DB session's timezone
+	# (server-local); with neither, fall back to the now-relative go_back_minutes.
+	my %time_cond;
+	if ( defined( $opts{start} ) && $opts{start} ne '' ) {
+		$time_cond{'>='} = _parse_search_time( 'start', $opts{start} );
+	}
+	if ( defined( $opts{end} ) && $opts{end} ne '' ) {
+		$time_cond{'<='} = _parse_search_time( 'end', $opts{end} );
+	}
+
+	my $search;
+	if (%time_cond) {
+		$search = { $go_back_column => \%time_cond };
+	} else {
+		my $go_back_time = 'CURRENT_TIMESTAMP - interval \'' . $opts{go_back_minutes} . ' minutes\'';
+		$search = { $go_back_column => { '>=', \$go_back_time } };
+	}
 
 	#
 	# add simple items

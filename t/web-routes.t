@@ -162,6 +162,46 @@ sub _make_app {
 }
 
 # ---------------------------------------------------------------------------
+# 2d.  Explicit time range — the When toggle and start/end passthrough
+# ---------------------------------------------------------------------------
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $t = Test::Mojo->new('Lilith::Web');
+
+    # the search form uses the reusable time-range control: a preset dropdown
+    # (relative) plus a Custom range of native date + 24h hour/minute fields
+    $t->get_ok('/search')->status_is( 200, 'search form renders' )
+        ->element_exists( 'div.time-range',                                'has the reusable time-range control' )
+        ->element_exists( 'select[data-role="preset"] option[value="custom"]', 'preset dropdown offers a Custom range' )
+        ->element_exists( 'select[data-role="preset"] option[value="43200"]',  'and relative presets (30 days)' )
+        ->element_exists( 'input[type="date"][data-role="start-date"]',    'custom range has a From date' )
+        ->element_exists( 'input[type="number"][data-role="start-hour"][max="23"]', 'and a 24-hour From hour' )
+        ->element_exists( 'input[type="hidden"][name="go_back_minutes"][data-role="minutes"]', 'emits go_back_minutes' )
+        ->element_exists( 'input[type="hidden"][name="start"][data-role="start"]', 'emits start' )
+        ->element_exists( 'script[src="/js/time-range.js"]',               'loads the shared time-range script' );
+
+    my %captured;
+    no warnings qw(redefine once);
+    local *Lilith::search = sub { my ( $self, %opts ) = @_; %captured = %opts; return []; };
+    use warnings qw(redefine once);
+
+    $t->get_ok('/search?search=1&start=2026-07-18T00:00&end=2026-07-18T12:00')
+        ->status_is( 200, 'range search renders 200' );
+    is( $captured{start}, '2026-07-18T00:00', 'start reaches search()' );
+    is( $captured{end},   '2026-07-18T12:00', 'end reaches search()' );
+
+    # with no range params, start/end are undef (relative window is used)
+    $t->get_ok('/search?search=1');
+    ok( !defined $captured{start}, 'no start param -> undef' );
+    ok( !defined $captured{end},   'no end param -> undef' );
+}
+
+# ---------------------------------------------------------------------------
 # 2c.  Auto-refresh partial render — GET /search?...&partial=1
 # ---------------------------------------------------------------------------
 

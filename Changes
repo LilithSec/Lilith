@@ -1,11 +1,21 @@
 Revision history for Lilith
 
 4.0.0	unreleased
+		 - Lilith::search now accepts an explicit start/end time window (any
+		   Time::Piece::Guess-parseable time, bound as values and read in the
+		   DB session timezone) as an alternative to the now-relative
+		   go_back_minutes; it ranges on the type's time column (stop for
+		   cape). The web search page gains a When toggle -- Last N min vs a
+		   Custom range (native date inputs plus 24-hour hour/minute number
+		   fields, no picker library) -- with only the active mode's params
+		   submitted. The control is a reusable partial
+		   (templates/partials/_time_range.html.ep + /js/time-range.js) so it
+		   can be dropped into other forms.
 		 - Add a read-only Logs page (/logs) to the web UI for browsing the
 		   logs an Allani store holds (syslog / http_access / http_error,
 		   plus an interleaved http view). It reads Allani over its own
 		   [allani] connection (dsn/user/pass) and reuses Allani::Sources
-		   as the column/filter whitelist, so it neither touches Lilith's
+		   as the source of accepted columns and filters, so it neither touches Lilith's
 		   alert schema nor requires the two to share a database. The page,
 		   its record view, and the nav entry stay hidden unless [allani]
 		   is configured; Allani is an optional (suggested) prereq.
@@ -49,10 +59,11 @@ Revision history for Lilith
 		   reconfigure and an x to remove, and the whole set drag/resizes
 		   and persists as before. The saved layout now stores each
 		   widget's type and config (not just its position), sanitized
-		   server-side against a type/config whitelist. A new
-		   GET /api/dashboard/columns endpoint (over Lilith::Stats->columns)
-		   drives the config pickers from the same whitelist the API
-		   validates against. A fresh or reset board starts from a
+		   server-side against a fixed set of accepted types and config keys.
+		   A new GET /api/dashboard/columns endpoint (over
+		   Lilith::Stats->columns) drives the config pickers from the same
+		   accepted columns the API validates against. A fresh or reset board
+		   starts from a
 		   built-in default widget set.
 		 - Make the dashboard panels draggable and resizable with
 		   Gridstack (vendored), laid out on a 12-column grid. The layout
@@ -80,7 +91,7 @@ Revision history for Lilith
 		   distinct, top, and (bucketed, optionally grouped) timeseries
 		   over the suricata/sagan/cape alert tables, windowed on
 		   timestamp (or stop for cape) and leaning on the version-5
-		   indexes. Table/column/bucket names are whitelisted and the
+		   indexes. Table/column/bucket names are checked against a fixed set and the
 		   window/limit are integer-checked, so request parameters can be
 		   passed straight through. Reachable as $lilith->stats.
 		 - Fix the migration fixture directories never installing. The

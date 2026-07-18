@@ -23,8 +23,8 @@ sub index {
 	my $order_by        = $self->param('order_by')        // '';
 
 	# Sanitize
-	$table     = 'suricata' unless $table     =~ /^(?:suricata|sagan|cape)$/;
-	$order_dir = 'DESC'     unless $order_dir =~ /^(?:ASC|DESC)$/;
+	$table     = 'suricata'                                  unless $table     =~ /^(?:suricata|sagan|cape)$/;
+	$order_dir = 'DESC'                                      unless $order_dir =~ /^(?:ASC|DESC)$/;
 	$order_by  = ( $table eq 'cape' ? 'stop' : 'timestamp' ) unless $order_by;
 
 	my $results;
@@ -61,17 +61,19 @@ sub index {
 			$results = $self->lilith->search(
 				table            => $table,
 				go_back_minutes  => $go_back_minutes,
+				start            => $self->param('start') || undef,
+				end              => $self->param('end')   || undef,
 				order_by         => $order_by,
 				order_dir        => $order_dir,
 				limit            => $limit,
 				offset           => $offset,
-				src_ip           => $self->param('src_ip')           || undef,
-				dest_ip          => $self->param('dest_ip')          || undef,
-				ip               => $self->param('ip')               || undef,
-				port             => $self->param('port')             || undef,
-				host             => $self->param('host')             || undef,
-				instance_host    => $self->param('instance_host')    || undef,
-				instance         => $self->param('instance')         || undef,
+				src_ip           => $self->param('src_ip')        || undef,
+				dest_ip          => $self->param('dest_ip')       || undef,
+				ip               => $self->param('ip')            || undef,
+				port             => $self->param('port')          || undef,
+				host             => $self->param('host')          || undef,
+				instance_host    => $self->param('instance_host') || undef,
+				instance         => $self->param('instance')      || undef,
 				class            => \@class,
 				signature        => $self->param('signature')        || undef,
 				app_proto        => $self->param('app_proto')        || undef,
@@ -128,7 +130,7 @@ sub index {
 	if ( $self->param('partial') && defined $results ) {
 		return $self->render( 'search/_results', layout => undef );
 	}
-}
+} ## end sub index
 
 sub _split_list {
 	my $str = shift;
