@@ -16,6 +16,7 @@ sub app_for {
 	print $fh 'dsn = "' . $c{dsn} . '"' . "\n";
 	print $fh 'user = "' . ( defined $c{user} ? $c{user} : '' ) . '"' . "\n";
 	print $fh 'pass = "' . ( defined $c{pass} ? $c{pass} : '' ) . '"' . "\n";
+	print $fh qq{[allani]\ndsn = "dbi:Pg:dbname=allani"\n} if $c{allani};
 	close $fh;
 	$ENV{LILITH_CONFIG} = $cf;
 	return Test::Mojo->new('Lilith::Web');
@@ -32,7 +33,7 @@ sub app_for {
 		->element_exists( 'select#db-table',                    'has the table selector' )
 		->element_exists( 'div.time-range select[data-role="preset"]', 'has the time-range control' )
 		->element_exists( 'script[src="/js/time-range.js"]',            'loads the shared time-range script' )
-		->element_exists( '#card-esc',                          'has the escalated card' )
+		->element_exists_not( '#card-total', 'the fixed stat strip is gone (now stat widgets)' )
 		->element_exists( 'input#db-gpcd[type="checkbox"]',     'has the Show GPCD checkbox' )
 		->element_exists_not( 'input#db-gpcd[checked]', 'Show GPCD is unchecked by default' )
 		->element_exists( 'div.grid-stack',                                   'has the (widget) gridstack container' )
@@ -41,6 +42,9 @@ sub app_for {
 		->element_exists( '#wm-type',                                         'modal has a widget type selector' )
 		->element_exists( '#wm-table option[value="cape"]',                   'modal has a per-widget table selector' )
 		->element_exists( '#wm-table option[value=""]',                       'and a Follow-default-table option' )
+		->element_exists_not( '#wm-table optgroup[label="Logs (Allani)"]', 'no log sources in the picker without Allani' )
+		->element_exists( '#wm-type option[value="stat"]',                    'modal offers a stat (text) widget type' )
+		->element_exists( '#wm-metric option[value="distinct"]',              'stat widget has a metric picker' )
 		->element_exists( '#wm-style option[value="pie"]',                    'modal offers a pie style' )
 		->element_exists( 'input#wm-limit[type="number"][min="1"][max="50"]', 'modal has a 1-50 count input' )
 		->element_exists( '#db-reset',                                        'has the reset-layout button' )
@@ -53,6 +57,12 @@ sub app_for {
 		->element_exists( '#board-modal',                                     'has the board-name modal' )
 		->element_exists( 'script[src="/vendor/gridstack/gridstack-all.js"]', 'pulls in Gridstack' )
 		->element_exists( 'script[src="/vendor/Chart.js"]',                   'pulls in Chart.js' );
+
+	# With Allani configured, a widget can target a log source too.
+	my $ta = app_for( dsn => 'dbi:Pg:dbname=test', allani => 1 );
+	$ta->get_ok('/dashboard')->status_is( 200, 'dashboard renders with Allani configured' )
+		->element_exists( '#wm-table optgroup[label="Logs (Allani)"] option[value="syslog"]',
+		'widget table picker offers Allani log sources when configured' );
 
 	# The vendored Gridstack assets are served.
 	$t->get_ok('/vendor/gridstack/gridstack-all.js')->status_is( 200, 'Gridstack JS served' );
@@ -118,15 +128,6 @@ SKIP: {
 
 	my $t = app_for( dsn => $pg->dsn, user => $pg->user, pass => $pg->pass );
 
-	$t->get_ok('/api/dashboard/summary?table=suricata')
-		->status_is( 200, 'summary ok' )
-		->json_is( '/total',                  3,           'summary total' )
-		->json_is( '/escalated',              0,           'summary escalated' )
-		->json_is( '/distinct_src_ip',        2,           'summary distinct src_ip' )
-		->json_is( '/distinct_detail',        2,           'summary distinct signatures' )
-		->json_is( '/detail_label',           'signature', 'summary detail label is signature' )
-		->json_is( '/busiest_instance/value', 'i',         'summary busiest instance' );
-
 	# The countries panel depends on whether GeoIP MMDBs are installed on the
 	# box running the tests, so assert its shape either way: disabled -> empty;
 	# enabled -> the geolocated top-IP counts sum back to the source-IP total.
@@ -151,21 +152,40 @@ SKIP: {
 		->status_is( 200, 'timeseries ok' )
 		->json_is( '/grouped', 1, 'timeseries reports grouped' );
 
+	# The stat (text) widget endpoint: one number + a label per metric.
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=total')
+		->status_is( 200, 'stat total ok' )
+		->json_is( '/value', 3,              'stat total value' )
+		->json_is( '/label', 'Total alerts', 'stat total label' );
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=distinct&column=src_ip')
+		->status_is( 200, 'stat distinct ok' )
+		->json_is( '/label', 'Unique src_ip', 'stat distinct label' )
+		->json_is( '/value', 2,               'stat distinct src_ip value' );
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=distinct&column=signature')
+		->json_is( '/value', 2, 'stat distinct signature value' );
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=escalated')
+		->status_is( 200, 'stat escalated ok' )
+		->json_is( '/value', 0,           'stat escalated value' )
+		->json_is( '/label', 'Escalated', 'stat escalated label' );
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=busiest&column=instance')
+		->json_like( '/value', qr/^i\s+\(\d+\)$/, 'stat busiest instance value (with count)' );
+
 	# An explicit absolute range bounds the query (preferred over go_back_minutes):
 	# a future window has nothing, a wide one has everything.
-	$t->get_ok('/api/dashboard/summary?table=suricata&start=2999-01-01+00:00')
-		->status_is( 200, 'future-range summary ok' )
-		->json_is( '/total', 0, 'a future start excludes every row' );
-	$t->get_ok('/api/dashboard/summary?table=suricata&start=2000-01-01+00:00&end=2999-01-01+00:00')
-		->status_is( 200, 'wide-range summary ok' )
-		->json_is( '/total', 3, 'a wide start/end range includes all rows' );
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=total&start=2999-01-01+00:00')
+		->status_is( 200, 'future-range stat ok' )
+		->json_is( '/value', 0, 'a future start excludes every row' );
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=total&start=2000-01-01+00:00&end=2999-01-01+00:00')
+		->status_is( 200, 'wide-range stat ok' )
+		->json_is( '/value', 3, 'a wide start/end range includes all rows' );
 
 	# The Show GPCD toggle: a GPCD row is hidden by default, included at show_gpcd=1.
 	$dbh->do( "insert into suricata_alerts (instance,host,timestamp,event_id,src_ip,classification)"
 			. " values ('i','h', now(), 'e', '3.3.3.3', 'Generic Protocol Command Decode')" );
-	$t->get_ok('/api/dashboard/summary?table=suricata')->json_is( '/total', 3, 'GPCD hidden by default' );
-	$t->get_ok('/api/dashboard/summary?table=suricata&show_gpcd=1')
-		->json_is( '/total', 4, 'GPCD included when show_gpcd=1' );
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=total')
+		->json_is( '/value', 3, 'GPCD hidden by default' );
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=total&show_gpcd=1')
+		->json_is( '/value', 4, 'GPCD included when show_gpcd=1' );
 
 	# Layout persistence: the seeded default board is empty; a POST is stored and
 	# read back (exercises Lilith::dashboard_get/save and the version-6 table).
@@ -213,15 +233,26 @@ SKIP: {
 		{ id => 'a', type => 'top',        config => { column => 'target',  table => 'cape' },  x => 0, y => 0, w => 4, h => 4 },
 		{ id => 'b', type => 'timeseries', config => { group_by => 'signature', table => 'sagan' }, x => 4, y => 0, w => 4, h => 4 },
 		{ id => 'c', type => 'top',        config => { column => 'src_ip',  table => 'bogus' }, x => 8, y => 0, w => 4, h => 4 },
+		{ id => 'd', type => 'top',        config => { column => 'program', table => 'syslog' }, x => 0, y => 4, w => 4, h => 4 },
+		{ id => 'e', type => 'stat', config => { metric => 'distinct', column => 'src_ip', label => 'My hosts', abbrev => 1 }, x => 4, y => 4, w => 2, h => 2 },
+		{ id => 'f', type => 'stat', config => { metric => 'nonsense' }, x => 6, y => 4, w => 2, h => 2 },
+		{ id => 'g', type => 'stat', config => { metric => 'total', abbrev => 'yes' }, x => 8, y => 4, w => 2, h => 2 },
 	];
 	$t->post_ok( '/api/dashboard/layout' => json => { layout => $mt } )
 		->status_is( 200, 'multi-table layout saved' )
-		->json_is( '/count', 3, 'all three widgets kept' );
+		->json_is( '/count', 7, 'all seven widgets kept' );
 	$t->get_ok('/api/dashboard/layout')
 		->json_is( '/layout/0/config/table',   'cape',   'a valid per-widget table round-trips (cape)' )
 		->json_is( '/layout/1/config/table',   'sagan',  'a valid per-widget table round-trips (sagan)' )
 		->json_is( '/layout/2/config/column',  'src_ip', 'the widget with a bad table is still kept' )
-		->json_hasnt( '/layout/2/config/table', 'an invalid per-widget table is dropped' );
+		->json_hasnt( '/layout/2/config/table', 'an invalid per-widget table is dropped' )
+		->json_is( '/layout/3/config/table',   'syslog', 'an Allani log source round-trips as a widget table' )
+		->json_is( '/layout/4/type',           'stat',      'a stat widget round-trips' )
+		->json_is( '/layout/4/config/metric',  'distinct',  'stat metric round-trips' )
+		->json_is( '/layout/4/config/label',   'My hosts',  'stat label round-trips' )
+		->json_is( '/layout/4/config/abbrev',  1,           'stat abbrev flag round-trips as 1' )
+		->json_hasnt( '/layout/5/config/metric', 'an invalid stat metric is dropped' )
+		->json_is( '/layout/6/config/abbrev',  1,           'a truthy abbrev value normalizes to 1' );
 
 	# ---- multiple dashboards + per-board settings ----
 	# The list starts with just the seeded default board.

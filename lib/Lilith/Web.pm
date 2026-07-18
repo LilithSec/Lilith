@@ -360,7 +360,7 @@ sub startup {
 	$r->get('/')->to( cb => sub { $_[0]->redirect_to('/search') } );
 	$r->get('/search')->to('search#index');
 	$r->get('/dashboard')->to('dashboard#index');
-	$r->get('/api/dashboard/summary')->to('dashboard#summary');
+	$r->get('/api/dashboard/stat')->to('dashboard#stat');
 	$r->get('/api/dashboard/top')->to('dashboard#top');
 	$r->get('/api/dashboard/timeseries')->to('dashboard#timeseries');
 	$r->get('/api/dashboard/countries')->to('dashboard#countries');
@@ -379,9 +379,12 @@ sub startup {
 	$r->get('/logs')->to('logs#index');
 	$r->get('/logs/dashboard')->to('logs#dashboard');
 	$r->get('/api/logs/summary')->to('logs#summary');
+	$r->get('/api/logs/stat')->to('logs#stat');
 	$r->get('/api/logs/top')->to('logs#top');
 	$r->get('/api/logs/timeseries')->to('logs#timeseries');
 	$r->get('/api/logs/countries')->to('logs#countries');
+	$r->get('/api/logs/columns')->to('logs#columns');
+	$r->get('/api/logs/measures')->to('logs#measures');
 	$r->get('/logs/:source/:id')->to('logs#view');
 	$r->get('/api/ipinfo/*ip')->to('api#ipinfo');
 	$r->get('/api/domaininfo/*domain')->to('api#domaininfo');

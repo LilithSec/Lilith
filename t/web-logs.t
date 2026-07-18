@@ -237,6 +237,17 @@ sub _app {
     # configured, 1 otherwise -- GeoIP availability is environment-dependent).
     $t->get_ok('/api/logs/countries?source=syslog')->status_is( 200, 'countries endpoint renders' )
         ->json_has( '/enabled', 'countries reports an enabled flag' );
+
+    # columns/measures endpoints (drive the alert dashboard's log-widget pickers)
+    $t->get_ok('/api/logs/columns?source=syslog')->status_is(200)
+        ->json_is( '/columns/0', 'program', 'columns endpoint returns the source dims' );
+    $t->get_ok('/api/logs/measures?source=syslog')->status_is(200)
+        ->json_is( '/measures/1/name', 'bytes', 'measures endpoint returns the source measures' );
+
+    # stat (text) widget endpoint for a log source
+    $t->get_ok('/api/logs/stat?source=syslog&metric=total')->status_is(200)
+        ->json_is( '/value', 1234,        'log stat total value' )
+        ->json_is( '/label', 'Total rows', 'log stat total label' );
 }
 
 # without [allani]: the dashboard renders a notice and the API is a 400

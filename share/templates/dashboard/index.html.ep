@@ -10,6 +10,11 @@
   .db-chart { position: relative; min-height: 0; flex: 1 1 auto; }
   .db-chart > canvas { position: absolute; inset: 0; }
   .db-wbtn { line-height: 1; text-decoration: none; }
+  /* stat (text) widgets are just a label + a number, so pack them tight enough
+     to sit one grid-row high instead of wasting a whole chart-sized cell. */
+  .db-stat .card-body { padding: .25rem .5rem !important; }
+  .db-stat .card-title { font-size: .7rem; text-transform: uppercase; letter-spacing: .02em; opacity: .75; }
+  .db-stat [data-role=stat-value] { font-size: 1.5rem; line-height: 1.1; }
   /* Edit-only controls (Add widget, Reset, per-widget gear/×) are hidden until
      the Edit toggle adds .db-editing to the body. */
   body:not(.db-editing) .db-edit-only { display: none; }
@@ -66,19 +71,6 @@
   </div>
 </div>
 
-<div class="row g-2 mb-3">
-  <div class="col-6 col-md"><div class="card border-secondary h-100"><div class="card-body py-2">
-    <div class="text-muted small">Total alerts</div><div class="fs-4 fw-bold" id="card-total">&ndash;</div></div></div></div>
-  <div class="col-6 col-md"><div class="card border-secondary h-100"><div class="card-body py-2">
-    <div class="text-muted small">Unique sources</div><div class="fs-4 fw-bold" id="card-src">&ndash;</div></div></div></div>
-  <div class="col-6 col-md"><div class="card border-secondary h-100"><div class="card-body py-2">
-    <div class="text-muted small" id="card-detail-label">Unique signatures</div><div class="fs-4 fw-bold" id="card-detail">&ndash;</div></div></div></div>
-  <div class="col-6 col-md"><div class="card border-secondary h-100"><div class="card-body py-2">
-    <div class="text-muted small">Escalated</div><div class="fs-4 fw-bold" id="card-esc">&ndash;</div></div></div></div>
-  <div class="col-6 col-md"><div class="card border-secondary h-100"><div class="card-body py-2">
-    <div class="text-muted small">Busiest sensor</div><div class="fs-6 fw-bold text-truncate" id="card-busiest">&ndash;</div></div></div></div>
-</div>
-
 <div class="grid-stack"></div>
 
 <!-- Add / configure widget modal -->
@@ -94,9 +86,18 @@
           <label class="form-label small text-muted mb-1">Table</label>
           <select id="wm-table" class="form-select form-select-sm">
             <option value="">Follow default table</option>
-            <option value="suricata">Suricata</option>
-            <option value="sagan">Sagan</option>
-            <option value="cape">CAPE</option>
+            <optgroup label="Alerts">
+              <option value="suricata">Suricata</option>
+              <option value="sagan">Sagan</option>
+              <option value="cape">CAPE</option>
+            </optgroup>
+            % if ($self->allani_enabled) {
+            <optgroup label="Logs (Allani)">
+              <option value="syslog">syslog</option>
+              <option value="http">http (access)</option>
+              <option value="http_error">http error</option>
+            </optgroup>
+            % }
           </select>
         </div>
         <div class="mb-2">
@@ -105,6 +106,16 @@
             <option value="timeseries">Alerts over time</option>
             <option value="top">Top values</option>
             <option value="countries">Source countries</option>
+            <option value="stat">Stat (text)</option>
+          </select>
+        </div>
+        <div class="mb-2" id="wm-metric-wrap">
+          <label class="form-label small text-muted mb-1">Metric</label>
+          <select id="wm-metric" class="form-select form-select-sm">
+            <option value="total">Total count</option>
+            <option value="distinct">Distinct values (of a column)</option>
+            <option value="escalated">Escalated count</option>
+            <option value="busiest">Busiest value (of a column)</option>
           </select>
         </div>
         <div class="mb-2" id="wm-column-wrap">
@@ -129,6 +140,14 @@
         <div class="mb-2" id="wm-group-wrap">
           <label class="form-label small text-muted mb-1">Group by</label>
           <select id="wm-group" class="form-select form-select-sm"></select>
+        </div>
+        <div class="mb-2" id="wm-label-wrap">
+          <label class="form-label small text-muted mb-1">Label (optional)</label>
+          <input type="text" id="wm-label" class="form-control form-control-sm" maxlength="40" placeholder="defaults from the metric">
+        </div>
+        <div class="mb-2 form-check" id="wm-abbrev-wrap">
+          <input type="checkbox" class="form-check-input" id="wm-abbrev">
+          <label class="form-check-label small text-muted" for="wm-abbrev">Abbreviate large numbers (2010 to 2k)</label>
         </div>
         <div class="text-muted small">Time range and GPCD come from the dashboard controls; each
           widget can read a different table, or follow the dashboard's Default table.</div>
@@ -173,6 +192,11 @@
   Chart.defaults.font.size = 11;
 
   var GROUP_COL = { suricata: 'classification', sagan: 'classification', cape: 'target' };
+  // Allani log sources a widget may target alongside the alert tables; such a
+  // widget fetches from /api/logs/* (source=) instead of /api/dashboard/* (table=).
+  var LOG_SOURCES = { syslog: 1, http: 1, http_error: 1 };
+  function isLogSource(s) { return !!LOG_SOURCES[s]; }
+  function apiBase(s) { return isLogSource(s) ? '/api/logs' : '/api/dashboard'; }
   var PALETTE = ['#dc3545','#0d6efd','#fd7e14','#20c997','#6f42c1','#ffc107','#0dcaf0','#d63384','#198754','#adb5bd'];
 
   // The widget set a fresh (or reset) dashboard starts with -- a Suricata-shaped
@@ -180,21 +204,26 @@
   // removed, or added to; on Sagan/CAPE a panel whose column does not exist just
   // notes so.
   var DEFAULT_WIDGETS = [
-    { type: 'timeseries', config: { group_by: 'classification' },         x: 0,  y: 0, w: 10, h: 4 },
-    { type: 'top',        config: { column: 'mitre_tactic', style: 'pie' },x: 10, y: 0, w: 2,  h: 4 },
-    { type: 'top',        config: { column: 'classification' },        x: 0, y: 4,  w: 4,  h: 4 },
-    { type: 'top',        config: { column: 'signature' },             x: 4, y: 4,  w: 4,  h: 4 },
-    { type: 'top',        config: { column: 'severity', style: 'pie' },      x: 8,  y: 4, w: 2, h: 4 },
-    { type: 'top',        config: { column: 'mitre_technique', style: 'pie' },x: 10, y: 4, w: 2, h: 4 },
-    { type: 'top',        config: { column: 'src_ip' },                x: 0, y: 8,  w: 4,  h: 4 },
-    { type: 'top',        config: { column: 'dest_ip' },               x: 4, y: 8,  w: 4,  h: 4 },
-    { type: 'top',        config: { column: 'dest_port' },             x: 8, y: 8,  w: 4,  h: 4 },
-    { type: 'top',        config: { column: 'app_proto', style: 'pie' },x: 0, y: 12, w: 4, h: 4 },
-    { type: 'top',        config: { column: 'instance' },              x: 4, y: 12, w: 4,  h: 4 },
-    { type: 'countries',  config: {},                                  x: 8, y: 12, w: 4,  h: 4 },
-    { type: 'timeseries', config: { measure: 'bytes' },                x: 0, y: 16, w: 12, h: 4 },
-    { type: 'top',        config: { column: 'src_ip', measure: 'bytes' },             x: 0, y: 20, w: 6, h: 4 },
-    { type: 'top',        config: { column: 'src_ip', measure: 'distinct_dest_port' },x: 6, y: 20, w: 6, h: 4 }
+    { type: 'stat', config: { metric: 'total' },                                                     x: 0, y: 0, w: 2, h: 1 },
+    { type: 'stat', config: { metric: 'distinct', column: 'src_ip', label: 'Unique sources' },       x: 2, y: 0, w: 2, h: 1 },
+    { type: 'stat', config: { metric: 'distinct', column: 'signature', label: 'Unique signatures' }, x: 4, y: 0, w: 2, h: 1 },
+    { type: 'stat', config: { metric: 'escalated' },                                                 x: 6, y: 0, w: 2, h: 1 },
+    { type: 'stat', config: { metric: 'busiest', column: 'instance', label: 'Busiest sensor' },      x: 8, y: 0, w: 4, h: 1 },
+    { type: 'timeseries', config: { group_by: 'classification' },         x: 0,  y: 1, w: 10, h: 4 },
+    { type: 'top',        config: { column: 'mitre_tactic', style: 'pie' },x: 10, y: 1, w: 2,  h: 4 },
+    { type: 'top',        config: { column: 'classification' },        x: 0, y: 5,  w: 4,  h: 4 },
+    { type: 'top',        config: { column: 'signature' },             x: 4, y: 5,  w: 4,  h: 4 },
+    { type: 'top',        config: { column: 'severity', style: 'pie' },      x: 8,  y: 5, w: 2, h: 4 },
+    { type: 'top',        config: { column: 'mitre_technique', style: 'pie' },x: 10, y: 5, w: 2, h: 4 },
+    { type: 'top',        config: { column: 'src_ip' },                x: 0, y: 9,  w: 4,  h: 4 },
+    { type: 'top',        config: { column: 'dest_ip' },               x: 4, y: 9,  w: 4,  h: 4 },
+    { type: 'top',        config: { column: 'dest_port' },             x: 8, y: 9,  w: 4,  h: 4 },
+    { type: 'top',        config: { column: 'app_proto', style: 'pie' },x: 0, y: 13, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'instance' },              x: 4, y: 13, w: 4,  h: 4 },
+    { type: 'countries',  config: {},                                  x: 8, y: 13, w: 4,  h: 4 },
+    { type: 'timeseries', config: { measure: 'bytes' },                x: 0, y: 17, w: 12, h: 4 },
+    { type: 'top',        config: { column: 'src_ip', measure: 'bytes' },             x: 0, y: 21, w: 6, h: 4 },
+    { type: 'top',        config: { column: 'src_ip', measure: 'distinct_dest_port' },x: 6, y: 21, w: 6, h: 4 }
   ];
 
   var state   = { board: 'default', table: '<%= $table %>', mins: <%= $go_back_minutes %>, start: '', end: '', showGpcd: <%= $show_gpcd ? 'true' : 'false' %> };
@@ -241,16 +270,15 @@
     return mins <= 180 ? 'minute' : (mins <= 20160 ? 'hour' : 'day');
   }
 
-  function qsFor(table, extra) {
-    var s = '?table=' + encodeURIComponent(table) + '&go_back_minutes=' + encodeURIComponent(state.mins);
-    if (state.showGpcd) { s += '&show_gpcd=1'; }
+  function qsFor(source, extra) {
+    var log = isLogSource(source);
+    var s = '?' + (log ? 'source' : 'table') + '=' + encodeURIComponent(source) + '&go_back_minutes=' + encodeURIComponent(state.mins);
+    if (!log && state.showGpcd) { s += '&show_gpcd=1'; }   // GPCD exclude is alert-only
     if (state.start) { s += '&start=' + encodeURIComponent(state.start); }
     if (state.end)   { s += '&end=' + encodeURIComponent(state.end); }
     for (var k in (extra || {})) { if (extra[k] !== undefined && extra[k] !== '') { s += '&' + k + '=' + encodeURIComponent(extra[k]); } }
     return s;
   }
-  // board-level query string (stat cards); widgets build their own via qsFor
-  function qs(extra) { return qsFor(state.table, extra); }
   function getJSON(url) {
     return fetch(url).then(function(response) {
       return response.json().then(function(data) {
@@ -290,6 +318,15 @@
     }
     if (widget.type === 'top')       { return 'Top ' + (widget.config.column || '') + (measure ? ' by ' + measure : '') + suffix; }
     if (widget.type === 'countries') { return 'Source countries' + suffix; }
+    if (widget.type === 'stat') {
+      if (widget.config.label) { return widget.config.label; }
+      var metric = widget.config.metric || 'total';
+      var lbl = metric === 'distinct'  ? ('Unique ' + (widget.config.column || '')) :
+                metric === 'escalated' ? 'Escalated' :
+                metric === 'busiest'   ? ('Busiest ' + (widget.config.column || '')) :
+                (isLogSource(wtable) ? 'Total rows' : 'Total alerts');
+      return lbl + suffix;
+    }
     return 'Widget';
   }
   function widgetEl(widget) {
@@ -298,20 +335,23 @@
     el.setAttribute('gs-id', widget.id);
     el.setAttribute('gs-x', widget.x); el.setAttribute('gs-y', widget.y);
     el.setAttribute('gs-w', widget.w); el.setAttribute('gs-h', widget.h);
+    var isStat = widget.type === 'stat';
     el.innerHTML =
       '<div class="grid-stack-item-content">'
-      + '<div class="card border-secondary h-100 mb-0 db-card"><div class="card-body p-2 d-flex flex-column">'
-      +   '<div class="d-flex align-items-center mb-1">'
+      + '<div class="card border-secondary h-100 mb-0 db-card' + (isStat ? ' db-stat' : '') + '"><div class="card-body p-2 d-flex flex-column">'
+      +   '<div class="d-flex align-items-center' + (isStat ? '' : ' mb-1') + '">'
       +     '<h6 class="card-title db-handle mb-0 flex-grow-1 text-truncate" data-role="title"></h6>'
       +     '<a href="#" class="db-wbtn db-edit-only text-secondary ms-2" data-act="config" title="Configure">&#9881;</a>'
       +     '<a href="#" class="db-wbtn db-edit-only text-secondary ms-2" data-act="remove" title="Remove">&times;</a>'
       +   '</div>'
       +   '<div class="text-muted small" data-role="note" style="display:none"></div>'
-      +   '<div class="db-chart"><canvas data-role="canvas"></canvas></div>'
+      +   (isStat
+            ? '<div class="flex-grow-1 d-flex align-items-center"><div class="fw-bold text-truncate" data-role="stat-value">&ndash;</div></div>'
+            : '<div class="db-chart"><canvas data-role="canvas"></canvas></div>')
       + '</div></div>'
       + '</div>';
     el.querySelector('[data-role=title]').textContent = widgetTitle(widget);
-    el.querySelector('canvas').id = 'chart-' + widget.id;
+    var cv = el.querySelector('canvas'); if (cv) { cv.id = 'chart-' + widget.id; }
     return el;
   }
   function itemFor(id) { return document.querySelector('.grid-stack-item[gs-id="' + id + '"]'); }
@@ -319,13 +359,15 @@
     var item = itemFor(widget.id); if (!item) { return; }
     item.querySelector('[data-role=note]').textContent = msg;
     item.querySelector('[data-role=note]').style.display = '';
-    item.querySelector('canvas').style.display = 'none';
+    var body = item.querySelector('canvas') || item.querySelector('[data-role=stat-value]');
+    if (body) { body.style.display = 'none'; }
     destroyChart(widget.id);
   }
   function clearNote(widget) {
     var item = itemFor(widget.id); if (!item) { return; }
     item.querySelector('[data-role=note]').style.display = 'none';
-    item.querySelector('canvas').style.display = '';
+    var body = item.querySelector('canvas') || item.querySelector('[data-role=stat-value]');
+    if (body) { body.style.display = ''; }
   }
 
   // ---- chart renderers ----
@@ -395,36 +437,47 @@
   }
 
   // ---- data loading ----
-  function renderCards(data) {
-    document.getElementById('card-total').textContent  = data.total;
-    document.getElementById('card-src').textContent    = data.distinct_src_ip;
-    document.getElementById('card-detail').textContent = data.distinct_detail;
-    document.getElementById('card-detail-label').textContent = 'Unique ' + data.detail_label + 's';
-    document.getElementById('card-esc').textContent    = data.escalated;
-    var busiest = data.busiest_instance;
-    document.getElementById('card-busiest').textContent = busiest ? (busiest.value + ' (' + busiest.count + ')') : '–';
+  function loadStat(widget, base, wtable) {
+    var item = itemFor(widget.id); if (!item) { return; }
+    var valEl = item.querySelector('[data-role=stat-value]'); if (!valEl) { return; }
+    getJSON(base + '/stat' + qsFor(wtable, { metric: widget.config.metric, column: widget.config.column }))
+      .then(function(data) {
+        clearNote(widget);
+        var v = data.value;
+        var fmtd = (typeof v === 'number')
+          ? (widget.config.abbrev ? fmtNum(v) : v.toLocaleString())
+          : String(v);
+        valEl.textContent = (v === undefined || v === null) ? '–' : fmtd;
+        valEl.title = valEl.textContent;
+      })
+      .catch(function(err) { showNote(widget, err.message); });
   }
   function loadWidget(widget) {
+    var wtable = widget.config.table || state.table;
+    var base = apiBase(wtable);
+    if (widget.type === 'stat') { return loadStat(widget, base, wtable); }
     var canvas = document.getElementById('chart-' + widget.id);
     if (!canvas) { return; }
-    var wtable = widget.config.table || state.table;
     if (widget.type === 'top') {
-      getJSON('/api/dashboard/top' + qsFor(wtable, { column: widget.config.column, limit: widget.config.limit || 10, measure: widget.config.measure }))
+      getJSON(base + '/top' + qsFor(wtable, { column: widget.config.column, limit: widget.config.limit || 10, measure: widget.config.measure }))
         .then(function(data) { clearNote(widget); renderTop(widget, canvas, data.rows || []); })
         .catch(function(err) { showNote(widget, err.message); });
     } else if (widget.type === 'timeseries') {
-      getJSON('/api/dashboard/timeseries' + qsFor(wtable, { bucket: bucketUnit(), group_by: widget.config.group_by, top_groups: 6, measure: widget.config.measure }))
-        .then(function(data) { clearNote(widget); renderTimeseries(widget.id, canvas, data); })
+      getJSON(base + '/timeseries' + qsFor(wtable, { bucket: bucketUnit(), group_by: widget.config.group_by, top_groups: 6, measure: widget.config.measure }))
+        .then(function(data) {
+          // log timeseries buckets are ISO strings; the renderer wants epoch seconds
+          if (isLogSource(wtable)) { (data.rows || []).forEach(function(r) { r.bucket = Math.floor(new Date(r.bucket).getTime() / 1000); }); }
+          clearNote(widget); renderTimeseries(widget.id, canvas, data);
+        })
         .catch(function(err) { showNote(widget, err.message); });
     } else if (widget.type === 'countries') {
-      getJSON('/api/dashboard/countries' + qsFor(wtable))
+      getJSON(base + '/countries' + qsFor(wtable))
         .then(function(data) { renderCountries(widget, canvas, data); })
         .catch(function(err) { showNote(widget, err.message); });
     }
   }
   function refresh() {
     clearError();
-    getJSON('/api/dashboard/summary' + qs()).then(renderCards).catch(function(err) { showError(err.message); });
     widgets.forEach(loadWidget);
   }
 
@@ -494,21 +547,30 @@
   // ---- widget config modal ----
   var modal, editingId = null;
   function getModal() { modal = modal || new bootstrap.Modal(document.getElementById('widget-modal')); return modal; }
-  function loadColumns(table) {
-    if (colsCache[table]) { return Promise.resolve(colsCache[table]); }
-    return getJSON('/api/dashboard/columns?table=' + encodeURIComponent(table)).then(function(data) {
-      colsCache[table] = data.columns || []; return colsCache[table];
+  function loadColumns(source) {
+    if (colsCache[source]) { return Promise.resolve(colsCache[source]); }
+    var key = isLogSource(source) ? 'source' : 'table';
+    return getJSON(apiBase(source) + '/columns?' + key + '=' + encodeURIComponent(source)).then(function(data) {
+      colsCache[source] = data.columns || []; return colsCache[source];
     });
   }
-  function loadMeasures(table) {
-    if (measuresCache[table]) { return Promise.resolve(measuresCache[table]); }
-    return getJSON('/api/dashboard/measures?table=' + encodeURIComponent(table)).then(function(data) {
-      measuresCache[table] = data.measures || []; return measuresCache[table];
+  function loadMeasures(source) {
+    if (measuresCache[source]) { return Promise.resolve(measuresCache[source]); }
+    var key = isLogSource(source) ? 'source' : 'table';
+    return getJSON(apiBase(source) + '/measures?' + key + '=' + encodeURIComponent(source)).then(function(data) {
+      measuresCache[source] = data.measures || []; return measuresCache[source];
     });
   }
   function syncModalFields() {
     var type = document.getElementById('wm-type').value;
-    document.getElementById('wm-column-wrap').style.display  = (type === 'top') ? '' : 'none';
+    var metric = document.getElementById('wm-metric').value;
+    var isStat = (type === 'stat');
+    var statNeedsColumn = isStat && (metric === 'distinct' || metric === 'busiest');
+    document.getElementById('wm-metric-wrap').style.display = isStat ? '' : 'none';
+    document.getElementById('wm-label-wrap').style.display  = isStat ? '' : 'none';
+    // abbreviation only applies to numeric metrics; busiest is a "value (count)" string
+    document.getElementById('wm-abbrev-wrap').style.display = (isStat && metric !== 'busiest') ? '' : 'none';
+    document.getElementById('wm-column-wrap').style.display = (type === 'top' || statNeedsColumn) ? '' : 'none';
     document.getElementById('wm-style-wrap').style.display   = (type === 'top') ? '' : 'none';
     document.getElementById('wm-limit-wrap').style.display   = (type === 'top') ? '' : 'none';
     document.getElementById('wm-group-wrap').style.display   = (type === 'timeseries') ? '' : 'none';
@@ -530,7 +592,7 @@
       meas.forEach(function(measure) {
         var option = document.createElement('option'); option.value = measure.name; option.textContent = measure.label; measSel.appendChild(option);
       });
-      if (widget && widget.type === 'top') { colSel.value = widget.config.column || ''; }
+      if (widget && (widget.type === 'top' || widget.type === 'stat')) { colSel.value = widget.config.column || ''; }
       if (widget && widget.type === 'timeseries') { grpSel.value = widget.config.group_by || ''; }
       document.getElementById('wm-style').value = (widget && widget.config.style) ? widget.config.style : 'bar';
       document.getElementById('wm-limit').value = (widget && widget.config.limit) ? widget.config.limit : 10;
@@ -545,9 +607,13 @@
     var pinned = (widget && widget.config.table) || '';
     document.getElementById('wm-table').value = pinned;
     document.getElementById('wm-type').value = widget ? widget.type : 'timeseries';
+    document.getElementById('wm-metric').value = (widget && widget.config.metric) ? widget.config.metric : 'total';
+    document.getElementById('wm-label').value = (widget && widget.config.label) ? widget.config.label : '';
+    document.getElementById('wm-abbrev').checked = !!(widget && widget.config.abbrev);
     populateFields(pinned || state.table, widget).catch(function() {}).then(function() { syncModalFields(); getModal().show(); });
   }
   document.getElementById('wm-type').addEventListener('change', syncModalFields);
+  document.getElementById('wm-metric').addEventListener('change', syncModalFields);
   // Changing the widget's table re-loads its columns/measures (using the board
   // default when set to Follow) and resets column/group/measure to that table's.
   document.getElementById('wm-table').addEventListener('change', function() { populateFields(this.value || state.table, null); });
@@ -563,6 +629,14 @@
     }
     if (type === 'timeseries') { var group = document.getElementById('wm-group').value; if (group) { config.group_by = group; } }
     if ((type === 'top' || type === 'timeseries') && measure && measure !== 'count') { config.measure = measure; }
+    if (type === 'stat') {
+      var metric = document.getElementById('wm-metric').value;
+      config.metric = metric;
+      if (metric === 'distinct' || metric === 'busiest') { config.column = document.getElementById('wm-column').value; }
+      var label = document.getElementById('wm-label').value.trim();
+      if (label) { config.label = label; }
+      if (metric !== 'busiest' && document.getElementById('wm-abbrev').checked) { config.abbrev = 1; }
+    }
     // a concrete table pins the widget (even if it equals the current default);
     // the empty "Follow default table" option leaves it following the board
     var wtable = document.getElementById('wm-table').value;

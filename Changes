@@ -15,6 +15,23 @@ Revision history for Lilith
 		   explicit start/end absolute range (preferred over go_back_minutes);
 		   on the alert dashboard an absolute range is a live override, not
 		   saved with the board.
+		 - Add a Stat (text) widget type to /dashboard: a single number --
+		   Total / Distinct-of-a-column / Escalated / Busiest-value -- with an
+		   optional custom label, backed by GET /api/{dashboard,logs}/stat.
+		   Numbers are shown in full with thousands separators by default; an
+		   Abbreviate large numbers config toggle shortens them (2010 -> 2k).
+		 - Replace the fixed stat-card strip atop /dashboard with stat widgets:
+		   the built-in board now seeds Total alerts, Unique sources, Unique
+		   signatures, Escalated, and Busiest sensor as ordinary Stat widgets in
+		   the top row, so they move, retype, retable, and remove like any other.
+		   The now-unused GET /api/dashboard/summary endpoint is removed (its
+		   numbers are served per-widget by /api/dashboard/stat).
+		 - The configurable /dashboard can now host Allani log widgets: a
+		   widget's Table picker offers the log sources (syslog/http/http_error)
+		   when [allani] is configured, and such a widget reads from
+		   /api/logs/* (with that source's dims/measures) instead of the alert
+		   tables, so one board can mix alert and log graphs. Adds
+		   /api/logs/{columns,measures}; Stat widgets work per log source too.
 		 - Add a read-only Logs page (/logs) to the web UI for browsing the
 		   logs an Allani store holds (syslog / http_access / http_error,
 		   plus an interleaved http view). It reads Allani over its own
@@ -86,7 +103,7 @@ Revision history for Lilith
 		   source countries chart resolved through the GeoIP databases,
 		   with a table and time-range selector. Backed by
 		   Lilith::Web::Controller::Dashboard and the
-		   /api/dashboard/{summary,top,timeseries,countries} JSON endpoints
+		   /api/dashboard/{stat,top,timeseries,countries} JSON endpoints
 		   over Lilith::Stats, drawn with a vendored Chart.js. A "Show
 		   GPCD" checkbox (off by default) toggles whether Generic Protocol
 		   Command Decode alerts are included. A Dashboard (and Search)

@@ -218,6 +218,46 @@ sub summary {
 	);
 } ## end sub summary
 
+=head2 stat
+
+C<GET /api/logs/stat?metric=&column=> -- a single number for a stat (text)
+widget, as C<< { value, label } >>. C<metric> is C<total>, C<distinct> (of
+C<column>), or C<busiest> (the top value of C<column>).
+
+=cut
+
+sub stat {
+	my $self = shift;
+	my ( $source, $mins, @range ) = $self->_dparams;
+	my $metric = $self->param('metric') // 'total';
+	my $column = $self->param('column');
+
+	return $self->_ljson(
+		sub {
+			my $r = shift;
+			if ( $metric eq 'distinct' ) {
+				return {
+					value => $r->distinct( source => $source, column => $column, go_back_minutes => $mins, @range ),
+					label => 'Unique ' . ( $column // '' ),
+				};
+			}
+			if ( $metric eq 'busiest' ) {
+				my $rows
+					= $r->top( source => $source, column => $column, limit => 1, go_back_minutes => $mins, @range );
+				my $busiest = $rows->[0];
+				return {
+					value => ( $busiest ? $busiest->{value} . ' (' . $busiest->{count} . ')' : undef ),
+					label => 'Busiest ' . ( $column // '' ),
+				};
+			}
+			return {
+				value => $r->total( source => $source, go_back_minutes => $mins, @range ),
+				label => 'Total rows'
+			};
+		}
+	);
+} ## end sub stat
+
 =head2 top
 
 C<GET /api/logs/top?column=&limit=&measure=> -- the top values of a dimension,
@@ -316,6 +356,34 @@ sub countries {
 		}
 	);
 } ## end sub countries
+
+=head2 columns
+
+C<GET /api/logs/columns?source=> -- the dimensions a widget on that source may
+group/count by, as C<< { source, columns => [ ... ] } >>. Lets the alert
+dashboard's log widgets drive their config pickers, mirroring
+C</api/dashboard/columns>.
+
+=cut
+
+sub columns {
+	my $self   = shift;
+	my $source = $self->param('source') // 'syslog';
+	return $self->_ljson( sub { return { source => $source, columns => $_[0]->dims($source) }; } );
+}
+
+=head2 measures
+
+C<GET /api/logs/measures?source=> -- the measures a widget on that source may
+aggregate by, as C<< { source, measures => [ { name, label } ] } >>.
+
+=cut
+
+sub measures {
+	my $self   = shift;
+	my $source = $self->param('source') // 'syslog';
+	return $self->_ljson( sub { return { source => $source, measures => $_[0]->measures($source) }; } );
+}
 
 # Shared source/window parsing for the dashboard API: the source, the relative
 # window, and an absolute start/end range as a (possibly empty) list of pairs the

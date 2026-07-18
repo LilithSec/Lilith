@@ -9,11 +9,11 @@ my $GPCD = 'Generic Protocol Command Decode';
 # Widget model: the types a saved layout may contain and the config keys each may
 # carry. Anything else is dropped when a layout is stored, so an arbitrary posted
 # body cannot smuggle unknown widget types or config into the database.
-my %WIDGET_TYPE = map { $_ => 1 } qw( timeseries top countries );
+my %WIDGET_TYPE = map { $_ => 1 } qw( timeseries top countries stat );
 # 'table', when a widget carries its own valid one, lets a single board span
 # tables; a widget with none reads the board's table. See layout_save for how
 # an invalid table value is dropped (unlike the free-string config keys).
-my %CONFIG_KEY = map { $_ => 1 } qw( column group_by limit style measure table );
+my %CONFIG_KEY = map { $_ => 1 } qw( column group_by limit style measure table metric label abbrev );
 
 =head1 NAME
 
@@ -123,44 +123,52 @@ sub index {
 	return;
 } ## end sub index
 
-=head2 summary
+=head2 stat
 
-C<GET /api/dashboard/summary> -- the stat-card numbers: total alerts, distinct
-source IPs, a per-table "detail" distinct (signatures for suricata/sagan,
-targets for cape), and the busiest instance.
+C<GET /api/dashboard/stat?metric=&column=> -- a single number for a stat (text)
+widget, as C<< { value, label } >>. C<metric> is C<total>, C<distinct> (of
+C<column>), C<escalated>, or C<busiest> (the top value of C<column>).
 
 =cut
 
-sub summary {
+sub stat {
 	my $self = shift;
 	my ( $table, $mins, @filter ) = $self->_params;
-
-	# suricata/sagan carry signatures; cape does not, so fall back to target.
-	my $detail_col = ( $table eq 'cape' ) ? 'target' : 'signature';
+	my $metric = $self->param('metric') // 'total';
+	my $column = $self->param('column');
 
 	return $self->_json(
 		sub {
-			my $stats   = $self->lilith->stats;
-			my $busiest = $stats->top(
-				table           => $table,
-				column          => 'instance',
-				limit           => 1,
-				go_back_minutes => $mins,
-				@filter
-			);
+			my $stats = $self->lilith->stats;
+			if ( $metric eq 'distinct' ) {
+				return {
+					value =>
+						$stats->distinct( table => $table, column => $column, go_back_minutes => $mins, @filter ),
+					label => 'Unique ' . ( $column // '' ),
+				};
+			}
+			if ( $metric eq 'escalated' ) {
+				return {
+					value => $stats->escalated( table => $table, go_back_minutes => $mins, @filter ),
+					label => 'Escalated',
+				};
+			}
+			if ( $metric eq 'busiest' ) {
+				my $rows
+					= $stats->top( table => $table, column => $column, limit => 1, go_back_minutes => $mins, @filter );
+				my $busiest = $rows->[0];
+				return {
+					value => ( $busiest ? $busiest->{value} . ' (' . $busiest->{count} . ')' : undef ),
+					label => 'Busiest ' . ( $column // '' ),
+				};
+			}
 			return {
-				total           => $stats->total( table => $table, go_back_minutes => $mins, @filter ),
-				escalated       => $stats->escalated( table => $table, go_back_minutes => $mins, @filter ),
-				distinct_src_ip =>
-					$stats->distinct( table => $table, column => 'src_ip', go_back_minutes => $mins, @filter ),
-				distinct_detail =>
-					$stats->distinct( table => $table, column => $detail_col, go_back_minutes => $mins, @filter ),
-				detail_label     => $detail_col,
-				busiest_instance => $busiest->[0],
+				value => $stats->total( table => $table, go_back_minutes => $mins, @filter ),
+				label => 'Total alerts'
 			};
 		}
 	);
-} ## end sub summary
+} ## end sub stat
 
 =head2 top
 
@@ -378,9 +386,19 @@ sub layout_save {
 				if ( $k eq 'limit' ) {
 					$cfg{$k} = int($v);
 				} elsif ( $k eq 'table' ) {
-					# a widget's own table lets one board span tables; an invalid
-					# value is dropped so the widget falls back to the board table
-					$cfg{$k} = '' . $v if $v =~ /\A(?:suricata|sagan|cape)\z/;
+					# a widget's own source lets one board mix alert tables and Allani
+					# log sources; an invalid value is dropped so the widget falls back
+					# to the board table
+					$cfg{$k} = '' . $v if $v =~ /\A(?:suricata|sagan|cape|syslog|http|http_error)\z/;
+				} elsif ( $k eq 'metric' ) {
+					# the stat (text) widget's metric; invalid values are dropped
+					$cfg{$k} = '' . $v if $v =~ /\A(?:total|distinct|escalated|busiest)\z/;
+				} elsif ( $k eq 'label' ) {
+					$cfg{$k} = substr( '' . $v, 0, 60 );
+				} elsif ( $k eq 'abbrev' ) {
+					# stat (text) widget: numbers are exact by default; this opts into
+					# abbreviating them (2010 -> 2k)
+					$cfg{$k} = $v ? 1 : 0;
 				} else {
 					$cfg{$k} = '' . $v;
 				}

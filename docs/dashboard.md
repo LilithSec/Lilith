@@ -12,9 +12,9 @@ Along the top:
 
 - **Dashboard** — which saved board to show. Pick another to switch to it; the
   star (★) marks the default board (the one loaded first).
-- **Default table** — the annal the stat cards read, and the default for any
-  widget that does not set its own: Suricata, Sagan, or CAPE. Each widget can
-  override it (see the widget config below), so one board can span tables.
+- **Default table** — the default annal for any widget that does not set its
+  own: Suricata, Sagan, or CAPE. Each widget can override it (see the widget
+  config below), so one board can span tables.
 - **Time range** — a preset relative window (Last hour … Last 30 days) or a
   **Custom range** with From/To pickers (native date plus 24-hour hour/minute).
   A relative window is what the board saves; a custom absolute range is a live
@@ -30,9 +30,10 @@ The **Default table**, **Time range**, and **Show GPCD** controls are per-board:
 board remembers its own, restored when you switch to it. Changing them just
 re-draws until you save (in edit mode).
 
-Below the controls is a fixed strip of stat cards (total alerts, unique sources,
-a per-table detail count, escalated, and the busiest sensor), and then the
-widget grid.
+Below the controls is the widget grid. The built-in board opens with a row of
+**stat widgets** across the top (total alerts, unique sources, unique
+signatures, escalated, and the busiest sensor); these are ordinary widgets, so
+they can be moved, retyped, retabled, or removed like any other.
 
 ## Edit mode
 
@@ -62,6 +63,14 @@ empty; the built-in `default` board comes seeded with the widget set below.
 - **Source countries** — the busiest source IPs resolved to countries through the
   GeoIP databases (needs an MMDB configured, see [configuration](configuration.md);
   otherwise the panel notes it is unavailable).
+- **Stat (text)** — a single big number: the **Total** count, **Distinct** values
+  of a column, **Escalated** count, or the **Busiest** value of a column, with an
+  optional custom label (defaulting from the metric). Numbers are shown in full
+  with thousands separators by default; tick **Abbreviate large numbers** to
+  shorten them (2010 → 2k) instead. The row of numbers at the
+  top of the built-in board — Total alerts, Unique sources/signatures, Escalated,
+  busiest sensor — is just these widgets, movable and per-table (or
+  per-log-source) like any other.
 
 The column pickers are driven by the backend's own list of accepted columns, so
 they only offer columns that table actually supports.
@@ -79,6 +88,17 @@ aggregate, instead of just counting rows:
   "Top values of `src_ip` by Distinct destination ports" surfaces **port scans /
   fan-out**.
 - **Average / Max malscore, Total size** (CAPE).
+
+## Allani log widgets
+
+When an [Allani](https://github.com/LilithSec/Allani) store is configured
+(`[allani]`), a widget's **Table** picker also offers the log sources — `syslog`,
+`http (access)`, `http error` — under a *Logs (Allani)* group. Such a widget
+reads from the log store instead of the alert tables, with that source's own
+dimensions and measures (e.g. top programs for syslog, top vhosts by Total bytes
+for http), so one board can mix alert and log graphs. The **Top values**,
+**Alerts over time**, **Source countries**, and **Stat (text)** widget types all
+work against a log source too.
 
 ## Recipe panels
 
