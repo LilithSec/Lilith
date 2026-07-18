@@ -35,23 +35,23 @@
       <tbody>
         % for my $row (@$results) {
         <tr>
-          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a><% if (my $ec = $escalated->{$row->{id}}) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $ec %> time<%= $ec == 1 ? '' : 's' %>">E</span><% } %></td>
+          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a><% if (my $escalation_count = $escalated->{$row->{id}}) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $escalation_count %> time<%= $escalation_count == 1 ? '' : 's' %>">E</span><% } %></td>
           <td><%= $row->{timestamp} // '' %></td>
-          <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
-          <td class="col-host" style="display:none"><% if (my $i = $row->{host}) { %><a href="#" class="host-filter" data-host="<%= $i %>"><%= $i %></a><% } %></td>
-          <td><% if (my $i = $row->{in_iface}) { %><a href="#" class="iface-filter" data-iface="<%= $i %>"><%= $i %></a><% } %></td>
-          <td><% if (my $i = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $i %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $cc = $self->ip_country($i)) { %> <span class="text-muted small" title="<%= $cc %>"><%= $self->country_flag($cc) %> <%= $cc %><% if (my $sub = $self->ip_subdivision($i)) { %>/<%= $sub %><% } %><% if (my $city = $self->ip_city($i)) { %><span class="geoip-city"> <%= $city %></span><% } %></span><% } %><% } %></td>
-          <td><% if (my $i = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $i %>"><%= $i %></a><% } %></td>
-          <td><% if (my $i = $row->{dest_ip}) { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $i %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $cc = $self->ip_country($i)) { %> <span class="text-muted small" title="<%= $cc %>"><%= $self->country_flag($cc) %> <%= $cc %><% if (my $sub = $self->ip_subdivision($i)) { %>/<%= $sub %><% } %><% if (my $city = $self->ip_city($i)) { %><span class="geoip-city"> <%= $city %></span><% } %></span><% } %><% } %></td>
-          <td><% if (my $i = $row->{dest_port}) { %><a href="#" class="port-filter" data-port="<%= $i %>"><%= $i %></a><% } %></td>
-          <td><% if (my $i = $row->{proto}) { %><a href="#" class="proto-filter" data-proto="<%= $i %>"><%= $i %></a><% } %></td>
-          <td><% if (my $i = $row->{app_proto}) { %><a href="#" class="aproto-filter" data-aproto="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $instance = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $instance %>"><%= $instance %></a><% } %></td>
+          <td class="col-host" style="display:none"><% if (my $host = $row->{host}) { %><a href="#" class="host-filter" data-host="<%= $host %>"><%= $host %></a><% } %></td>
+          <td><% if (my $in_iface = $row->{in_iface}) { %><a href="#" class="iface-filter" data-iface="<%= $in_iface %>"><%= $in_iface %></a><% } %></td>
+          <td><% if (my $src_ip = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $src_ip %>"><%= $src_ip %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $src_ip %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $country = $self->ip_country($src_ip)) { %> <span class="text-muted small" title="<%= $country %>"><%= $self->country_flag($country) %> <%= $country %><% if (my $subdivision = $self->ip_subdivision($src_ip)) { %>/<%= $subdivision %><% } %><% if (my $city = $self->ip_city($src_ip)) { %><span class="geoip-city"> <%= $city %></span><% } %></span><% } %><% } %></td>
+          <td><% if (my $src_port = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $src_port %>"><%= $src_port %></a><% } %></td>
+          <td><% if (my $dest_ip = $row->{dest_ip}) { %><a href="#" class="ip-filter" data-ip="<%= $dest_ip %>"><%= $dest_ip %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $dest_ip %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $country = $self->ip_country($dest_ip)) { %> <span class="text-muted small" title="<%= $country %>"><%= $self->country_flag($country) %> <%= $country %><% if (my $subdivision = $self->ip_subdivision($dest_ip)) { %>/<%= $subdivision %><% } %><% if (my $city = $self->ip_city($dest_ip)) { %><span class="geoip-city"> <%= $city %></span><% } %></span><% } %><% } %></td>
+          <td><% if (my $dest_port = $row->{dest_port}) { %><a href="#" class="port-filter" data-port="<%= $dest_port %>"><%= $dest_port %></a><% } %></td>
+          <td><% if (my $proto = $row->{proto}) { %><a href="#" class="proto-filter" data-proto="<%= $proto %>"><%= $proto %></a><% } %></td>
+          <td><% if (my $app_proto = $row->{app_proto}) { %><a href="#" class="aproto-filter" data-aproto="<%= $app_proto %>"><%= $app_proto %></a><% } %></td>
           <td title="<%= $row->{classification} // '' %>">
             <%= $self->lilith->get_short_class($row->{classification}) %>
           </td>
-          <td><% if (my $i = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $signature = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $signature %>"><%= $signature %></a><% } %></td>
           <td class="text-muted">
-            <% if (my $g = $row->{gid}) { %><a href="#" class="gid-filter" data-gid="<%= $g %>"><%= $g %></a><% } %>:<% if (my $s = $row->{sid}) { %><a href="#" class="sid-filter" data-sid="<%= $s %>"><%= $s %></a><% } %>:<% if (my $r = $row->{rev}) { %><a href="#" class="rev-filter" data-rev="<%= $r %>"><%= $r %></a><% } %>
+            <% if (my $gid = $row->{gid}) { %><a href="#" class="gid-filter" data-gid="<%= $gid %>"><%= $gid %></a><% } %>:<% if (my $sid = $row->{sid}) { %><a href="#" class="sid-filter" data-sid="<%= $sid %>"><%= $sid %></a><% } %>:<% if (my $rev = $row->{rev}) { %><a href="#" class="rev-filter" data-rev="<%= $rev %>"><%= $rev %></a><% } %>
           </td>
         </tr>
         % }
@@ -69,12 +69,12 @@
       <tbody>
         % for my $row (@$results) {
         <tr>
-          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a><% if (my $ec = $escalated->{$row->{id}}) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $ec %> time<%= $ec == 1 ? '' : 's' %>">E</span><% } %></td>
+          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a><% if (my $escalation_count = $escalated->{$row->{id}}) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $escalation_count %> time<%= $escalation_count == 1 ? '' : 's' %>">E</span><% } %></td>
           <td><%= $row->{timestamp} // '' %></td>
-          <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
-          <td class="col-host" style="display:none"><% if (my $i = $row->{instance_host}) { %><a href="#" class="instance-host-filter" data-instance-host="<%= $i %>"><%= $i %></a><% } %></td>
-          <td><% if (my $i = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $i %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $cc = $self->ip_country($i)) { %> <span class="text-muted small" title="<%= $cc %>"><%= $self->country_flag($cc) %> <%= $cc %><% if (my $sub = $self->ip_subdivision($i)) { %>/<%= $sub %><% } %><% if (my $city = $self->ip_city($i)) { %><span class="geoip-city"> <%= $city %></span><% } %></span><% } %><% } %></td>
-          <td><% if (my $i = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $instance = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $instance %>"><%= $instance %></a><% } %></td>
+          <td class="col-host" style="display:none"><% if (my $instance_host = $row->{instance_host}) { %><a href="#" class="instance-host-filter" data-instance-host="<%= $instance_host %>"><%= $instance_host %></a><% } %></td>
+          <td><% if (my $src_ip = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $src_ip %>"><%= $src_ip %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $src_ip %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $country = $self->ip_country($src_ip)) { %> <span class="text-muted small" title="<%= $country %>"><%= $self->country_flag($country) %> <%= $country %><% if (my $subdivision = $self->ip_subdivision($src_ip)) { %>/<%= $subdivision %><% } %><% if (my $city = $self->ip_city($src_ip)) { %><span class="geoip-city"> <%= $city %></span><% } %></span><% } %><% } %></td>
+          <td><% if (my $src_port = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $src_port %>"><%= $src_port %></a><% } %></td>
           <td><%= $row->{host}      // '' %></td>
           <td><%= $row->{program}   // '' %></td>
           <td><%= $row->{facility}  // '' %></td>
@@ -83,9 +83,9 @@
           <td title="<%= $row->{classification} // '' %>">
             <%= $self->lilith->get_short_class($row->{classification}) %>
           </td>
-          <td><% if (my $i = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $signature = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $signature %>"><%= $signature %></a><% } %></td>
           <td class="text-muted">
-            <% if (my $g = $row->{gid}) { %><a href="#" class="gid-filter" data-gid="<%= $g %>"><%= $g %></a><% } %>:<% if (my $s = $row->{sid}) { %><a href="#" class="sid-filter" data-sid="<%= $s %>"><%= $s %></a><% } %>:<% if (my $r = $row->{rev}) { %><a href="#" class="rev-filter" data-rev="<%= $r %>"><%= $r %></a><% } %>
+            <% if (my $gid = $row->{gid}) { %><a href="#" class="gid-filter" data-gid="<%= $gid %>"><%= $gid %></a><% } %>:<% if (my $sid = $row->{sid}) { %><a href="#" class="sid-filter" data-sid="<%= $sid %>"><%= $sid %></a><% } %>:<% if (my $rev = $row->{rev}) { %><a href="#" class="rev-filter" data-rev="<%= $rev %>"><%= $rev %></a><% } %>
           </td>
         </tr>
         % }
@@ -102,9 +102,9 @@
       <tbody>
         % for my $row (@$results) {
         <tr>
-          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a><% if (my $ec = $escalated->{$row->{id}}) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $ec %> time<%= $ec == 1 ? '' : 's' %>">E</span><% } %></td>
-          <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
-          <td class="col-host" style="display:none"><% if (my $i = $row->{instance_host}) { %><a href="#" class="instance-host-filter" data-instance-host="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a><% if (my $escalation_count = $escalated->{$row->{id}}) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $escalation_count %> time<%= $escalation_count == 1 ? '' : 's' %>">E</span><% } %></td>
+          <td><% if (my $instance = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $instance %>"><%= $instance %></a><% } %></td>
+          <td class="col-host" style="display:none"><% if (my $instance_host = $row->{instance_host}) { %><a href="#" class="instance-host-filter" data-instance-host="<%= $instance_host %>"><%= $instance_host %></a><% } %></td>
           <td><%= $row->{target}    // '' %></td>
           <td><%= $row->{malscore}  // '' %></td>
           <td><%= $row->{pkg}       // '' %></td>
@@ -132,16 +132,16 @@
       <tbody>
         % for my $row (@$results) {
         <tr>
-          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a><% if (my $ec = $escalated->{$row->{id}}) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $ec %> time<%= $ec == 1 ? '' : 's' %>">E</span><% } %></td>
+          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a><% if (my $escalation_count = $escalated->{$row->{id}}) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $escalation_count %> time<%= $escalation_count == 1 ? '' : 's' %>">E</span><% } %></td>
           <td><%= $row->{timestamp} // '' %></td>
-          <td><% if (my $i = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $i %>"><%= $i %></a><% } %></td>
-          <td class="col-host" style="display:none"><% if (my $i = $row->{host}) { %><a href="#" class="host-filter" data-host="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $instance = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $instance %>"><%= $instance %></a><% } %></td>
+          <td class="col-host" style="display:none"><% if (my $host = $row->{host}) { %><a href="#" class="host-filter" data-host="<%= $host %>"><%= $host %></a><% } %></td>
           <td><%= $row->{event_type} // '' %></td>
-          <td><% if (my $i = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $i %>"><%= $i %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $i %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $cc = $self->ip_country($i)) { %> <span class="text-muted small" title="<%= $cc %>"><%= $self->country_flag($cc) %> <%= $cc %><% if (my $sub = $self->ip_subdivision($i)) { %>/<%= $sub %><% } %><% if (my $city = $self->ip_city($i)) { %><span class="geoip-city"> <%= $city %></span><% } %></span><% } %><% } %></td>
+          <td><% if (my $src_ip = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $src_ip %>"><%= $src_ip %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $src_ip %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $country = $self->ip_country($src_ip)) { %> <span class="text-muted small" title="<%= $country %>"><%= $self->country_flag($country) %> <%= $country %><% if (my $subdivision = $self->ip_subdivision($src_ip)) { %>/<%= $subdivision %><% } %><% if (my $city = $self->ip_city($src_ip)) { %><span class="geoip-city"> <%= $city %></span><% } %></span><% } %><% } %></td>
           <td><%= $row->{subject} // '' %></td>
           <td><%= $row->{severity} // '' %></td>
           <td title="<%= $row->{classification} // '' %>"><%= $row->{classification} // '' %></td>
-          <td><% if (my $i = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $i %>"><%= $i %></a><% } %></td>
+          <td><% if (my $signature = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $signature %>"><%= $signature %></a><% } %></td>
           <td><%= $row->{score} // '' %></td>
         </tr>
         % }

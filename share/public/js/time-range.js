@@ -19,10 +19,10 @@
 (function () {
   function pad(num) { return (num < 10 ? '0' : '') + num; }
 
-  function clampInt(value, lo, hi) {
+  function clampInt(value, low, high) {
     value = parseInt(value, 10);
-    if (isNaN(value)) { return lo; }
-    return Math.max(lo, Math.min(hi, value));
+    if (isNaN(value)) { return low; }
+    return Math.max(low, Math.min(high, value));
   }
 
   function initOne(root) {
@@ -96,10 +96,10 @@
 
     // Point the control at a relative preset (used when a saved view loads),
     // snapping to a day when the value is not one of the presets.
-    function setWindow(win) {
-      var mins = win && win.go_back_minutes != null ? String(win.go_back_minutes) : '';
-      presetEl.value = mins;
-      if (presetEl.value !== mins) { presetEl.value = '1440'; }
+    function setWindow(windowSpec) {
+      var minutes = windowSpec && windowSpec.go_back_minutes != null ? String(windowSpec.go_back_minutes) : '';
+      presetEl.value = minutes;
+      if (presetEl.value !== minutes) { presetEl.value = '1440'; }
       syncMode();
     }
 
@@ -111,8 +111,8 @@
     // Notify live consumers when the window changes (form pages ignore this).
     presetEl.addEventListener('change', function () { syncMode(); fireChange(); });
     [bounds.start, bounds.end].forEach(function (bound) {
-      [bound.dateEl, bound.hourEl, bound.minEl].forEach(function (el) {
-        if (el) { el.addEventListener('change', fireChange); }
+      [bound.dateEl, bound.hourEl, bound.minEl].forEach(function (input) {
+        if (input) { input.addEventListener('change', fireChange); }
       });
     });
     if (formEl) {
@@ -140,7 +140,7 @@
     init: initOne,
     initAll: initAll,
     read: function (root) { return root && root._trApi ? root._trApi.read() : null; },
-    set:  function (root, win) { if (root && root._trApi) { root._trApi.set(win); } }
+    set:  function (root, windowSpec) { if (root && root._trApi) { root._trApi.set(windowSpec); } }
   };
 
   if (document.readyState !== 'loading') { initAll(); }

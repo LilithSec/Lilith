@@ -339,14 +339,14 @@
             %   'access to a potentially vulnerable web application',
             % );
             <select name="class" class="form-select form-select-sm flex-grow-1" multiple>
-              % for my $_c (@_classes) {
-                <option value="<%= $_c %>" <%= $_sel_class{$_c} ? 'selected' : '' %>><%= $_c %></option>
+              % for my $class (@_classes) {
+                <option value="<%= $class %>" <%= $_sel_class{$class} ? 'selected' : '' %>><%= $class %></option>
               % }
             </select>
             <label class="form-label mt-2">Classification — exclude all of</label>
             <select name="class_not" class="form-select form-select-sm flex-grow-1" multiple>
-              % for my $_c (@_classes) {
-                <option value="<%= $_c %>" <%= $_sel_class_not{$_c} ? 'selected' : '' %>><%= $_c %></option>
+              % for my $class (@_classes) {
+                <option value="<%= $class %>" <%= $_sel_class_not{$class} ? 'selected' : '' %>><%= $class %></option>
               % }
             </select>
           </div><!-- /class filter col -->
@@ -399,8 +399,8 @@ function syncOrderBy(keepVal) {
   } else {
     orderBy.value = cols[0];
   }
-  var ihField = document.getElementById('instance-host-field');
-  ihField.style.display = (table === 'sagan' || table === 'cape') ? '' : 'none';
+  var instanceHostField = document.getElementById('instance-host-field');
+  instanceHostField.style.display = (table === 'sagan' || table === 'cape') ? '' : 'none';
   var capeFilters = document.getElementById('cape-filters');
   capeFilters.style.display = (table === 'cape') ? '' : 'none';
   var ruleFilters = document.getElementById('rule-filters');
@@ -475,11 +475,11 @@ function initSort() {
 // (Re)wire all handlers and view state inside the results container. Safe to
 // call again after the results HTML is swapped in by an auto-refresh.
 function initResults() {
-  var hostCb = document.getElementById('show-host-col');
-  applyHostCol(hostCb && hostCb.checked);
+  var hostCheckbox = document.getElementById('show-host-col');
+  applyHostCol(hostCheckbox && hostCheckbox.checked);
 
-  var cityCb = document.getElementById('show-city');
-  applyGeoCity(!cityCb || cityCb.checked);
+  var cityCheckbox = document.getElementById('show-city');
+  applyGeoCity(!cityCheckbox || cityCheckbox.checked);
 
   bindFilter('.host-filter',          'host-input',          'host');
   bindFilter('.instance-host-filter', 'instance-host-input', 'instanceHost');
@@ -507,8 +507,8 @@ function setRefreshStatus(ok) {
   var el = document.getElementById('ar-status');
   if (!el) { return; }
   var now = new Date();
-  function p(n) { return (n < 10 ? '0' : '') + n; }
-  var timeStr = p(now.getHours()) + ':' + p(now.getMinutes()) + ':' + p(now.getSeconds());
+  function pad2(value) { return (value < 10 ? '0' : '') + value; }
+  var timeStr = pad2(now.getHours()) + ':' + pad2(now.getMinutes()) + ':' + pad2(now.getSeconds());
   if (ok) {
     el.textContent = 'updated ' + timeStr;
     el.className = 'small text-muted';
@@ -560,35 +560,35 @@ function refreshResults(done) {
 document.addEventListener('DOMContentLoaded', function() {
   syncOrderBy(false);
   document.getElementById('order-by').value = '<%= $order_by %>' || document.getElementById('order-by').value;
-  var hostCb = document.getElementById('show-host-col');
-  var stored = localStorage.getItem('showHostCol') === 'true';
-  hostCb.checked = stored;
-  applyHostCol(stored);
-  hostCb.addEventListener('change', function() {
+  var hostCheckbox = document.getElementById('show-host-col');
+  var storedHostCol = localStorage.getItem('showHostCol') === 'true';
+  hostCheckbox.checked = storedHostCol;
+  applyHostCol(storedHostCol);
+  hostCheckbox.addEventListener('change', function() {
     localStorage.setItem('showHostCol', this.checked);
     applyHostCol(this.checked);
   });
 
   // GeoIP city: show the city label next to each IP's country flag. Defaults on
   // when the user has not made an explicit choice.
-  var cityCb        = document.getElementById('show-city');
+  var cityCheckbox  = document.getElementById('show-city');
   var storedCity    = localStorage.getItem('showGeoCity');
-  cityCb.checked = ( storedCity === null ) ? true : ( storedCity === 'true' );
-  applyGeoCity(cityCb.checked);
-  cityCb.addEventListener('change', function() {
+  cityCheckbox.checked = ( storedCity === null ) ? true : ( storedCity === 'true' );
+  applyGeoCity(cityCheckbox.checked);
+  cityCheckbox.addEventListener('change', function() {
     localStorage.setItem('showGeoCity', this.checked);
     applyGeoCity(this.checked);
   });
 
   // Auto-FC: keep the filter panel collapsed on load (overriding the server's
   // auto-expand when filters are set) until the Filters button is clicked.
-  var afcCb        = document.getElementById('auto-fc');
+  var autoFcCheckbox = document.getElementById('auto-fc');
   var filterPanel  = document.getElementById('filter-panel');
   var storedAutoFc = localStorage.getItem('autoFc');
   // default on when the user has not made an explicit choice
-  afcCb.checked = ( storedAutoFc === null ) ? true : ( storedAutoFc === 'true' );
-  if (afcCb.checked) { filterPanel.classList.remove('show'); }
-  afcCb.addEventListener('change', function() {
+  autoFcCheckbox.checked = ( storedAutoFc === null ) ? true : ( storedAutoFc === 'true' );
+  if (autoFcCheckbox.checked) { filterPanel.classList.remove('show'); }
+  autoFcCheckbox.addEventListener('change', function() {
     localStorage.setItem('autoFc', this.checked);
     if (this.checked) {
       bootstrap.Collapse.getOrCreateInstance(filterPanel, { toggle: false }).hide();
@@ -598,35 +598,35 @@ document.addEventListener('DOMContentLoaded', function() {
   // Auto-refresh: fetch fresh results every N seconds and swap them in place,
   // with no full page reload (so scroll position and form state are kept).
   // State is kept in localStorage so it persists across navigation.
-  var arCb       = document.getElementById('auto-refresh');
-  var arSecs     = document.getElementById('auto-refresh-secs');
-  var arTimer    = null;
+  var autoRefreshCheckbox  = document.getElementById('auto-refresh');
+  var autoRefreshSecsInput = document.getElementById('auto-refresh-secs');
+  var autoRefreshTimer     = null;
   var lastRefresh = Date.now();   // the page load is itself a "refresh"
-  function arInterval() {
-    var secs = parseInt(arSecs.value, 10);
+  function refreshIntervalSecs() {
+    var secs = parseInt(autoRefreshSecsInput.value, 10);
     return (!secs || secs < 1) ? 30 : secs;
   }
   function stopAutoRefresh() {
-    if (arTimer) { clearTimeout(arTimer); arTimer = null; }
+    if (autoRefreshTimer) { clearTimeout(autoRefreshTimer); autoRefreshTimer = null; }
   }
   // Schedule the next tick, unless disabled or the tab is hidden (polling is
   // paused while hidden to avoid needless server load and bandwidth).
   function scheduleNext() {
     stopAutoRefresh();
-    if (!arCb.checked || document.hidden) { return; }
-    arTimer = setTimeout(function() {
+    if (!autoRefreshCheckbox.checked || document.hidden) { return; }
+    autoRefreshTimer = setTimeout(function() {
       refreshResults(function() { lastRefresh = Date.now(); scheduleNext(); });
-    }, arInterval() * 1000);
+    }, refreshIntervalSecs() * 1000);
   }
-  var storedSecs = localStorage.getItem('autoRefreshSecs');
-  if (storedSecs) { arSecs.value = storedSecs; }
-  arCb.checked = localStorage.getItem('autoRefresh') === 'true';
+  var storedRefreshSecs = localStorage.getItem('autoRefreshSecs');
+  if (storedRefreshSecs) { autoRefreshSecsInput.value = storedRefreshSecs; }
+  autoRefreshCheckbox.checked = localStorage.getItem('autoRefresh') === 'true';
   scheduleNext();
-  arCb.addEventListener('change', function() {
+  autoRefreshCheckbox.addEventListener('change', function() {
     localStorage.setItem('autoRefresh', this.checked);
     scheduleNext();
   });
-  arSecs.addEventListener('change', function() {
+  autoRefreshSecsInput.addEventListener('change', function() {
     localStorage.setItem('autoRefreshSecs', this.value);
     scheduleNext();
   });
@@ -635,8 +635,8 @@ document.addEventListener('DOMContentLoaded', function() {
   document.addEventListener('visibilitychange', function() {
     if (document.hidden) {
       stopAutoRefresh();
-    } else if (arCb.checked) {
-      if (Date.now() - lastRefresh >= arInterval() * 1000) {
+    } else if (autoRefreshCheckbox.checked) {
+      if (Date.now() - lastRefresh >= refreshIntervalSecs() * 1000) {
         refreshResults(function() { lastRefresh = Date.now(); scheduleNext(); });
       } else {
         scheduleNext();

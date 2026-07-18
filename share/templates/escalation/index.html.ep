@@ -37,28 +37,28 @@
           </tr>
         </thead>
         <tbody>
-          % for my $t (@$targets) {
-          <tr data-target-id="<%= $t->{id} %>">
-            <td><%= $t->{id} %></td>
-            <td><%= $t->{name} %></td>
-            <td><%= $t->{type} %></td>
+          % for my $target (@$targets) {
+          <tr data-target-id="<%= $target->{id} %>">
+            <td><%= $target->{id} %></td>
+            <td><%= $target->{name} %></td>
+            <td><%= $target->{type} %></td>
             <td>
-              % if ($t->{enabled}) {
+              % if ($target->{enabled}) {
               <span class="badge bg-success">enabled</span>
               % } else {
               <span class="badge bg-secondary">disabled</span>
               % }
             </td>
-            <td><%= $t->{description} // '' %></td>
-            <td class="text-muted small"><%= $t->{updated} // '' %></td>
+            <td><%= $target->{description} // '' %></td>
+            <td class="text-muted small"><%= $target->{updated} // '' %></td>
             % if ($can_edit) {
             <td class="text-nowrap">
               <button type="button" class="btn btn-sm btn-outline-secondary py-0 target-edit-btn"
-                      data-target-id="<%= $t->{id} %>">Edit</button>
+                      data-target-id="<%= $target->{id} %>">Edit</button>
               <button type="button" class="btn btn-sm btn-outline-secondary py-0 target-test-btn"
-                      data-target-id="<%= $t->{id} %>">Test</button>
+                      data-target-id="<%= $target->{id} %>">Test</button>
               <button type="button" class="btn btn-sm btn-outline-danger py-0 target-delete-btn"
-                      data-target-id="<%= $t->{id} %>" data-target-name="<%= $t->{name} %>">Delete</button>
+                      data-target-id="<%= $target->{id} %>" data-target-name="<%= $target->{name} %>">Delete</button>
             </td>
             % }
           </tr>
@@ -150,22 +150,22 @@ document.addEventListener('DOMContentLoaded', function() {
   var fieldsEl    = document.getElementById('target-config-fields');
   var statusEl    = document.getElementById('esc-action-status');
 
-  function status(msg, ok) {
-    statusEl.textContent = msg;
-    statusEl.className = 'small mb-2 ' + (ok ? 'text-success' : 'text-warning');
+  function showStatus(message, succeeded) {
+    statusEl.textContent = message;
+    statusEl.className = 'small mb-2 ' + (succeeded ? 'text-success' : 'text-warning');
     statusEl.style.display = '';
   }
 
-  function typeInfo(name) {
-    for (var i = 0; i < ESC_TYPES.length; i++) {
-      if (ESC_TYPES[i].type === name) { return ESC_TYPES[i]; }
+  function typeInfo(typeName) {
+    for (var typeIndex = 0; typeIndex < ESC_TYPES.length; typeIndex++) {
+      if (ESC_TYPES[typeIndex].type === typeName) { return ESC_TYPES[typeIndex]; }
     }
     return null;
   }
 
-  function findTarget(id) {
-    for (var i = 0; i < ESC_TARGETS.length; i++) {
-      if (String(ESC_TARGETS[i].id) === String(id)) { return ESC_TARGETS[i]; }
+  function findTarget(targetId) {
+    for (var targetIndex = 0; targetIndex < ESC_TARGETS.length; targetIndex++) {
+      if (String(ESC_TARGETS[targetIndex].id) === String(targetId)) { return ESC_TARGETS[targetIndex]; }
     }
     return null;
   }
@@ -205,12 +205,12 @@ document.addEventListener('DOMContentLoaded', function() {
           row.appendChild(input);
         });
       } else {
-        var single = document.createElement('input');
-        single.type = 'text';
-        single.className = 'form-control';
-        single.dataset.configListItem = '1';
-        if (typeof value === 'string') { single.value = value; }
-        row.appendChild(single);
+        var singleInput = document.createElement('input');
+        singleInput.type = 'text';
+        singleInput.className = 'form-control';
+        singleInput.dataset.configListItem = '1';
+        if (typeof value === 'string') { singleInput.value = value; }
+        row.appendChild(singleInput);
       }
       var removeBtn = document.createElement('button');
       removeBtn.type = 'button';
@@ -246,22 +246,22 @@ document.addEventListener('DOMContentLoaded', function() {
     var config     = (target && target.config)      || {};
     var secretsSet = (target && target.secrets_set) || [];
     info.fields.forEach(function(field) {
-      var col = document.createElement('div');
-      col.className = 'col-md-6';
+      var fieldColumn = document.createElement('div');
+      fieldColumn.className = 'col-md-6';
       var label = document.createElement('label');
       label.className = 'form-label small text-muted mb-1';
       label.textContent = field.label + (field.required ? ' *' : '');
-      col.appendChild(label);
+      fieldColumn.appendChild(label);
       var input;
       if (field.type === 'boolean') {
-        var wrap = document.createElement('div');
-        wrap.className = 'form-check';
+        var checkWrap = document.createElement('div');
+        checkWrap.className = 'form-check';
         input = document.createElement('input');
         input.type = 'checkbox';
         input.className = 'form-check-input';
         input.checked = config[field.name] !== undefined ? !!config[field.name] : !!field.default;
-        wrap.appendChild(input);
-        col.appendChild(wrap);
+        checkWrap.appendChild(input);
+        fieldColumn.appendChild(checkWrap);
       } else if (field.type === 'enum') {
         input = document.createElement('select');
         input.className = 'form-select form-select-sm';
@@ -274,14 +274,14 @@ document.addEventListener('DOMContentLoaded', function() {
         var currentValue = (config[field.name] !== undefined && config[field.name] !== null) ? config[field.name]
                 : (field.default !== undefined && field.default !== null ? field.default : '');
         if (currentValue !== '') { input.value = currentValue; }
-        col.appendChild(input);
+        fieldColumn.appendChild(input);
       } else if (field.type === 'list') {
-        col.className = 'col-12';
+        fieldColumn.className = 'col-12';
         // a new target has no stored value, so seed the rows from the field
         // default; an existing target uses its own value, even when empty
         var listValues = (config[field.name] !== undefined) ? config[field.name] : field.default;
         input = buildListField(field, listValues);
-        col.appendChild(input);
+        fieldColumn.appendChild(input);
       } else {
         input = document.createElement('input');
         input.type = (field.type === 'secret') ? 'password' : 'text';
@@ -295,17 +295,17 @@ document.addEventListener('DOMContentLoaded', function() {
         } else if (field.default !== undefined && field.default !== null) {
           input.placeholder = 'default: ' + field.default;
         }
-        col.appendChild(input);
+        fieldColumn.appendChild(input);
       }
       if (field.help) {
-        var help = document.createElement('div');
-        help.className = 'form-text small';
-        help.textContent = field.help;
-        col.appendChild(help);
+        var helpText = document.createElement('div');
+        helpText.className = 'form-text small';
+        helpText.textContent = field.help;
+        fieldColumn.appendChild(helpText);
       }
       input.dataset.configName = field.name;
       input.dataset.configType = field.type;
-      fieldsEl.appendChild(col);
+      fieldsEl.appendChild(fieldColumn);
     });
   }
 
@@ -331,45 +331,45 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('target-add-btn').addEventListener('click', function() {
     openModal(null);
   });
-  document.querySelectorAll('.target-edit-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() {
+  document.querySelectorAll('.target-edit-btn').forEach(function(editButton) {
+    editButton.addEventListener('click', function() {
       openModal(findTarget(this.dataset.targetId));
     });
   });
 
   document.getElementById('target-save-btn').addEventListener('click', function() {
-    var errEl  = document.getElementById('target-error');
-    errEl.style.display = 'none';
+    var errorEl = document.getElementById('target-error');
+    errorEl.style.display = 'none';
     var config = {};
     fieldsEl.querySelectorAll('[data-config-name]').forEach(function(input) {
-      var name = input.dataset.configName;
+      var fieldName = input.dataset.configName;
       if (input.dataset.configType === 'boolean') {
-        config[name] = input.checked ? 1 : 0;
+        config[fieldName] = input.checked ? 1 : 0;
       } else if (input.dataset.configType === 'list') {
         var items = [];
         input.querySelectorAll('[data-config-list-row]').forEach(function(row) {
-          var cols = row.querySelectorAll('[data-config-list-col]');
-          if (cols.length) {
+          var columnInputs = row.querySelectorAll('[data-config-list-col]');
+          if (columnInputs.length) {
             var rowObj = {}, hasValue = false;
-            cols.forEach(function(column) {
-              var value = column.value.trim();
-              rowObj[column.dataset.configListCol] = value;
+            columnInputs.forEach(function(columnInput) {
+              var value = columnInput.value.trim();
+              rowObj[columnInput.dataset.configListCol] = value;
               if (value !== '') { hasValue = true; }
             });
             if (hasValue) { items.push(rowObj); }
           } else {
-            var single = row.querySelector('[data-config-list-item]');
-            if (single && single.value.trim() !== '') { items.push(single.value.trim()); }
+            var singleInput = row.querySelector('[data-config-list-item]');
+            if (singleInput && singleInput.value.trim() !== '') { items.push(singleInput.value.trim()); }
           }
         });
         // always send the list, even when empty, so a cleared list is a
         // deliberate opt out rather than falling back to the field default
-        config[name] = items;
+        config[fieldName] = items;
       } else if (input.value !== '') {
-        config[name] = input.value;
+        config[fieldName] = input.value;
       }
     });
-    var body = {
+    var requestBody = {
       id:          document.getElementById('target-id').value,
       name:        document.getElementById('target-name').value.trim(),
       type:        typeEl.value,
@@ -380,71 +380,71 @@ document.addEventListener('DOMContentLoaded', function() {
     fetch('/api/escalation/targets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      body: JSON.stringify(requestBody)
     })
-      .then(function(response) { return response.json().then(function(data) { return { ok: response.ok, data: data }; }); })
+      .then(function(response) { return response.json().then(function(responseData) { return { ok: response.ok, data: responseData }; }); })
       .then(function(result) {
         if (!result.ok || result.data.error) {
-          errEl.textContent = result.data.error || 'save failed';
-          errEl.style.display = '';
+          errorEl.textContent = result.data.error || 'save failed';
+          errorEl.style.display = '';
           return;
         }
         window.location.reload();
       })
-      .catch(function(err) {
-        errEl.textContent = 'save failed: ' + err;
-        errEl.style.display = '';
+      .catch(function(error) {
+        errorEl.textContent = 'save failed: ' + error;
+        errorEl.style.display = '';
       });
   });
 
-  document.querySelectorAll('.target-delete-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      var id = this.dataset.targetId;
+  document.querySelectorAll('.target-delete-btn').forEach(function(deleteButton) {
+    deleteButton.addEventListener('click', function() {
+      var targetId = this.dataset.targetId;
       if (!window.confirm('Delete escalation target "' + this.dataset.targetName + '"?')) { return; }
-      fetch('/api/escalation/targets/' + encodeURIComponent(id) + '/delete', { method: 'POST' })
-        .then(function(response) { return response.json().then(function(data) { return { ok: response.ok, data: data }; }); })
+      fetch('/api/escalation/targets/' + encodeURIComponent(targetId) + '/delete', { method: 'POST' })
+        .then(function(response) { return response.json().then(function(responseData) { return { ok: response.ok, data: responseData }; }); })
         .then(function(result) {
           if (!result.ok || result.data.error) {
-            status(result.data.error || 'delete failed', false);
+            showStatus(result.data.error || 'delete failed', false);
             return;
           }
           window.location.reload();
         })
-        .catch(function(err) { status('delete failed: ' + err, false); });
+        .catch(function(error) { showStatus('delete failed: ' + error, false); });
     });
   });
 
-  document.querySelectorAll('.target-test-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      var id     = this.dataset.targetId;
-      var target = findTarget(id);
+  document.querySelectorAll('.target-test-btn').forEach(function(testButton) {
+    testButton.addEventListener('click', function() {
+      var targetId = this.dataset.targetId;
+      var target   = findTarget(targetId);
       document.getElementById('test-result-title').textContent
-        = 'Test Escalation — ' + (target ? target.name : id);
+        = 'Test Escalation — ' + (target ? target.name : targetId);
       document.getElementById('test-result-loading').style.display = '';
       document.getElementById('test-result-content').style.display = 'none';
       testModal.show();
-      fetch('/api/escalation/targets/' + encodeURIComponent(id) + '/test', { method: 'POST' })
-        .then(function(response) { return response.json().then(function(data) { return { ok: response.ok, data: data }; }); })
+      fetch('/api/escalation/targets/' + encodeURIComponent(targetId) + '/test', { method: 'POST' })
+        .then(function(response) { return response.json().then(function(responseData) { return { ok: response.ok, data: responseData }; }); })
         .then(function(result) {
-          var errEl   = document.getElementById('test-result-error');
-          var payWrap = document.getElementById('test-result-payload-wrap');
+          var errorEl     = document.getElementById('test-result-error');
+          var payloadWrap = document.getElementById('test-result-payload-wrap');
           if (!result.ok || result.data.error) {
-            errEl.textContent = result.data.error || 'test failed';
-            errEl.style.display = '';
-            payWrap.style.display = 'none';
+            errorEl.textContent = result.data.error || 'test failed';
+            errorEl.style.display = '';
+            payloadWrap.style.display = 'none';
           } else {
-            errEl.style.display = 'none';
+            errorEl.style.display = 'none';
             document.getElementById('test-result-payload').textContent
               = JSON.stringify(result.data.payload, null, 2);
-            payWrap.style.display = '';
+            payloadWrap.style.display = '';
           }
           document.getElementById('test-result-loading').style.display = 'none';
           document.getElementById('test-result-content').style.display = '';
         })
-        .catch(function(err) {
-          var errEl = document.getElementById('test-result-error');
-          errEl.textContent = 'test failed: ' + err;
-          errEl.style.display = '';
+        .catch(function(error) {
+          var errorEl = document.getElementById('test-result-error');
+          errorEl.textContent = 'test failed: ' + error;
+          errorEl.style.display = '';
           document.getElementById('test-result-loading').style.display = 'none';
           document.getElementById('test-result-content').style.display = '';
         });

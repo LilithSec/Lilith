@@ -305,8 +305,8 @@
           <div class="col-md-6">
             <label class="form-label small text-muted mb-1">Virani instance</label>
             <select id="virani-remote" class="form-select form-select-sm">
-              % for my $r (sort keys %{ $self->virani_remotes }) {
-              <option value="<%= $r %>"><%= $r %></option>
+              % for my $remote (sort keys %{ $self->virani_remotes }) {
+              <option value="<%= $remote %>"><%= $remote %></option>
               % }
             </select>
           </div>
@@ -377,8 +377,8 @@
           <div>
             <label class="form-label small text-muted mb-1">Virani instance</label>
             <select id="virani-cache-remote" class="form-select form-select-sm" style="width:auto">
-              % for my $r (sort keys %{ $self->virani_remotes }) {
-              <option value="<%= $r %>"><%= $r %></option>
+              % for my $remote (sort keys %{ $self->virani_remotes }) {
+              <option value="<%= $remote %>"><%= $remote %></option>
               % }
             </select>
           </div>
@@ -413,10 +413,10 @@ window.loadViraniSets = function(selectEl, remote) {
   fetch('/api/virani/sets/' + encodeURIComponent(remote))
     .then(function(response) { return response.json(); })
     .then(function(data) {
-      (data.sets || []).forEach(function(s) {
+      (data.sets || []).forEach(function(setName) {
         var option = document.createElement('option');
-        option.value = s;
-        option.textContent = (s === data.default_set) ? s + ' (default)' : s;
+        option.value = setName;
+        option.textContent = (setName === data.default_set) ? setName + ' (default)' : setName;
         selectEl.appendChild(option);
       });
     })
@@ -426,16 +426,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Go to Event
   document.getElementById('lookup-go-btn').addEventListener('click', function() {
-    var val   = document.getElementById('lookup-id').value.trim();
+    var lookupValue = document.getElementById('lookup-id').value.trim();
     var table = document.getElementById('lookup-table').value;
     var errEl = document.getElementById('lookup-error');
-    if (!val) { errEl.style.display = ''; return; }
+    if (!lookupValue) { errEl.style.display = ''; return; }
     errEl.style.display = 'none';
-    if (/^\d+$/.test(val)) {
-      window.location.href = '/event/' + encodeURIComponent(table) + '/' + encodeURIComponent(val);
+    if (/^\d+$/.test(lookupValue)) {
+      window.location.href = '/event/' + encodeURIComponent(table) + '/' + encodeURIComponent(lookupValue);
     } else {
       window.location.href = '/search?search=1&table=' + encodeURIComponent(table)
-                           + '&event_id=' + encodeURIComponent(val);
+                           + '&event_id=' + encodeURIComponent(lookupValue);
     }
   });
   document.getElementById('lookup-id').addEventListener('keydown', function(event) {
@@ -516,15 +516,15 @@ document.addEventListener('DOMContentLoaded', function() {
       .then(function(data) {
         var dnsEl = document.getElementById('nav-domaininfo-dns');
         if (data.dns && Object.keys(data.dns).length) {
-          var order = ['A','AAAA','CNAME','MX','NS','TXT','SOA','CAA','SRV','PTR'];
-          var keys  = Object.keys(data.dns).sort(function(a,b) {
-            var ai = order.indexOf(a), bi = order.indexOf(b);
-            if (ai === -1) ai = 999; if (bi === -1) bi = 999;
-            return ai - bi;
+          var typeOrder = ['A','AAAA','CNAME','MX','NS','TXT','SOA','CAA','SRV','PTR'];
+          var recordTypes = Object.keys(data.dns).sort(function(typeA, typeB) {
+            var rankA = typeOrder.indexOf(typeA), rankB = typeOrder.indexOf(typeB);
+            if (rankA === -1) rankA = 999; if (rankB === -1) rankB = 999;
+            return rankA - rankB;
           });
-          dnsEl.innerHTML = keys.map(function(type) {
-            return data.dns[type].map(function(v) {
-              return '<strong>' + type + '</strong> ' + v;
+          dnsEl.innerHTML = recordTypes.map(function(type) {
+            return data.dns[type].map(function(recordValue) {
+              return '<strong>' + type + '</strong> ' + recordValue;
             }).join('<br>');
           }).join('<br>');
         } else {
@@ -537,15 +537,15 @@ document.addEventListener('DOMContentLoaded', function() {
           (data.whois_domain && data.whois_domain !== domain)
             ? 'WHOIS (' + data.whois_domain + ')' : 'WHOIS';
         document.getElementById('nav-domaininfo-whois').textContent = data.whois || '(none)';
-        var dtSection = document.getElementById('nav-domaininfo-dnstracer-section');
-        var dtErrEl   = document.getElementById('nav-domaininfo-dnstracer-error');
+        var dnstracerSection = document.getElementById('nav-domaininfo-dnstracer-section');
+        var dnstracerErrEl   = document.getElementById('nav-domaininfo-dnstracer-error');
         if (data.dnstracer || data.dnstracer_error) {
-          dtSection.style.display = '';
+          dnstracerSection.style.display = '';
           document.getElementById('nav-domaininfo-dnstracer').textContent = data.dnstracer || '';
-          if (data.dnstracer_error) { dtErrEl.textContent = data.dnstracer_error; dtErrEl.style.display = ''; }
-          else { dtErrEl.style.display = 'none'; }
+          if (data.dnstracer_error) { dnstracerErrEl.textContent = data.dnstracer_error; dnstracerErrEl.style.display = ''; }
+          else { dnstracerErrEl.style.display = 'none'; }
         } else {
-          dtSection.style.display = 'none';
+          dnstracerSection.style.display = 'none';
         }
         document.getElementById('nav-domaininfo-loading').style.display = 'none';
         document.getElementById('nav-domaininfo-content').style.display = '';
@@ -570,14 +570,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // HTTPS Info
   var httpsModal = new bootstrap.Modal(document.getElementById('httpsinfo-modal'));
-  function httpsRow(tbody, label, value, cls) {
+  function httpsRow(tbody, label, value, cssClass) {
     if (value === undefined || value === null || value === '') { return; }
     var row = document.createElement('tr');
     var headerCell = document.createElement('th');
     headerCell.className = 'text-muted fw-normal ps-0'; headerCell.style.width = '170px'; headerCell.style.whiteSpace = 'nowrap';
     headerCell.textContent = label;
     var cell = document.createElement('td');
-    cell.className = 'font-monospace small' + (cls ? (' ' + cls) : '');
+    cell.className = 'font-monospace small' + (cssClass ? (' ' + cssClass) : '');
     cell.style.wordBreak = 'break-all';
     cell.textContent = Array.isArray(value) ? value.join(', ') : value;   // textContent escapes
     row.appendChild(headerCell); row.appendChild(cell); tbody.appendChild(row);
@@ -617,19 +617,19 @@ document.addEventListener('DOMContentLoaded', function() {
         if (data.timed_out)   { httpsRow(httpEl, 'Note', 'timed out (5s limit)', 'text-warning'); }
         if (data.read_capped) { httpsRow(httpEl, 'Note', 'response truncated at 512 KB', 'text-warning'); }
 
-        var c = data.cert || {};
-        certWrap.style.display = Object.keys(c).length ? '' : 'none';
-        httpsRow(certEl, 'Common name', c.cn);
-        httpsRow(certEl, 'Subject', c.subject);
-        httpsRow(certEl, 'Issuer', c.issuer);
-        httpsRow(certEl, 'SANs', c.sans);
-        httpsRow(certEl, 'Not before', c.not_before);
-        httpsRow(certEl, 'Not after', c.not_after);
-        httpsRow(certEl, 'Serial', c.serial);
-        httpsRow(certEl, 'Version', c.version ? ('v' + c.version) : undefined);
-        httpsRow(certEl, 'Signature alg', c.sig_alg);
-        httpsRow(certEl, 'SHA-1 fingerprint', c.fp_sha1);
-        httpsRow(certEl, 'SHA-256 fingerprint', c.fp_sha256);
+        var cert = data.cert || {};
+        certWrap.style.display = Object.keys(cert).length ? '' : 'none';
+        httpsRow(certEl, 'Common name', cert.cn);
+        httpsRow(certEl, 'Subject', cert.subject);
+        httpsRow(certEl, 'Issuer', cert.issuer);
+        httpsRow(certEl, 'SANs', cert.sans);
+        httpsRow(certEl, 'Not before', cert.not_before);
+        httpsRow(certEl, 'Not after', cert.not_after);
+        httpsRow(certEl, 'Serial', cert.serial);
+        httpsRow(certEl, 'Version', cert.version ? ('v' + cert.version) : undefined);
+        httpsRow(certEl, 'Signature alg', cert.sig_alg);
+        httpsRow(certEl, 'SHA-1 fingerprint', cert.fp_sha1);
+        httpsRow(certEl, 'SHA-256 fingerprint', cert.fp_sha256);
         if (data.valid === 0 && data.valid_error) { httpsRow(certEl, 'Validation error', data.valid_error, 'text-warning'); }
 
         document.getElementById('httpsinfo-loading').style.display = 'none';
@@ -654,18 +654,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Mail Info (SPF / DMARC / DKIM). Reuses httpsRow for the detail rows.
   var mailModal = new bootstrap.Modal(document.getElementById('mailinfo-modal'));
-  function badge(el, text, cls) {
-    el.innerHTML = '';
+  function badge(badgeContainer, text, cssClass) {
+    badgeContainer.innerHTML = '';
     if (text === undefined || text === null || text === '') { return; }
-    var badgeEl = document.createElement('span'); badgeEl.className = 'badge ' + cls; badgeEl.textContent = text; el.appendChild(badgeEl);
+    var badgeEl = document.createElement('span'); badgeEl.className = 'badge ' + cssClass; badgeEl.textContent = text; badgeContainer.appendChild(badgeEl);
   }
   function spfBadgeClass(code) {
     return ({ pass: 'bg-success', fail: 'bg-danger', softfail: 'bg-warning text-dark',
               neutral: 'bg-secondary', none: 'bg-secondary',
               permerror: 'bg-danger', temperror: 'bg-warning text-dark' })[code] || 'bg-secondary';
   }
-  function dmarcBadgeClass(p) {
-    return ({ reject: 'bg-success', quarantine: 'bg-warning text-dark', none: 'bg-secondary' })[p] || 'bg-secondary';
+  function dmarcBadgeClass(policy) {
+    return ({ reject: 'bg-success', quarantine: 'bg-warning text-dark', none: 'bg-secondary' })[policy] || 'bg-secondary';
   }
   function showMailInfo(domain, ip, selector) {
     document.getElementById('mailinfo-modal-title').textContent = 'Mail Info — ' + domain;
@@ -687,7 +687,7 @@ document.addEventListener('DOMContentLoaded', function() {
         badge(document.getElementById('mailinfo-mx-badge'),
           mx.length ? (mx.length + ' record' + (mx.length === 1 ? '' : 's')) : 'none', 'bg-secondary');
         var mxBody = document.getElementById('mailinfo-mx'); mxBody.innerHTML = '';
-        if (mx.length) { mx.forEach(function(m) { httpsRow(mxBody, m.preference, m.exchange); }); }
+        if (mx.length) { mx.forEach(function(mxRecord) { httpsRow(mxBody, mxRecord.preference, mxRecord.exchange); }); }
         else { httpsRow(mxBody, 'MX', '(none)'); }
 
         // --- SPF ---
@@ -734,19 +734,19 @@ document.addEventListener('DOMContentLoaded', function() {
           noteEl.textContent = 'probed common selectors' + (keys.length ? '' : ' — none found; supply a selector if known');
           dkimBody.appendChild(noteEl);
         }
-        keys.forEach(function(key) {
+        keys.forEach(function(dkimKey) {
           var table = document.createElement('table'); table.className = 'table table-dark table-sm table-borderless mb-2';
           var tbody = document.createElement('tbody'); table.appendChild(tbody);
-          httpsRow(tbody, 'Selector', key.selector);
-          httpsRow(tbody, 'Key type', key.key_type);
-          httpsRow(tbody, 'Key size', key.key_bits ? (key.key_bits + ' bits') : undefined);
-          httpsRow(tbody, 'Revoked', key.revoked ? 'yes' : undefined, key.revoked ? 'text-warning' : '');
-          httpsRow(tbody, 'Testing', key.testing ? 'yes' : undefined);
-          httpsRow(tbody, 'Hash algorithms', key.hash_algorithms);
-          httpsRow(tbody, 'Service types', key.service_types);
-          httpsRow(tbody, 'Granularity', key.granularity);
-          httpsRow(tbody, 'Notes', key.notes);
-          httpsRow(tbody, 'Record', key.record);
+          httpsRow(tbody, 'Selector', dkimKey.selector);
+          httpsRow(tbody, 'Key type', dkimKey.key_type);
+          httpsRow(tbody, 'Key size', dkimKey.key_bits ? (dkimKey.key_bits + ' bits') : undefined);
+          httpsRow(tbody, 'Revoked', dkimKey.revoked ? 'yes' : undefined, dkimKey.revoked ? 'text-warning' : '');
+          httpsRow(tbody, 'Testing', dkimKey.testing ? 'yes' : undefined);
+          httpsRow(tbody, 'Hash algorithms', dkimKey.hash_algorithms);
+          httpsRow(tbody, 'Service types', dkimKey.service_types);
+          httpsRow(tbody, 'Granularity', dkimKey.granularity);
+          httpsRow(tbody, 'Notes', dkimKey.notes);
+          httpsRow(tbody, 'Record', dkimKey.record);
           dkimBody.appendChild(table);
         });
         if (!keys.length && dkim.note && !dkim.probed) {
@@ -794,23 +794,23 @@ document.addEventListener('DOMContentLoaded', function() {
     var cmdWrap    = document.getElementById('virani-cmd-wrap');
     var cmdEl      = document.getElementById('virani-cmd');
 
-    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    function pad(num) { return (num < 10 ? '0' : '') + num; }
     // Combine a date field (YYYY-MM-DD) and a 24-hour HH:MM time field into an
     // epoch, interpreting them in the browser's local timezone. null if invalid.
     function epochOf(dateEl, timeEl) {
       if (!dateEl.value || !/^\d{1,2}:\d{2}$/.test(timeEl.value)) { return null; }
-      var t = new Date(dateEl.value + 'T' + timeEl.value);
-      return isNaN(t.getTime()) ? null : Math.floor(t.getTime() / 1000);
+      var date = new Date(dateEl.value + 'T' + timeEl.value);
+      return isNaN(date.getTime()) ? null : Math.floor(date.getTime() / 1000);
     }
-    function setRange(mins) {
-      var now = new Date(), then = new Date(now.getTime() - mins * 60000);
-      startDate.value = then.getFullYear() + '-' + pad(then.getMonth() + 1) + '-' + pad(then.getDate());
-      startTime.value = pad(then.getHours()) + ':' + pad(then.getMinutes());
+    function setRange(minutes) {
+      var now = new Date(), start = new Date(now.getTime() - minutes * 60000);
+      startDate.value = start.getFullYear() + '-' + pad(start.getMonth() + 1) + '-' + pad(start.getDate());
+      startTime.value = pad(start.getHours()) + ':' + pad(start.getMinutes());
       endDate.value   = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
       endTime.value   = pad(now.getHours()) + ':' + pad(now.getMinutes());
     }
-    document.querySelectorAll('.virani-range').forEach(function(b) {
-      b.addEventListener('click', function() { setRange(parseInt(this.dataset.mins, 10)); });
+    document.querySelectorAll('.virani-range').forEach(function(rangeBtn) {
+      rangeBtn.addEventListener('click', function() { setRange(parseInt(this.dataset.mins, 10)); });
     });
 
     modal.addEventListener('show.bs.modal', function() {
@@ -834,9 +834,9 @@ document.addEventListener('DOMContentLoaded', function() {
         + " -w search.pcap -f '" + params.filter + "'";
       cmdWrap.style.display = '';
     });
-    var dlBtn = document.getElementById('virani-download');
-    if (dlBtn) {
-      dlBtn.addEventListener('click', function() {
+    var downloadBtn = document.getElementById('virani-download');
+    if (downloadBtn) {
+      downloadBtn.addEventListener('click', function() {
         var params = query(); if (!params) { return; }
         window.location.href = '/api/virani/pcap?remote=' + encodeURIComponent(params.remote)
           + '&set=' + encodeURIComponent(params.set) + '&start=' + params.start + '&end=' + params.end
@@ -856,25 +856,25 @@ document.addEventListener('DOMContentLoaded', function() {
     var rowsEl   = document.getElementById('virani-cache-rows');
     var statusEl = document.getElementById('virani-cache-status');
 
-    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    function pad(num) { return (num < 10 ? '0' : '') + num; }
     function fmtTime(epoch) {
       if (!epoch) { return ''; }
       var date = new Date(epoch * 1000);
       return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
         + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
     }
-    function fmtSize(n) {
-      if (n == null || n === '') { return ''; }
-      var units = ['B', 'KB', 'MB', 'GB', 'TB'], i = 0;
-      n = Number(n);
-      while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
-      return (i === 0 ? n : n.toFixed(1)) + ' ' + units[i];
+    function fmtSize(bytes) {
+      if (bytes == null || bytes === '') { return ''; }
+      var units = ['B', 'KB', 'MB', 'GB', 'TB'], unitIndex = 0;
+      bytes = Number(bytes);
+      while (bytes >= 1024 && unitIndex < units.length - 1) { bytes /= 1024; unitIndex++; }
+      return (unitIndex === 0 ? bytes : bytes.toFixed(1)) + ' ' + units[unitIndex];
     }
-    function cell(text, cls) {
-      var cell = document.createElement('td');
-      cell.textContent = (text == null ? '' : text);
-      if (cls) { cell.className = cls; }
-      return cell;
+    function cell(text, cssClass) {
+      var cellEl = document.createElement('td');
+      cellEl.textContent = (text == null ? '' : text);
+      if (cssClass) { cellEl.className = cssClass; }
+      return cellEl;
     }
 
     function load() {
@@ -889,12 +889,12 @@ document.addEventListener('DOMContentLoaded', function() {
             return { ok: response.ok, status: response.status, data: data };
           });
         })
-        .then(function(res) {
-          if (!res.ok) {
-            statusEl.textContent = (res.data && res.data.error) ? res.data.error : ('request failed: HTTP ' + res.status);
+        .then(function(result) {
+          if (!result.ok) {
+            statusEl.textContent = (result.data && result.data.error) ? result.data.error : ('request failed: HTTP ' + result.status);
             return;
           }
-          var items = (res.data && res.data.cached) || [];
+          var items = (result.data && result.data.cached) || [];
           statusEl.textContent = items.length + ' cached search' + (items.length === 1 ? '' : 'es')
             + (items.length >= 50 ? ' (newest 50)' : '');
           items.forEach(function(item) {
@@ -906,21 +906,21 @@ document.addEventListener('DOMContentLoaded', function() {
             row.appendChild(cell(item.filter, 'font-monospace small'));
             row.appendChild(cell(item.found));
             row.appendChild(cell(item.success));
-            var dl = document.createElement('td');
-            dl.className = 'text-nowrap';
+            var downloadCell = document.createElement('td');
+            downloadCell.className = 'text-nowrap';
             if (item.has_pcap) {
               var pcapLink = document.createElement('a');
               pcapLink.className = 'btn btn-sm btn-outline-secondary py-0 me-1';
               pcapLink.textContent = 'PCAP';
               pcapLink.href = '/api/virani/cached/' + encodeURIComponent(remote) + '/pcap/' + encodeURIComponent(item.id);
-              dl.appendChild(pcapLink);
+              downloadCell.appendChild(pcapLink);
             }
             var jsonLink = document.createElement('a');
             jsonLink.className = 'btn btn-sm btn-outline-secondary py-0';
             jsonLink.textContent = 'JSON';
             jsonLink.href = '/api/virani/cached/' + encodeURIComponent(remote) + '/meta/' + encodeURIComponent(item.id);
-            dl.appendChild(jsonLink);
-            row.appendChild(dl);
+            downloadCell.appendChild(jsonLink);
+            row.appendChild(downloadCell);
             rowsEl.appendChild(row);
           });
         })

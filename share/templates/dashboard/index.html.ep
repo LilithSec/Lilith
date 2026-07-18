@@ -246,8 +246,8 @@
   // Allani log sources a widget may target alongside the alert tables; such a
   // widget fetches from /api/logs/* (source=) instead of /api/dashboard/* (table=).
   var LOG_SOURCES = { syslog: 1, http: 1, http_error: 1 };
-  function isLogSource(s) { return !!LOG_SOURCES[s]; }
-  function apiBase(s) { return isLogSource(s) ? '/api/logs' : '/api/dashboard'; }
+  function isLogSource(source) { return !!LOG_SOURCES[source]; }
+  function apiBase(source) { return isLogSource(source) ? '/api/logs' : '/api/dashboard'; }
   var PALETTE = ['#dc3545','#0d6efd','#fd7e14','#20c997','#6f42c1','#ffc107','#0dcaf0','#d63384','#198754','#adb5bd'];
 
   // Built-in dashboard presets the Reset menu offers. Each is a list of ordinary
@@ -388,7 +388,7 @@
       { type: 'countries',  config: { table: 'http_error' },                      x: 6, y: 9, w: 6, h: 4 }
     ] }
   ];
-  var PRESET = {}; PRESETS.forEach(function(p) { PRESET[p.key] = p; });
+  var PRESET = {}; PRESETS.forEach(function(preset) { PRESET[preset.key] = preset; });
   // The default board (and any legacy caller) seeds the Suricata preset.
   var DEFAULT_WIDGETS = PRESET.suricata.widgets;
 
@@ -403,30 +403,30 @@
   function uid() { return 'w' + Math.random().toString(36).slice(2, 9); }
 
   // Compact number for axis ticks / large measures (bytes): 1500 -> 1.5K.
-  function fmtNum(n) {
-    n = Number(n) || 0;
-    var u = ['', 'K', 'M', 'G', 'T'], i = 0;
-    while (Math.abs(n) >= 1000 && i < u.length - 1) { n /= 1000; i++; }
-    return (i === 0 ? n : n.toFixed(n < 10 ? 1 : 0)) + u[i];
+  function fmtNum(value) {
+    value = Number(value) || 0;
+    var units = ['', 'K', 'M', 'G', 'T'], unitIndex = 0;
+    while (Math.abs(value) >= 1000 && unitIndex < units.length - 1) { value /= 1000; unitIndex++; }
+    return (unitIndex === 0 ? value : value.toFixed(value < 10 ? 1 : 0)) + units[unitIndex];
   }
   function baseOpts(extra) {
-    var o = { responsive: true, maintainAspectRatio: false, animation: false };
-    for (var k in (extra || {})) { o[k] = extra[k]; }
-    return o;
+    var options = { responsive: true, maintainAspectRatio: false, animation: false };
+    for (var key in (extra || {})) { options[key] = extra[key]; }
+    return options;
   }
   function resizeAllCharts() { Object.keys(charts).forEach(function(id) { if (charts[id]) { charts[id].resize(); } }); }
   function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
 
   function flag(countryCode) {
     if (!/^[A-Za-z]{2}$/.test(countryCode)) { return ''; }
-    return String.fromCodePoint.apply(null, countryCode.toUpperCase().split('').map(function(c) { return 0x1F1E6 + c.charCodeAt(0) - 65; }));
+    return String.fromCodePoint.apply(null, countryCode.toUpperCase().split('').map(function(letter) { return 0x1F1E6 + letter.charCodeAt(0) - 65; }));
   }
-  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function pad(number) { return (number < 10 ? '0' : '') + number; }
   function bucketLabel(epoch, unit) {
-    var d = new Date(epoch * 1000);
-    var hourMin = pad(d.getHours()) + ':' + pad(d.getMinutes());
-    var monthDay = pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-    if (unit === 'month') { return d.getFullYear() + '-' + pad(d.getMonth() + 1); }
+    var date = new Date(epoch * 1000);
+    var hourMin = pad(date.getHours()) + ':' + pad(date.getMinutes());
+    var monthDay = pad(date.getMonth() + 1) + '-' + pad(date.getDate());
+    if (unit === 'month') { return date.getFullYear() + '-' + pad(date.getMonth() + 1); }
     if (unit === 'week' || unit === 'day') { return monthDay; }
     // minute / hour: prepend the date when the window spans more than a day
     return state.mins <= 1440 ? hourMin : (monthDay + ' ' + hourMin);
@@ -448,18 +448,18 @@
   // A widget's own bucket wins, else the board bucket, else auto; 'auto' resolves
   // to a concrete unit here so the API never has to.
   function resolveBucket(widget) {
-    var b = (widget && widget.config && widget.config.bucket) || state.bucket || 'auto';
-    return (b === 'auto') ? bucketUnit() : b;
+    var bucket = (widget && widget.config && widget.config.bucket) || state.bucket || 'auto';
+    return (bucket === 'auto') ? bucketUnit() : bucket;
   }
 
   function qsFor(source, extra) {
     var log = isLogSource(source);
-    var s = '?' + (log ? 'source' : 'table') + '=' + encodeURIComponent(source) + '&go_back_minutes=' + encodeURIComponent(state.mins);
-    if (!log && state.showGpcd) { s += '&show_gpcd=1'; }   // GPCD exclude is alert-only
-    if (state.start) { s += '&start=' + encodeURIComponent(state.start); }
-    if (state.end)   { s += '&end=' + encodeURIComponent(state.end); }
-    for (var k in (extra || {})) { if (extra[k] !== undefined && extra[k] !== '') { s += '&' + k + '=' + encodeURIComponent(extra[k]); } }
-    return s;
+    var query = '?' + (log ? 'source' : 'table') + '=' + encodeURIComponent(source) + '&go_back_minutes=' + encodeURIComponent(state.mins);
+    if (!log && state.showGpcd) { query += '&show_gpcd=1'; }   // GPCD exclude is alert-only
+    if (state.start) { query += '&start=' + encodeURIComponent(state.start); }
+    if (state.end)   { query += '&end=' + encodeURIComponent(state.end); }
+    for (var key in (extra || {})) { if (extra[key] !== undefined && extra[key] !== '') { query += '&' + key + '=' + encodeURIComponent(extra[key]); } }
+    return query;
   }
   function getJSON(url) {
     return fetch(url).then(function(response) {
@@ -480,21 +480,21 @@
         });
       });
   }
-  function showError(msg) { var el = document.getElementById('db-error'); el.textContent = 'Error: ' + msg; el.style.display = ''; }
+  function showError(msg) { var element = document.getElementById('db-error'); element.textContent = 'Error: ' + msg; element.style.display = ''; }
   function clearError() { document.getElementById('db-error').style.display = 'none'; }
 
   // ---- widget DOM ----
   function measureLabel(table, name) {
     if (!name || name === 'count') { return ''; }
-    var list = measuresCache[table] || [];
-    for (var i = 0; i < list.length; i++) { if (list[i].name === name) { return list[i].label; } }
+    var measures = measuresCache[table] || [];
+    for (var i = 0; i < measures.length; i++) { if (measures[i].name === name) { return measures[i].label; } }
     return name.replace(/_/g, ' ');
   }
   function widgetTitle(widget) {
-    var wtable  = widget.config.table || state.table;
-    var measure = measureLabel(wtable, widget.config.measure);
+    var widgetTable = widget.config.table || state.table;
+    var measure = measureLabel(widgetTable, widget.config.measure);
     // note the table only when the widget pins one different from the board's
-    var suffix = widget.config.table ? (' · ' + wtable) : '';
+    var suffix = widget.config.table ? (' · ' + widgetTable) : '';
     if (widget.type === 'timeseries') {
       return (measure || 'Alerts') + ' over time' + (widget.config.group_by ? ' (by ' + widget.config.group_by + ')' : '') + suffix;
     }
@@ -503,22 +503,22 @@
     if (widget.type === 'stat') {
       if (widget.config.label) { return widget.config.label; }
       var metric = widget.config.metric || 'total';
-      var lbl = metric === 'distinct'  ? ('Unique ' + (widget.config.column || '')) :
+      var label = metric === 'distinct'  ? ('Unique ' + (widget.config.column || '')) :
                 metric === 'escalated' ? 'Escalated' :
                 metric === 'busiest'   ? ('Busiest ' + (widget.config.column || '')) :
-                (isLogSource(wtable) ? 'Total rows' : 'Total alerts');
-      return lbl + suffix;
+                (isLogSource(widgetTable) ? 'Total rows' : 'Total alerts');
+      return label + suffix;
     }
     return 'Widget';
   }
   function widgetEl(widget) {
-    var el = document.createElement('div');
-    el.className = 'grid-stack-item';
-    el.setAttribute('gs-id', widget.id);
-    el.setAttribute('gs-x', widget.x); el.setAttribute('gs-y', widget.y);
-    el.setAttribute('gs-w', widget.w); el.setAttribute('gs-h', widget.h);
+    var element = document.createElement('div');
+    element.className = 'grid-stack-item';
+    element.setAttribute('gs-id', widget.id);
+    element.setAttribute('gs-x', widget.x); element.setAttribute('gs-y', widget.y);
+    element.setAttribute('gs-w', widget.w); element.setAttribute('gs-h', widget.h);
     var isStat = widget.type === 'stat';
-    el.innerHTML =
+    element.innerHTML =
       '<div class="grid-stack-item-content">'
       + '<div class="card border-secondary h-100 mb-0 db-card' + (isStat ? ' db-stat' : '') + '"><div class="card-body p-2 d-flex flex-column">'
       +   '<div class="d-flex align-items-center' + (isStat ? '' : ' mb-1') + '">'
@@ -532,9 +532,9 @@
             : '<div class="db-chart"><canvas data-role="canvas"></canvas></div>')
       + '</div></div>'
       + '</div>';
-    el.querySelector('[data-role=title]').textContent = widgetTitle(widget);
-    var cv = el.querySelector('canvas'); if (cv) { cv.id = 'chart-' + widget.id; }
-    return el;
+    element.querySelector('[data-role=title]').textContent = widgetTitle(widget);
+    var canvas = element.querySelector('canvas'); if (canvas) { canvas.id = 'chart-' + widget.id; }
+    return element;
   }
   function itemFor(id) { return document.querySelector('.grid-stack-item[gs-id="' + id + '"]'); }
   function showNote(widget, msg) {
@@ -555,13 +555,13 @@
   // ---- chart renderers ----
   function renderTop(widget, canvas, rows) {
     destroyChart(widget.id);
-    var labels = rows.map(function(r) { return r.value; });
-    var counts = rows.map(function(r) { return r.count; });
+    var labels = rows.map(function(row) { return row.value; });
+    var counts = rows.map(function(row) { return row.count; });
     if ((widget.config && widget.config.style) === 'pie') {
       charts[widget.id] = new Chart(canvas, {
         type: 'pie',
         data: { labels: labels,
-                datasets: [{ data: counts, backgroundColor: rows.map(function(_, i) { return PALETTE[i % PALETTE.length]; }) }] },
+                datasets: [{ data: counts, backgroundColor: rows.map(function(_, index) { return PALETTE[index % PALETTE.length]; }) }] },
         options: baseOpts({ plugins: { legend: { display: true, position: 'right' } } })
       });
     } else {
@@ -579,24 +579,24 @@
   function renderTimeseries(id, canvas, data, unit) {
     destroyChart(id);
     var rows = data.rows || [], bucketSet = {}, groupSet = {};
-    rows.forEach(function(r) { bucketSet[r.bucket] = 1; if (r.group !== undefined) { groupSet[r.group] = 1; } });
+    rows.forEach(function(row) { bucketSet[row.bucket] = 1; if (row.group !== undefined) { groupSet[row.group] = 1; } });
     var buckets = Object.keys(bucketSet).map(Number).sort(function(a, b) { return a - b; });
-    var bucketIndex = {}; buckets.forEach(function(b, i) { bucketIndex[b] = i; });
+    var bucketIndex = {}; buckets.forEach(function(bucket, index) { bucketIndex[bucket] = index; });
     var groups = Object.keys(groupSet), datasets;
     if (data.grouped && groups.length) {
-      datasets = groups.map(function(group, i) {
+      datasets = groups.map(function(group, index) {
         var seriesData = buckets.map(function() { return 0; });
-        rows.forEach(function(r) { if (r.group === group) { seriesData[bucketIndex[r.bucket]] = r.count; } });
-        var color = PALETTE[i % PALETTE.length];
+        rows.forEach(function(row) { if (row.group === group) { seriesData[bucketIndex[row.bucket]] = row.count; } });
+        var color = PALETTE[index % PALETTE.length];
         return { label: group, data: seriesData, backgroundColor: color, borderColor: color, stack: 's' };
       });
     } else {
       var seriesData = buckets.map(function() { return 0; });
-      rows.forEach(function(r) { seriesData[bucketIndex[r.bucket]] = r.count; });
+      rows.forEach(function(row) { seriesData[bucketIndex[row.bucket]] = row.count; });
       datasets = [{ label: 'alerts', data: seriesData, backgroundColor: PALETTE[1], borderColor: PALETTE[1] }];
     }
     charts[id] = new Chart(canvas, {
-      type: 'bar', data: { labels: buckets.map(function(b) { return bucketLabel(b, unit); }), datasets: datasets },
+      type: 'bar', data: { labels: buckets.map(function(bucket) { return bucketLabel(bucket, unit); }), datasets: datasets },
       options: baseOpts({
         interaction: { mode: 'index', intersect: false },
         scales: { x: { stacked: true, ticks: { maxRotation: 0, autoSkip: true } },
@@ -612,51 +612,51 @@
     var rows = data.rows || [];
     charts[widget.id] = new Chart(canvas, {
       type: 'bar',
-      data: { labels: rows.map(function(r) { return (flag(r.country) + ' ' + r.country).trim(); }),
-              datasets: [{ data: rows.map(function(r) { return r.count; }), backgroundColor: PALETTE[3] }] },
+      data: { labels: rows.map(function(row) { return (flag(row.country) + ' ' + row.country).trim(); }),
+              datasets: [{ data: rows.map(function(row) { return row.count; }), backgroundColor: PALETTE[3] }] },
       options: baseOpts({ indexAxis: 'y', scales: { x: { beginAtZero: true } }, plugins: { legend: { display: false } } })
     });
   }
 
   // ---- data loading ----
-  function loadStat(widget, base, wtable) {
+  function loadStat(widget, base, widgetTable) {
     var item = itemFor(widget.id); if (!item) { return; }
-    var valEl = item.querySelector('[data-role=stat-value]'); if (!valEl) { return; }
-    getJSON(base + '/stat' + qsFor(wtable, { metric: widget.config.metric, column: widget.config.column }))
+    var valueEl = item.querySelector('[data-role=stat-value]'); if (!valueEl) { return; }
+    getJSON(base + '/stat' + qsFor(widgetTable, { metric: widget.config.metric, column: widget.config.column }))
       .then(function(data) {
         clearNote(widget);
-        var v = data.value;
-        var fmtd = (typeof v === 'number')
-          ? (widget.config.abbrev ? fmtNum(v) : v.toLocaleString())
-          : String(v);
-        valEl.textContent = (v === undefined || v === null) ? '–' : fmtd;
-        valEl.title = valEl.textContent;
+        var value = data.value;
+        var formatted = (typeof value === 'number')
+          ? (widget.config.abbrev ? fmtNum(value) : value.toLocaleString())
+          : String(value);
+        valueEl.textContent = (value === undefined || value === null) ? '–' : formatted;
+        valueEl.title = valueEl.textContent;
       })
-      .catch(function(err) { showNote(widget, err.message); });
+      .catch(function(error) { showNote(widget, error.message); });
   }
   function loadWidget(widget) {
-    var wtable = widget.config.table || state.table;
-    var base = apiBase(wtable);
-    if (widget.type === 'stat') { return loadStat(widget, base, wtable); }
+    var widgetTable = widget.config.table || state.table;
+    var base = apiBase(widgetTable);
+    if (widget.type === 'stat') { return loadStat(widget, base, widgetTable); }
     var canvas = document.getElementById('chart-' + widget.id);
     if (!canvas) { return; }
     if (widget.type === 'top') {
-      getJSON(base + '/top' + qsFor(wtable, { column: widget.config.column, limit: widget.config.limit || 10, measure: widget.config.measure }))
+      getJSON(base + '/top' + qsFor(widgetTable, { column: widget.config.column, limit: widget.config.limit || 10, measure: widget.config.measure }))
         .then(function(data) { clearNote(widget); renderTop(widget, canvas, data.rows || []); })
-        .catch(function(err) { showNote(widget, err.message); });
+        .catch(function(error) { showNote(widget, error.message); });
     } else if (widget.type === 'timeseries') {
       var unit = resolveBucket(widget);
-      getJSON(base + '/timeseries' + qsFor(wtable, { bucket: unit, group_by: widget.config.group_by, top_groups: 6, measure: widget.config.measure }))
+      getJSON(base + '/timeseries' + qsFor(widgetTable, { bucket: unit, group_by: widget.config.group_by, top_groups: 6, measure: widget.config.measure }))
         .then(function(data) {
           // log timeseries buckets are ISO strings; the renderer wants epoch seconds
-          if (isLogSource(wtable)) { (data.rows || []).forEach(function(r) { r.bucket = Math.floor(new Date(r.bucket).getTime() / 1000); }); }
+          if (isLogSource(widgetTable)) { (data.rows || []).forEach(function(row) { row.bucket = Math.floor(new Date(row.bucket).getTime() / 1000); }); }
           clearNote(widget); renderTimeseries(widget.id, canvas, data, unit);
         })
-        .catch(function(err) { showNote(widget, err.message); });
+        .catch(function(error) { showNote(widget, error.message); });
     } else if (widget.type === 'countries') {
-      getJSON(base + '/countries' + qsFor(wtable))
+      getJSON(base + '/countries' + qsFor(widgetTable))
         .then(function(data) { renderCountries(widget, canvas, data); })
-        .catch(function(err) { showNote(widget, err.message); });
+        .catch(function(error) { showNote(widget, error.message); });
     }
   }
   function refresh() {
@@ -672,14 +672,14 @@
     suppressSave = true;
     Object.keys(charts).forEach(destroyChart);
     grid.removeAll();
-    widgets.forEach(function(widget) { var el = widgetEl(widget); grid.el.appendChild(el); grid.makeWidget(el); });
+    widgets.forEach(function(widget) { var element = widgetEl(widget); grid.el.appendChild(element); grid.makeWidget(element); });
     setTimeout(function() { suppressSave = false; }, 0);
   }
   function currentLayout() {
-    return (grid.save(false) || []).map(function(n) {
-      var widget = widgets.filter(function(x) { return x.id === n.id; })[0] || {};
-      return { id: n.id, type: widget.type, config: widget.config || {}, x: n.x, y: n.y, w: n.w, h: n.h };
-    }).filter(function(n) { return n.type; });
+    return (grid.save(false) || []).map(function(node) {
+      var widget = widgets.filter(function(candidate) { return candidate.id === node.id; })[0] || {};
+      return { id: node.id, type: widget.type, config: widget.config || {}, x: node.x, y: node.y, w: node.w, h: node.h };
+    }).filter(function(node) { return node.type; });
   }
   // The board's view state travels with its layout, so switching to a board
   // restores its own table / time range / GPCD setting.
@@ -691,7 +691,7 @@
   var saveTimer;
   function saveLayout() {
     var layout = currentLayout();
-    widgets = layout.map(function(n) { return { id: n.id, type: n.type, config: n.config, x: n.x, y: n.y, w: n.w, h: n.h }; });
+    widgets = layout.map(function(node) { return { id: node.id, type: node.type, config: node.config, x: node.x, y: node.y, w: node.w, h: node.h }; });
     postLayout(layout).catch(function() {});
   }
   // Only persist while editing: out of edit mode the grid is locked, so a change
@@ -706,21 +706,21 @@
     editing = !!on;
     document.body.classList.toggle('db-editing', editing);
     grid.setStatic(!editing);
-    var btn = document.getElementById('db-edit');
-    btn.classList.toggle('active', editing);
-    btn.textContent = editing ? 'Done' : 'Edit';
+    var button = document.getElementById('db-edit');
+    button.classList.toggle('active', editing);
+    button.textContent = editing ? 'Done' : 'Edit';
   }
 
   // config / remove buttons (event-delegated on the grid). The buttons are
   // hidden outside edit mode, but guard anyway.
   grid.el.addEventListener('click', function(event) {
-    var btn = event.target.closest('[data-act]'); if (!btn) { return; }
+    var button = event.target.closest('[data-act]'); if (!button) { return; }
     event.preventDefault();
     if (!editing) { return; }
-    var item = btn.closest('.grid-stack-item'); var id = item && item.getAttribute('gs-id'); if (!id) { return; }
-    if (btn.getAttribute('data-act') === 'remove') {
+    var item = button.closest('.grid-stack-item'); var id = item && item.getAttribute('gs-id'); if (!id) { return; }
+    if (button.getAttribute('data-act') === 'remove') {
       destroyChart(id); grid.removeWidget(item);
-      widgets = widgets.filter(function(x) { return x.id !== id; });
+      widgets = widgets.filter(function(candidate) { return candidate.id !== id; });
       saveLayout();
     } else {
       openModal(id);
@@ -765,27 +765,27 @@
   // picker changes) they reset to that table's defaults.
   function populateFields(table, widget) {
     return Promise.all([loadColumns(table), loadMeasures(table)]).then(function(results) {
-      var cols = results[0], meas = results[1];
-      var colSel = document.getElementById('wm-column'), grpSel = document.getElementById('wm-group');
-      var measSel = document.getElementById('wm-measure');
-      colSel.innerHTML = ''; grpSel.innerHTML = '<option value="">(none)</option>'; measSel.innerHTML = '';
-      cols.forEach(function(c) {
-        var colOption = document.createElement('option'); colOption.value = c; colOption.textContent = c; colSel.appendChild(colOption);
-        var groupOption = document.createElement('option'); groupOption.value = c; groupOption.textContent = c; grpSel.appendChild(groupOption);
+      var columns = results[0], measures = results[1];
+      var columnSelect = document.getElementById('wm-column'), groupSelect = document.getElementById('wm-group');
+      var measureSelect = document.getElementById('wm-measure');
+      columnSelect.innerHTML = ''; groupSelect.innerHTML = '<option value="">(none)</option>'; measureSelect.innerHTML = '';
+      columns.forEach(function(column) {
+        var columnOption = document.createElement('option'); columnOption.value = column; columnOption.textContent = column; columnSelect.appendChild(columnOption);
+        var groupOption = document.createElement('option'); groupOption.value = column; groupOption.textContent = column; groupSelect.appendChild(groupOption);
       });
-      meas.forEach(function(measure) {
-        var option = document.createElement('option'); option.value = measure.name; option.textContent = measure.label; measSel.appendChild(option);
+      measures.forEach(function(measure) {
+        var option = document.createElement('option'); option.value = measure.name; option.textContent = measure.label; measureSelect.appendChild(option);
       });
-      if (widget && (widget.type === 'top' || widget.type === 'stat')) { colSel.value = widget.config.column || ''; }
-      if (widget && widget.type === 'timeseries') { grpSel.value = widget.config.group_by || ''; }
+      if (widget && (widget.type === 'top' || widget.type === 'stat')) { columnSelect.value = widget.config.column || ''; }
+      if (widget && widget.type === 'timeseries') { groupSelect.value = widget.config.group_by || ''; }
       document.getElementById('wm-style').value = (widget && widget.config.style) ? widget.config.style : 'bar';
       document.getElementById('wm-limit').value = (widget && widget.config.limit) ? widget.config.limit : 10;
-      measSel.value = (widget && widget.config.measure) ? widget.config.measure : 'count';
+      measureSelect.value = (widget && widget.config.measure) ? widget.config.measure : 'count';
     });
   }
   function openModal(id) {
     editingId = id || null;
-    var widget = id ? widgets.filter(function(x) { return x.id === id; })[0] : null;
+    var widget = id ? widgets.filter(function(candidate) { return candidate.id === id; })[0] : null;
     document.getElementById('widget-modal-title').textContent = id ? 'Configure widget' : 'Add widget';
     // '' = follow the board default (unpinned); a concrete table pins the widget
     var pinned = (widget && widget.config.table) || '';
@@ -808,13 +808,13 @@
     if (type === 'top') {
       config.column = document.getElementById('wm-column').value;
       config.style = document.getElementById('wm-style').value;
-      var lim = parseInt(document.getElementById('wm-limit').value, 10);
-      if (isNaN(lim) || lim < 1) { lim = 1; } if (lim > 50) { lim = 50; }
-      config.limit = lim;
+      var limit = parseInt(document.getElementById('wm-limit').value, 10);
+      if (isNaN(limit) || limit < 1) { limit = 1; } if (limit > 50) { limit = 50; }
+      config.limit = limit;
     }
     if (type === 'timeseries') {
       var group = document.getElementById('wm-group').value; if (group) { config.group_by = group; }
-      var bkt = document.getElementById('wm-bucket').value; if (bkt) { config.bucket = bkt; }
+      var bucket = document.getElementById('wm-bucket').value; if (bucket) { config.bucket = bucket; }
     }
     if ((type === 'top' || type === 'timeseries') && measure && measure !== 'count') { config.measure = measure; }
     if (type === 'stat') {
@@ -827,10 +827,10 @@
     }
     // a concrete table pins the widget (even if it equals the current default);
     // the empty "Follow default table" option leaves it following the board
-    var wtable = document.getElementById('wm-table').value;
-    if (wtable) { config.table = wtable; }
+    var widgetTable = document.getElementById('wm-table').value;
+    if (widgetTable) { config.table = widgetTable; }
     if (editingId) {
-      var widget = widgets.filter(function(x) { return x.id === editingId; })[0];
+      var widget = widgets.filter(function(candidate) { return candidate.id === editingId; })[0];
       if (widget) { widget.type = type; widget.config = config; }
     } else {
       widgets.push({ id: uid(), type: type, config: config, x: 0, y: 1000, w: 4, h: 4 });
@@ -847,10 +847,10 @@
   // board (currentSettings persists only the relative go_back_minutes).
   var trRoot = document.querySelector('.time-range');
   function readTimeRange() {
-    var w = window.LilithTimeRange && window.LilithTimeRange.read(trRoot);
-    if (!w) { return; }
-    if (w.start || w.end) { state.start = w.start; state.end = w.end; }
-    else { state.mins = Number(w.go_back_minutes) || state.mins; state.start = ''; state.end = ''; }
+    var range = window.LilithTimeRange && window.LilithTimeRange.read(trRoot);
+    if (!range) { return; }
+    if (range.start || range.end) { state.start = range.start; state.end = range.end; }
+    else { state.mins = Number(range.go_back_minutes) || state.mins; state.start = ''; state.end = ''; }
   }
   // A view control changed: always re-pull; when editing, persist it to the board.
   function viewChanged() { refresh(); if (editing) { clearTimeout(saveTimer); saveTimer = setTimeout(saveLayout, 400); } }
@@ -862,8 +862,8 @@
   document.getElementById('db-add-widget').addEventListener('click', function() { openModal(null); });
   // Reset menu: replace the board with a named preset. An alert preset also sets
   // the board's Default table; a log preset leaves it (its widgets pin a source).
-  Array.prototype.forEach.call(document.querySelectorAll('[data-preset]'), function(el) {
-    el.addEventListener('click', function(event) {
+  Array.prototype.forEach.call(document.querySelectorAll('[data-preset]'), function(element) {
+    element.addEventListener('click', function(event) {
       event.preventDefault();
       var preset = PRESET[this.getAttribute('data-preset')]; if (!preset) { return; }
       if (!window.confirm("Replace this dashboard's widgets with the " + preset.label + " preset?")) { return; }
@@ -873,12 +873,12 @@
   document.getElementById('db-edit').addEventListener('click', function() { setEditing(!editing); });
 
   // ---- dashboards (boards) ----
-  function applySettings(s) {
-    s = s || {};
-    if (s.table && /^(?:suricata|sagan|cape|baphomet|syslog|http|http_error)$/.test(s.table)) { state.table = s.table; }
-    if (s.go_back_minutes) { state.mins = Number(s.go_back_minutes); }
-    if (s.show_gpcd !== undefined) { state.showGpcd = !!s.show_gpcd; }
-    state.bucket = (s.bucket && /^(?:auto|minute|hour|day|week|month)$/.test(s.bucket)) ? s.bucket : 'auto';
+  function applySettings(settings) {
+    settings = settings || {};
+    if (settings.table && /^(?:suricata|sagan|cape|baphomet|syslog|http|http_error)$/.test(settings.table)) { state.table = settings.table; }
+    if (settings.go_back_minutes) { state.mins = Number(settings.go_back_minutes); }
+    if (settings.show_gpcd !== undefined) { state.showGpcd = !!settings.show_gpcd; }
+    state.bucket = (settings.bucket && /^(?:auto|minute|hour|day|week|month)$/.test(settings.bucket)) ? settings.bucket : 'auto';
     state.start = ''; state.end = '';
     document.getElementById('db-table').value = state.table;
     document.getElementById('db-gpcd').checked = state.showGpcd;
@@ -889,16 +889,16 @@
   function loadBoards(want) {
     return getJSON('/api/dashboard/boards').then(function(data) {
       var boards = data.boards || [];
-      var sel = document.getElementById('db-board');
-      sel.innerHTML = '';
-      boards.forEach(function(b) {
+      var select = document.getElementById('db-board');
+      select.innerHTML = '';
+      boards.forEach(function(board) {
         var option = document.createElement('option');
-        option.value = b.name;
-        option.textContent = b.name + (b.is_default ? ' ★' : '');
-        sel.appendChild(option);
+        option.value = board.name;
+        option.textContent = board.name + (board.is_default ? ' ★' : '');
+        select.appendChild(option);
       });
       var target = want || data.default || (boards[0] && boards[0].name) || 'default';
-      sel.value = target; state.board = target;
+      select.value = target; state.board = target;
       return target;
     });
   }
@@ -908,9 +908,9 @@
     return getJSON('/api/dashboard/layout?name=' + encodeURIComponent(name)).then(function(data) {
       state.board = data.name || name;
       applySettings(data.settings);
-      var layout = (data && Array.isArray(data.layout)) ? data.layout.filter(function(w) { return w && w.type; }) : [];
+      var layout = (data && Array.isArray(data.layout)) ? data.layout.filter(function(widget) { return widget && widget.type; }) : [];
       widgets = layout.length
-        ? layout.map(function(w) { return { id: w.id || uid(), type: w.type, config: w.config || {}, x: w.x || 0, y: w.y || 0, w: w.w || 4, h: w.h || 4 }; })
+        ? layout.map(function(widget) { return { id: widget.id || uid(), type: widget.type, config: widget.config || {}, x: widget.x || 0, y: widget.y || 0, w: widget.w || 4, h: widget.h || 4 }; })
         : (data.is_default ? seedDefaults() : []);
       rebuildGrid(); refresh();
     });
@@ -918,7 +918,7 @@
   document.getElementById('db-board').addEventListener('change', function() {
     if (editing) { setEditing(false); }
     clearError();
-    loadBoard(this.value).catch(function(err) { showError(err.message); });
+    loadBoard(this.value).catch(function(error) { showError(error.message); });
   });
 
   // New and Rename share one modal.
@@ -936,8 +936,8 @@
   document.getElementById('db-rename').addEventListener('click', function(event) { event.preventDefault(); openBoardModal('rename'); });
   document.getElementById('board-modal-save').addEventListener('click', function() {
     var name = document.getElementById('board-name').value.trim();
-    var errEl = document.getElementById('board-modal-error');
-    if (!name) { errEl.textContent = 'A name is required.'; errEl.style.display = ''; return; }
+    var errorEl = document.getElementById('board-modal-error');
+    if (!name) { errorEl.textContent = 'A name is required.'; errorEl.style.display = ''; return; }
     var request = (boardModalMode === 'rename')
       ? postJSON('/api/dashboard/rename', { name: state.board, to: name })
       : postJSON('/api/dashboard/boards', { name: name });
@@ -945,20 +945,20 @@
       getBoardModal().hide();
       var newName = data.name || name;
       return loadBoards(newName).then(function() { return loadBoard(newName); });
-    }).catch(function(err) { errEl.textContent = err.message; errEl.style.display = ''; });
+    }).catch(function(error) { errorEl.textContent = error.message; errorEl.style.display = ''; });
   });
   document.getElementById('db-set-default').addEventListener('click', function(event) {
     event.preventDefault(); clearError();
     postJSON('/api/dashboard/default', { name: state.board })
       .then(function() { return loadBoards(state.board); })
-      .catch(function(err) { showError(err.message); });
+      .catch(function(error) { showError(error.message); });
   });
   document.getElementById('db-delete').addEventListener('click', function(event) {
     event.preventDefault(); clearError();
     if (!window.confirm('Delete dashboard "' + state.board + '"? This cannot be undone.')) { return; }
     postJSON('/api/dashboard/delete', { name: state.board })
       .then(function() { return loadBoards().then(function(name) { return loadBoard(name); }); })
-      .catch(function(err) { showError(err.message); });
+      .catch(function(error) { showError(error.message); });
   });
 
   // ---- boot ----

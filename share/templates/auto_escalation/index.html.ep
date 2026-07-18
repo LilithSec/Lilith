@@ -35,37 +35,37 @@
           </tr>
         </thead>
         <tbody>
-          % for my $r (@$rules) {
-          <tr data-rule-id="<%= $r->{id} %>">
-            <td><%= $r->{id} %></td>
-            <td><%= $r->{name} %></td>
+          % for my $rule (@$rules) {
+          <tr data-rule-id="<%= $rule->{id} %>">
+            <td><%= $rule->{id} %></td>
+            <td><%= $rule->{name} %></td>
             <td>
               % if ($can_manage) {
               <div class="form-check form-switch mb-0">
                 <input class="form-check-input rule-toggle" type="checkbox"
-                       data-rule-id="<%= $r->{id} %>" <%= $r->{enabled} ? 'checked' : '' %>>
+                       data-rule-id="<%= $rule->{id} %>" <%= $rule->{enabled} ? 'checked' : '' %>>
               </div>
-              % } elsif ($r->{enabled}) {
+              % } elsif ($rule->{enabled}) {
               <span class="badge bg-success">enabled</span>
               % } else {
               <span class="badge bg-secondary">disabled</span>
               % }
             </td>
-            <td><%= $r->{priority} %></td>
-            <td><%= $r->{stop_on_match} ? 'yes' : '' %></td>
-            <td class="small"><%= join(',', @{ $r->{tables} }) %></td>
-            <td><%= $r->{match_count} %></td>
-            <td class="text-muted small"><%= $r->{last_matched} // '' %></td>
-            <td><%= $r->{description} // '' %></td>
+            <td><%= $rule->{priority} %></td>
+            <td><%= $rule->{stop_on_match} ? 'yes' : '' %></td>
+            <td class="small"><%= join(',', @{ $rule->{tables} }) %></td>
+            <td><%= $rule->{match_count} %></td>
+            <td class="text-muted small"><%= $rule->{last_matched} // '' %></td>
+            <td><%= $rule->{description} // '' %></td>
             <td class="text-nowrap">
               % if ($can_manage) {
               <button type="button" class="btn btn-sm btn-outline-secondary py-0 rule-edit-btn"
-                      data-rule-id="<%= $r->{id} %>">Edit</button>
+                      data-rule-id="<%= $rule->{id} %>">Edit</button>
               <button type="button" class="btn btn-sm btn-outline-danger py-0 rule-delete-btn"
-                      data-rule-id="<%= $r->{id} %>" data-rule-name="<%= $r->{name} %>">Delete</button>
+                      data-rule-id="<%= $rule->{id} %>" data-rule-name="<%= $rule->{name} %>">Delete</button>
               % } else {
               <button type="button" class="btn btn-sm btn-outline-secondary py-0 rule-edit-btn"
-                      data-rule-id="<%= $r->{id} %>">View</button>
+                      data-rule-id="<%= $rule->{id} %>">View</button>
               % }
             </td>
           </tr>
@@ -211,15 +211,15 @@ document.addEventListener('DOMContentLoaded', function() {
   var ruleModal = new bootstrap.Modal(document.getElementById('rule-modal'));
   var statusEl  = document.getElementById('ae-action-status');
 
-  function status(msg, ok) {
-    statusEl.textContent = msg;
-    statusEl.className = 'small mb-2 ' + (ok ? 'text-success' : 'text-warning');
+  function status(message, isSuccess) {
+    statusEl.textContent = message;
+    statusEl.className = 'small mb-2 ' + (isSuccess ? 'text-success' : 'text-warning');
     statusEl.style.display = '';
   }
 
   function findRule(id) {
-    for (var i = 0; i < AE_RULES.length; i++) {
-      if (String(AE_RULES[i].id) === String(id)) { return AE_RULES[i]; }
+    for (var index = 0; index < AE_RULES.length; index++) {
+      if (String(AE_RULES[index].id) === String(id)) { return AE_RULES[index]; }
     }
     return null;
   }
@@ -233,29 +233,29 @@ document.addEventListener('DOMContentLoaded', function() {
   var AE_OPS  = ['==','!=','>','>=','<','<=','regex','in','contains','exists'];
   var jsonMode = false;
 
-  function el(tag, attrs, kids) {
+  function createElement(tag, attributes, children) {
     var element = document.createElement(tag);
-    if (attrs) { Object.keys(attrs).forEach(function(attrName){
-      if (attrName === 'class') { element.className = attrs[attrName]; }
-      else if (attrName === 'text') { element.textContent = attrs[attrName]; }
-      else { element.setAttribute(attrName, attrs[attrName]); }
+    if (attributes) { Object.keys(attributes).forEach(function(attrName){
+      if (attrName === 'class') { element.className = attributes[attrName]; }
+      else if (attrName === 'text') { element.textContent = attributes[attrName]; }
+      else { element.setAttribute(attrName, attributes[attrName]); }
     }); }
-    (kids || []).forEach(function(child){ if (child) { element.appendChild(child); } });
+    (children || []).forEach(function(child){ if (child) { element.appendChild(child); } });
     return element;
   }
 
   // numeric-looking strings become numbers so ==/in compare as intended
-  function coerce(value) { return /^-?\d+(\.\d+)?$/.test(value) ? Number(value) : value; }
+  function coerceValue(value) { return /^-?\d+(\.\d+)?$/.test(value) ? Number(value) : value; }
 
-  function valueWidget(op, value) {
-    if (op === 'exists') {
-      var select = el('select', { class: 'form-select form-select-sm leaf-value', style: 'max-width:6rem' });
-      ['true','false'].forEach(function(optionValue){ select.appendChild(el('option', { value: optionValue, text: optionValue })); });
+  function valueWidget(operator, value) {
+    if (operator === 'exists') {
+      var select = createElement('select', { class: 'form-select form-select-sm leaf-value', style: 'max-width:6rem' });
+      ['true','false'].forEach(function(optionValue){ select.appendChild(createElement('option', { value: optionValue, text: optionValue })); });
       select.value = (value === false ? 'false' : 'true');
       return select;
     }
-    var input = el('input', { type: 'text', class: 'form-control form-control-sm leaf-value', style: 'max-width:13rem' });
-    if (op === 'in') {
+    var input = createElement('input', { type: 'text', class: 'form-control form-control-sm leaf-value', style: 'max-width:13rem' });
+    if (operator === 'in') {
       input.placeholder = 'a, b, c';
       input.value = Array.isArray(value) ? value.join(', ') : (value == null ? '' : value);
     } else {
@@ -266,60 +266,60 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function negateControl(checked) {
-    var checkbox = el('input', { type: 'checkbox', class: 'form-check-input mt-0 node-negate' });
+    var checkbox = createElement('input', { type: 'checkbox', class: 'form-check-input mt-0 node-negate' });
     checkbox.checked = !!checked;
-    return el('label', { class: 'small text-muted mb-0 d-inline-flex align-items-center gap-1' },
+    return createElement('label', { class: 'small text-muted mb-0 d-inline-flex align-items-center gap-1' },
               [checkbox, document.createTextNode('not')]);
   }
 
   function makeLeaf(leaf) {
     leaf = leaf || { field: '', op: '==', value: '' };
-    var row = el('div', { class: 'leaf-node d-flex gap-1 align-items-center mb-1 flex-wrap' });
+    var row = createElement('div', { class: 'leaf-node d-flex gap-1 align-items-center mb-1 flex-wrap' });
     row.dataset.kind = 'leaf';
 
-    var field = el('input', { type: 'text', class: 'form-control form-control-sm leaf-field',
+    var field = createElement('input', { type: 'text', class: 'form-control form-control-sm leaf-field',
                               list: 'rule-field-list', placeholder: 'field', style: 'max-width:12rem' });
     field.value = leaf.field || '';
 
-    var opSelect = el('select', { class: 'form-select form-select-sm leaf-op', style: 'max-width:6.5rem' });
-    AE_OPS.forEach(function(operator){ var option = el('option', { value: operator, text: operator }); if (operator === leaf.op) { option.selected = true; } opSelect.appendChild(option); });
+    var operatorSelect = createElement('select', { class: 'form-select form-select-sm leaf-op', style: 'max-width:6.5rem' });
+    AE_OPS.forEach(function(operator){ var option = createElement('option', { value: operator, text: operator }); if (operator === leaf.op) { option.selected = true; } operatorSelect.appendChild(option); });
 
-    var valWrap = el('span', { class: 'leaf-value-wrap' }, [ valueWidget(leaf.op, leaf.value) ]);
-    opSelect.addEventListener('change', function(){
-      var currentValue = valWrap.firstChild ? valWrap.firstChild.value : '';
-      valWrap.innerHTML = '';
-      valWrap.appendChild(valueWidget(opSelect.value, currentValue));
+    var valueWrap = createElement('span', { class: 'leaf-value-wrap' }, [ valueWidget(leaf.op, leaf.value) ]);
+    operatorSelect.addEventListener('change', function(){
+      var currentValue = valueWrap.firstChild ? valueWrap.firstChild.value : '';
+      valueWrap.innerHTML = '';
+      valueWrap.appendChild(valueWidget(operatorSelect.value, currentValue));
     });
 
-    var removeBtn = el('button', { type: 'button', class: 'btn btn-sm btn-outline-danger py-0 node-remove', text: '×' });
+    var removeBtn = createElement('button', { type: 'button', class: 'btn btn-sm btn-outline-danger py-0 node-remove', text: '×' });
     removeBtn.addEventListener('click', function(){ row.remove(); });
 
     row.appendChild(negateControl(leaf.negate));
     row.appendChild(field);
-    row.appendChild(opSelect);
-    row.appendChild(valWrap);
+    row.appendChild(operatorSelect);
+    row.appendChild(valueWrap);
     row.appendChild(removeBtn);
     return row;
   }
 
   function makeGroup(group, isRoot) {
     group = group || { combinator: 'all', negate: false, children: [] };
-    var groupEl = el('div', { class: 'group-node border-start border-2 border-secondary ps-2 mb-1' });
+    var groupEl = createElement('div', { class: 'group-node border-start border-2 border-secondary ps-2 mb-1' });
     groupEl.dataset.kind = 'group';
 
-    var combSelect = el('select', { class: 'form-select form-select-sm group-combinator', style: 'max-width:6rem' });
-    [['all','ALL'],['any','ANY']].forEach(function(comboPair){ var option = el('option', { value: comboPair[0], text: comboPair[1] }); if (comboPair[0] === group.combinator) { option.selected = true; } combSelect.appendChild(option); });
+    var combinatorSelect = createElement('select', { class: 'form-select form-select-sm group-combinator', style: 'max-width:6rem' });
+    [['all','ALL'],['any','ANY']].forEach(function(comboPair){ var option = createElement('option', { value: comboPair[0], text: comboPair[1] }); if (comboPair[0] === group.combinator) { option.selected = true; } combinatorSelect.appendChild(option); });
 
-    var childrenEl = el('div', { class: 'group-children ms-1' });
-    var addCond = el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary py-0', text: '+ condition' });
-    var addGrp  = el('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary py-0', text: '+ group' });
-    addCond.addEventListener('click', function(){ childrenEl.appendChild(makeLeaf(null)); });
-    addGrp.addEventListener('click', function(){ childrenEl.appendChild(makeGroup(null, false)); });
+    var childrenEl = createElement('div', { class: 'group-children ms-1' });
+    var addConditionBtn = createElement('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary py-0', text: '+ condition' });
+    var addGroupBtn  = createElement('button', { type: 'button', class: 'btn btn-sm btn-outline-secondary py-0', text: '+ group' });
+    addConditionBtn.addEventListener('click', function(){ childrenEl.appendChild(makeLeaf(null)); });
+    addGroupBtn.addEventListener('click', function(){ childrenEl.appendChild(makeGroup(null, false)); });
 
-    var headerEl = el('div', { class: 'd-flex gap-1 align-items-center mb-1 flex-wrap' },
-                  [ negateControl(group.negate), combSelect, addCond, addGrp ]);
+    var headerEl = createElement('div', { class: 'd-flex gap-1 align-items-center mb-1 flex-wrap' },
+                  [ negateControl(group.negate), combinatorSelect, addConditionBtn, addGroupBtn ]);
     if (!isRoot) {
-      var removeBtn = el('button', { type: 'button', class: 'btn btn-sm btn-outline-danger py-0 node-remove', text: '× group' });
+      var removeBtn = createElement('button', { type: 'button', class: 'btn btn-sm btn-outline-danger py-0 node-remove', text: '× group' });
       removeBtn.addEventListener('click', function(){ groupEl.remove(); });
       headerEl.appendChild(removeBtn);
     }
@@ -362,19 +362,19 @@ document.addEventListener('DOMContentLoaded', function() {
       result = {}; result[combinator] = children;
     } else {
       negate = node.querySelector('.node-negate').checked;
-      var op  = node.querySelector('.leaf-op').value;
+      var operator  = node.querySelector('.leaf-op').value;
       var valueEl = node.querySelector('.leaf-value');
-      result = { field: node.querySelector('.leaf-field').value.trim(), op: op };
-      if (op === 'exists') {
+      result = { field: node.querySelector('.leaf-field').value.trim(), op: operator };
+      if (operator === 'exists') {
         result.value = (valueEl.value === 'true');
-      } else if (op === 'in') {
-        result.value = valueEl.value.split(',').map(function(part){ return coerce(part.trim()); }).filter(function(part){ return part !== ''; });
-      } else if (op === '>' || op === '>=' || op === '<' || op === '<=') {
+      } else if (operator === 'in') {
+        result.value = valueEl.value.split(',').map(function(part){ return coerceValue(part.trim()); }).filter(function(part){ return part !== ''; });
+      } else if (operator === '>' || operator === '>=' || operator === '<' || operator === '<=') {
         result.value = Number(valueEl.value);
-      } else if (op === 'regex' || op === 'contains') {
+      } else if (operator === 'regex' || operator === 'contains') {
         result.value = valueEl.value;
       } else {
-        result.value = coerce(valueEl.value);
+        result.value = coerceValue(valueEl.value);
       }
     }
     if (negate) { result = { not: result }; }
@@ -550,17 +550,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
   document.querySelectorAll('.rule-toggle').forEach(function(toggleInput){
     toggleInput.addEventListener('change', function(){
-      var id = this.dataset.ruleId, want = this.checked, checkbox = this;
+      var id = this.dataset.ruleId, wantEnabled = this.checked, checkbox = this;
       fetch('/api/auto_escalation/rules/' + encodeURIComponent(id) + '/toggle', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: want ? 1 : 0 })
+        body: JSON.stringify({ enabled: wantEnabled ? 1 : 0 })
       })
         .then(function(response){ return response.json().then(function(data){ return { ok: response.ok, data: data }; }); })
         .then(function(result){
-          if (!result.ok || result.data.error) { checkbox.checked = !want; status(result.data.error || 'toggle failed', false); return; }
-          status('rule ' + id + (want ? ' enabled' : ' disabled'), true);
+          if (!result.ok || result.data.error) { checkbox.checked = !wantEnabled; status(result.data.error || 'toggle failed', false); return; }
+          status('rule ' + id + (wantEnabled ? ' enabled' : ' disabled'), true);
         })
-        .catch(function(err){ checkbox.checked = !want; status('toggle failed: ' + err, false); });
+        .catch(function(err){ checkbox.checked = !wantEnabled; status('toggle failed: ' + err, false); });
     });
   });
 
