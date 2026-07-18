@@ -15,7 +15,10 @@ Along the top:
 - **Default table** — the annal the stat cards read, and the default for any
   widget that does not set its own: Suricata, Sagan, or CAPE. Each widget can
   override it (see the widget config below), so one board can span tables.
-- **Time range** — 1h / 6h / 24h / 7d.
+- **Time range** — a preset relative window (Last hour … Last 30 days) or a
+  **Custom range** with From/To pickers (native date plus 24-hour hour/minute).
+  A relative window is what the board saves; a custom absolute range is a live
+  override that is not persisted with the board.
 - **Show GPCD** — off by default. When off, `Generic Protocol Command Decode`
   alerts are excluded everywhere (as the search page hides them). Tick it to
   include them. Only affects tables with a classification (Suricata/Sagan).

@@ -48,6 +48,13 @@ sub _params {
 	my $sg     = $self->param('show_gpcd');
 	my @filter = ( defined $sg && $sg eq '1' ) ? () : ( exclude_classification => $GPCD );
 
+	# An optional absolute start/end range, spread into every Stats call alongside
+	# the exclude; Lilith::Stats prefers it over the now-relative go_back_minutes.
+	for my $bound (qw( start end )) {
+		my $val = $self->param($bound);
+		push( @filter, ( $bound => $val ) ) if defined $val && $val ne '';
+	}
+
 	return ( $table, $mins, @filter );
 } ## end sub _params
 

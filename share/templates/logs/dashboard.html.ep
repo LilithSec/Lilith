@@ -16,11 +16,7 @@
             % }
           </select>
         </div>
-        <div class="col-auto">
-          <label class="form-label">Minutes back</label>
-          <input type="number" name="go_back_minutes" class="form-control form-control-sm"
-                 value="<%= $go_back_minutes %>" style="width:110px" min="1">
-        </div>
+        %= include 'partials/_time_range', tr_minutes => $go_back_minutes, tr_start => $start, tr_end => $end
         <div class="col-auto">
           <label class="form-label">Bucket</label>
           <select id="ts-bucket" class="form-select form-select-sm" style="width:100px">
@@ -111,6 +107,7 @@
 </div>
 
 <script src="/vendor/Chart.js"></script>
+<script src="/js/time-range.js"></script>
 <script>
   Chart.defaults.color = '#adb5bd';
   Chart.defaults.borderColor = 'rgba(255,255,255,0.08)';
@@ -118,6 +115,8 @@
 
   var SOURCE = '<%= $source %>';
   var MINS   = '<%= $go_back_minutes %>';
+  var START  = <%== Mojo::JSON::to_json( $start ) %>;
+  var END    = <%== Mojo::JSON::to_json( $end ) %>;
   var GEOIP  = <%= $geoip ? 1 : 0 %>;
   var PANEL_DIMS = [<% for my $d (@panel_dims) { %>'<%= $d %>',<% } %>];
   // dimensions with few distinct values read better as a doughnut than a bar
@@ -129,7 +128,12 @@
     return fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       .then(function(r) { if (!r.ok) { throw new Error('HTTP ' + r.status); } return r.json(); });
   }
-  function baseQs() { return 'source=' + encodeURIComponent(SOURCE) + '&go_back_minutes=' + encodeURIComponent(MINS); }
+  function baseQs() {
+    var qs = 'source=' + encodeURIComponent(SOURCE) + '&go_back_minutes=' + encodeURIComponent(MINS);
+    if (START) { qs += '&start=' + encodeURIComponent(START); }
+    if (END)   { qs += '&end=' + encodeURIComponent(END); }
+    return qs;
+  }
   function measure() { return document.getElementById('ts-measure').value; }
   function draw(id, cfg) { if (charts[id]) { charts[id].destroy(); } var el = document.getElementById(id); if (el) { charts[id] = new Chart(el, cfg); } }
 

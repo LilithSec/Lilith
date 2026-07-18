@@ -9,8 +9,12 @@ Revision history for Lilith
 		   Custom range (native date inputs plus 24-hour hour/minute number
 		   fields, no picker library) -- with only the active mode's params
 		   submitted. The control is a reusable partial
-		   (templates/partials/_time_range.html.ep + /js/time-range.js) so it
-		   can be dropped into other forms.
+		   (templates/partials/_time_range.html.ep + /js/time-range.js), used
+		   on /search, /logs, and both dashboards (/dashboard and
+		   /logs/dashboard). Lilith::Stats and Lilith::Allani gained an
+		   explicit start/end absolute range (preferred over go_back_minutes);
+		   on the alert dashboard an absolute range is a live override, not
+		   saved with the board.
 		 - Add a read-only Logs page (/logs) to the web UI for browsing the
 		   logs an Allani store holds (syslog / http_access / http_error,
 		   plus an interleaved http view). It reads Allani over its own

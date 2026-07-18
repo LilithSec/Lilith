@@ -207,7 +207,9 @@ sub _app {
         ->element_exists( 'select#ts-group option[value="program"]', 'split-by selector offers the dims' )
         ->element_exists( 'select#ts-measure option[value="bytes"]', 'measure selector offers bytes' )
         ->element_exists( 'canvas#chart-ts',      'timeseries canvas present' )
-        ->element_exists( 'canvas#chart-program', 'a top-dimension canvas present' );
+        ->element_exists( 'canvas#chart-program', 'a top-dimension canvas present' )
+        ->element_exists( 'div.time-range select[data-role="preset"]', 'dashboard uses the time-range control' )
+        ->element_exists( 'script[src="/js/time-range.js"]', 'dashboard loads the shared time-range script' );
 
     # JSON endpoints
     $t->get_ok('/api/logs/summary?source=syslog')->status_is(200)
@@ -216,6 +218,11 @@ sub _app {
     $t->get_ok('/api/logs/top?source=http&column=vhost&measure=bytes')->status_is(200)
         ->json_is( '/rows/0/value', 'sshd', 'top reports rows' );
     is( $top_opts{measure}, 'bytes', 'the measure param reaches the reader' );
+
+    # an absolute range on a dashboard endpoint reaches the reader
+    $t->get_ok('/api/logs/top?source=syslog&column=program&start=2026-07-18+00:00&end=2026-07-18+12:00')->status_is(200);
+    is( $top_opts{start}, '2026-07-18 00:00', 'start reaches the reader from the dashboard API' );
+    is( $top_opts{end},   '2026-07-18 12:00', 'end reaches the reader from the dashboard API' );
     $t->get_ok('/api/logs/timeseries?source=syslog&bucket=hour')->status_is(200)
         ->json_is( '/rows/0/count', 5,      'timeseries reports rows' )
         ->json_is( '/bucket',       'hour', 'timeseries reports the resolved bucket' )

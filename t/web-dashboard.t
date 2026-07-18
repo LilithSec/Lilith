@@ -30,7 +30,8 @@ sub app_for {
 	$t->get_ok('/dashboard')
 		->status_is( 200, 'GET /dashboard renders' )
 		->element_exists( 'select#db-table',                    'has the table selector' )
-		->element_exists( '#db-range button[data-mins="1440"]', 'has the 24h range button' )
+		->element_exists( 'div.time-range select[data-role="preset"]', 'has the time-range control' )
+		->element_exists( 'script[src="/js/time-range.js"]',            'loads the shared time-range script' )
 		->element_exists( '#card-esc',                          'has the escalated card' )
 		->element_exists( 'input#db-gpcd[type="checkbox"]',     'has the Show GPCD checkbox' )
 		->element_exists_not( 'input#db-gpcd[checked]', 'Show GPCD is unchecked by default' )
@@ -149,6 +150,15 @@ SKIP: {
 	$t->get_ok('/api/dashboard/timeseries?table=suricata&group_by=classification&bucket=hour')
 		->status_is( 200, 'timeseries ok' )
 		->json_is( '/grouped', 1, 'timeseries reports grouped' );
+
+	# An explicit absolute range bounds the query (preferred over go_back_minutes):
+	# a future window has nothing, a wide one has everything.
+	$t->get_ok('/api/dashboard/summary?table=suricata&start=2999-01-01+00:00')
+		->status_is( 200, 'future-range summary ok' )
+		->json_is( '/total', 0, 'a future start excludes every row' );
+	$t->get_ok('/api/dashboard/summary?table=suricata&start=2000-01-01+00:00&end=2999-01-01+00:00')
+		->status_is( 200, 'wide-range summary ok' )
+		->json_is( '/total', 3, 'a wide start/end range includes all rows' );
 
 	# The Show GPCD toggle: a GPCD row is hidden by default, included at show_gpcd=1.
 	$dbh->do( "insert into suricata_alerts (instance,host,timestamp,event_id,src_ip,classification)"

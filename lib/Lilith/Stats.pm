@@ -34,9 +34,13 @@ C<cape_alerts> for the web dashboard. Each method takes a short table type
 time-windowed C<GROUP BY> range-scans rather than reading the whole table.
 
 Every table name, column name, and time bucket a caller passes is checked
-against a fixed set of accepted names before it reaches SQL, and the only
-interpolated scalars (the window and any limit) are checked to be integers, so
-callers may pass request parameters straight through without an injection risk.
+against a fixed set of accepted names before it reaches SQL; the only
+interpolated scalars (the relative window and any limit) are checked to be
+integers, and an explicit C<start>/C<end> range is quoted, so callers may pass
+request parameters straight through without an injection risk.
+
+The time window is an explicit absolute range (C<start> and/or C<end>) when
+given, otherwise the now-relative C<go_back_minutes>.
 
 Every method also accepts an optional C<exclude_classification> value; when set,
 rows with that classification are left out (this backs the dashboard's "hide
@@ -218,7 +222,8 @@ sub total {
 
 	my $dbh = $self->_dbh;
 	my $exf = $self->_exclude_frag( $dbh, $type, \%opts );
-	my $sql = "select count(*) from $tbl where $tc >= CURRENT_TIMESTAMP - interval '$mins minutes'$exf";
+	my $win = $self->_window_frag( $dbh, $tc, \%opts, $mins );
+	my $sql = "select count(*) from $tbl where $win$exf";
 	my ($n) = $dbh->selectrow_array($sql);
 
 	return ( $n // 0 ) + 0;
@@ -242,8 +247,9 @@ sub escalated {
 
 	my $dbh = $self->_dbh;
 	my $exf = $self->_exclude_frag( $dbh, $type, \%opts );
+	my $win = $self->_window_frag( $dbh, $tc, \%opts, $mins );
 	my $sql
-		= "select count(*) from $tbl where $tc >= CURRENT_TIMESTAMP - interval '$mins minutes'$exf "
+		= "select count(*) from $tbl where $win$exf "
 		. "and escalations is not null and array_length(escalations, 1) > 0";
 	my ($n) = $dbh->selectrow_array($sql);
 
@@ -268,9 +274,10 @@ sub distinct {
 
 	my $dbh     = $self->_dbh;
 	my $exf     = $self->_exclude_frag( $dbh, $type, \%opts );
+	my $win     = $self->_window_frag( $dbh, $tc, \%opts, $mins );
 	my $colexpr = $self->_col_expr( $type, $col );
-	my $sql = "select count(distinct $colexpr) from $tbl where $tc >= CURRENT_TIMESTAMP - interval '$mins minutes'$exf";
-	my ($n) = $dbh->selectrow_array($sql);
+	my $sql     = "select count(distinct $colexpr) from $tbl where $win$exf";
+	my ($n)     = $dbh->selectrow_array($sql);
 
 	return ( $n // 0 ) + 0;
 } ## end sub distinct
@@ -296,6 +303,7 @@ sub top {
 
 	my $dbh     = $self->_dbh;
 	my $exf     = $self->_exclude_frag( $dbh, $type, \%opts );
+	my $win     = $self->_window_frag( $dbh, $tc, \%opts, $mins );
 	my $vexpr   = $self->_value_expr( $type, $col );
 	my $colexpr = $self->_col_expr( $type, $col );
 	my $magg    = $self->_measure_expr( $type, $opts{measure} );
@@ -310,7 +318,7 @@ sub top {
 
 	my $sql
 		= "select $vexpr as value, $magg as count from $tbl "
-		. "where $tc >= CURRENT_TIMESTAMP - interval '$mins minutes'$exf and $colexpr is not null "
+		. "where $win$exf and $colexpr is not null "
 		. "group by 1 order by $ord limit $limit";
 
 	my $rows = $dbh->selectall_arrayref( $sql, { Slice => {} } );
@@ -347,7 +355,7 @@ sub timeseries {
 	my $dbh    = $self->_dbh;
 	my $exf    = $self->_exclude_frag( $dbh, $type, \%opts );
 	my $magg   = $self->_measure_expr( $type, $opts{measure} );
-	my $window = "$tc >= CURRENT_TIMESTAMP - interval '$mins minutes'$exf";
+	my $window = $self->_window_frag( $dbh, $tc, \%opts, $mins ) . $exf;
 	my $epoch  = "extract(epoch from date_trunc('$bucket', $tc))::bigint";
 
 	if ( defined $opts{group_by} && $opts{group_by} ne '' ) {
@@ -434,6 +442,26 @@ sub _dbh {
 
 	return $dbh;
 } ## end sub _dbh
+
+# The time-window WHERE fragment for time column $tc: an explicit absolute range
+# (start and/or end, quoted and cast to timestamptz, so read in the DB session's
+# timezone) when either is given, else the now-relative go_back_minutes. Quoted
+# rather than interpolated raw, mirroring _exclude_frag; a bad value is a query
+# error, not an injection. Callers append $exf (the classification exclude).
+sub _window_frag {
+	my ( $self, $dbh, $tc, $opts, $mins ) = @_;
+
+	my $start = ( defined $opts->{start} && $opts->{start} ne '' ) ? $opts->{start} : undef;
+	my $end   = ( defined $opts->{end}   && $opts->{end} ne '' )   ? $opts->{end}   : undef;
+	if ( $start || $end ) {
+		my @conds;
+		push( @conds, "$tc >= " . $dbh->quote($start) . '::timestamptz' ) if $start;
+		push( @conds, "$tc <= " . $dbh->quote($end) . '::timestamptz' )   if $end;
+		return join( ' and ', @conds );
+	}
+
+	return "$tc >= CURRENT_TIMESTAMP - interval '$mins minutes'";
+} ## end sub _window_frag
 
 sub _table {
 	my ( $self, $type ) = @_;

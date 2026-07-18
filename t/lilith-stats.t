@@ -58,6 +58,24 @@ use_ok('Lilith::Stats') or BAIL_OUT('Lilith::Stats failed to load');
 	is( $s->measures('suricata')->[0]{name}, 'count', 'count is the first measure' );
 	my %cm = map { $_->{name} => 1 } @{ $s->measures('cape') };
 	ok( $cm{avg_malscore} && !$cm{bytes}, 'cape measures reflect its columns' );
+
+	# The time-window fragment: an absolute start/end range (quoted, cast) takes
+	# precedence over the now-relative go_back_minutes. Uses a mock quote so no
+	# database is needed.
+	my $mock_dbh = bless {}, 'Lilith::Test::MockQuote';
+	no warnings 'once';
+	*Lilith::Test::MockQuote::quote = sub { my ( undef, $v ) = @_; return "'" . $v . "'"; };
+	use warnings 'once';
+
+	is( $s->_window_frag( $mock_dbh, 'timestamp', {}, 1440 ),
+		"timestamp >= CURRENT_TIMESTAMP - interval '1440 minutes'", 'no range -> now-relative window' );
+	is(
+		$s->_window_frag( $mock_dbh, 'timestamp', { start => '2026-07-18 00:00', end => '2026-07-18 12:00' }, 1440 ),
+		"timestamp >= '2026-07-18 00:00'::timestamptz and timestamp <= '2026-07-18 12:00'::timestamptz",
+		'start+end -> a quoted, cast absolute range'
+	);
+	is( $s->_window_frag( $mock_dbh, 'stop', { start => '2026-07-18 00:00' }, 1440 ),
+		"stop >= '2026-07-18 00:00'::timestamptz", 'start alone -> lower bound on the cape stop column' );
 }
 
 # ---------------------------------------------------------------------------

@@ -21,7 +21,9 @@ Along the top:
 - **Source** — which log table the panels read: `syslog`, `http (access)`, or
   `http error`. Changing it reloads the page, and the top-value panels follow
   that source's own dimensions.
-- **Minutes back** — the now-relative window every panel covers.
+- **When** — a preset relative window (Last hour … Last 30 days) or a **Custom
+  range** with From/To pickers (native date plus 24-hour hour/minute) every panel
+  covers.
 - **Bucket** — the time-bucket the "rows over time" chart uses: `auto` (the
   default), or a fixed `minute` / `hour` / `day` / `week` / `month`. `auto`
   sizes the bucket to the window (minute up to 3h, hour up to 2d, day up to 90d,

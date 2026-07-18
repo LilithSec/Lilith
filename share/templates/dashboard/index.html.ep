@@ -34,15 +34,7 @@
           <option value="cape"     <%= $table eq 'cape'     ? 'selected' : '' %>>CAPE</option>
         </select>
       </div>
-      <div class="col-auto">
-        <label class="form-label">Time range</label>
-        <div class="btn-group btn-group-sm" role="group" id="db-range">
-          <button type="button" class="btn btn-outline-secondary" data-mins="60">1h</button>
-          <button type="button" class="btn btn-outline-secondary" data-mins="360">6h</button>
-          <button type="button" class="btn btn-outline-secondary" data-mins="1440">24h</button>
-          <button type="button" class="btn btn-outline-secondary" data-mins="10080">7d</button>
-        </div>
-      </div>
+      %= include 'partials/_time_range', tr_minutes => $go_back_minutes
       <div class="col-auto ms-auto d-flex align-items-center gap-3">
         <div class="form-check mb-0">
           <input class="form-check-input" type="checkbox" id="db-gpcd" <%= $show_gpcd ? 'checked' : '' %>>
@@ -173,6 +165,7 @@
 
 <script src="/vendor/Chart.js"></script>
 <script src="/vendor/gridstack/gridstack-all.js"></script>
+<script src="/js/time-range.js"></script>
 <script>
 (function() {
   Chart.defaults.color = '#adb5bd';
@@ -204,7 +197,7 @@
     { type: 'top',        config: { column: 'src_ip', measure: 'distinct_dest_port' },x: 6, y: 20, w: 6, h: 4 }
   ];
 
-  var state   = { board: 'default', table: '<%= $table %>', mins: <%= $go_back_minutes %>, showGpcd: <%= $show_gpcd ? 'true' : 'false' %> };
+  var state   = { board: 'default', table: '<%= $table %>', mins: <%= $go_back_minutes %>, start: '', end: '', showGpcd: <%= $show_gpcd ? 'true' : 'false' %> };
   var widgets = [];      // [{ id, type, config, x, y, w, h }]
   var charts  = {};      // widget id -> Chart
   var colsCache = {};    // table -> [columns]
@@ -239,11 +232,20 @@
     var hourMin = pad(d.getHours()) + ':' + pad(d.getMinutes());
     return state.mins <= 1440 ? hourMin : (pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + hourMin);
   }
-  function bucketUnit() { return state.mins <= 180 ? 'minute' : (state.mins <= 20160 ? 'hour' : 'day'); }
+  function bucketUnit() {
+    var mins = state.mins;
+    if (state.start && state.end) {
+      var span = (new Date(state.end.replace(' ', 'T')) - new Date(state.start.replace(' ', 'T'))) / 60000;
+      if (span > 0) { mins = span; }
+    }
+    return mins <= 180 ? 'minute' : (mins <= 20160 ? 'hour' : 'day');
+  }
 
   function qsFor(table, extra) {
     var s = '?table=' + encodeURIComponent(table) + '&go_back_minutes=' + encodeURIComponent(state.mins);
     if (state.showGpcd) { s += '&show_gpcd=1'; }
+    if (state.start) { s += '&start=' + encodeURIComponent(state.start); }
+    if (state.end)   { s += '&end=' + encodeURIComponent(state.end); }
     for (var k in (extra || {})) { if (extra[k] !== undefined && extra[k] !== '') { s += '&' + k + '=' + encodeURIComponent(extra[k]); } }
     return s;
   }
@@ -578,15 +580,20 @@
   });
 
   // ---- controls ----
-  function markRange() {
-    document.querySelectorAll('#db-range button').forEach(function(b) { b.classList.toggle('active', Number(b.dataset.mins) === state.mins); });
+  // The shared time-range control: read its window into state on any change. An
+  // absolute range is transient -- it drives the view but is not saved with the
+  // board (currentSettings persists only the relative go_back_minutes).
+  var trRoot = document.querySelector('.time-range');
+  function readTimeRange() {
+    var w = window.LilithTimeRange && window.LilithTimeRange.read(trRoot);
+    if (!w) { return; }
+    if (w.start || w.end) { state.start = w.start; state.end = w.end; }
+    else { state.mins = Number(w.go_back_minutes) || state.mins; state.start = ''; state.end = ''; }
   }
   // A view control changed: always re-pull; when editing, persist it to the board.
   function viewChanged() { refresh(); if (editing) { clearTimeout(saveTimer); saveTimer = setTimeout(saveLayout, 400); } }
   document.getElementById('db-table').addEventListener('change', function() { state.table = this.value; viewChanged(); });
-  document.querySelectorAll('#db-range button').forEach(function(b) {
-    b.addEventListener('click', function() { state.mins = Number(this.dataset.mins); markRange(); viewChanged(); });
-  });
+  if (trRoot) { trRoot.addEventListener('timerange:change', function() { readTimeRange(); viewChanged(); }); }
   document.getElementById('db-gpcd').addEventListener('change', function() { state.showGpcd = this.checked; viewChanged(); });
   document.getElementById('db-refresh').addEventListener('click', refresh);
   document.getElementById('db-add-widget').addEventListener('click', function() { openModal(null); });
@@ -601,9 +608,10 @@
     if (s.table && /^(?:suricata|sagan|cape)$/.test(s.table)) { state.table = s.table; }
     if (s.go_back_minutes) { state.mins = Number(s.go_back_minutes); }
     if (s.show_gpcd !== undefined) { state.showGpcd = !!s.show_gpcd; }
+    state.start = ''; state.end = '';
     document.getElementById('db-table').value = state.table;
     document.getElementById('db-gpcd').checked = state.showGpcd;
-    markRange();
+    if (window.LilithTimeRange) { window.LilithTimeRange.set(trRoot, { go_back_minutes: state.mins }); }
   }
   // (Re)load the board list into the picker; select `want` (or the default).
   function loadBoards(want) {
@@ -683,7 +691,6 @@
 
   // ---- boot ----
   function seedDefaults() { return DEFAULT_WIDGETS.map(function(widget) { return { id: uid(), type: widget.type, config: widget.config, x: widget.x, y: widget.y, w: widget.w, h: widget.h }; }); }
-  markRange();
   setEditing(false);
   loadBoards().then(function(name) { return loadBoard(name); }).catch(function() {
     widgets = seedDefaults(); rebuildGrid(); refresh();

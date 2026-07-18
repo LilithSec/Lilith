@@ -86,10 +86,35 @@
         if (bound.minEl.value === '')  { bound.minEl.value = bound.defaultTime[1]; }
       });
     }
+    // The current window as the params a form would submit: a relative preset
+    // gives go_back_minutes; Custom gives composed start/end. Lets JS consumers
+    // (the dashboards) read the control without a form submit.
+    function readWindow() {
+      if (isCustom()) { return { go_back_minutes: '', start: compose(bounds.start), end: compose(bounds.end) }; }
+      return { go_back_minutes: presetEl.value, start: '', end: '' };
+    }
+
+    // Point the control at a relative preset (used when a saved view loads),
+    // snapping to a day when the value is not one of the presets.
+    function setWindow(win) {
+      var mins = win && win.go_back_minutes != null ? String(win.go_back_minutes) : '';
+      presetEl.value = mins;
+      if (presetEl.value !== mins) { presetEl.value = '1440'; }
+      syncMode();
+    }
+
+    function fireChange() { root.dispatchEvent(new CustomEvent('timerange:change')); }
+
     wireDefaultTime(bounds.start);
     wireDefaultTime(bounds.end);
 
-    presetEl.addEventListener('change', syncMode);
+    // Notify live consumers when the window changes (form pages ignore this).
+    presetEl.addEventListener('change', function () { syncMode(); fireChange(); });
+    [bounds.start, bounds.end].forEach(function (bound) {
+      [bound.dateEl, bound.hourEl, bound.minEl].forEach(function (el) {
+        if (el) { el.addEventListener('change', fireChange); }
+      });
+    });
     if (formEl) {
       formEl.addEventListener('submit', function () {
         if (isCustom()) { startEl.value = compose(bounds.start); endEl.value = compose(bounds.end); }
@@ -103,13 +128,20 @@
       seedBound(bounds.end, endEl.value);
     }
     syncMode();
+
+    root._trApi = { read: readWindow, set: setWindow };
   }
 
   function initAll(scope) {
     (scope || document).querySelectorAll('.time-range').forEach(initOne);
   }
 
-  window.LilithTimeRange = { init: initOne, initAll: initAll };
+  window.LilithTimeRange = {
+    init: initOne,
+    initAll: initAll,
+    read: function (root) { return root && root._trApi ? root._trApi.read() : null; },
+    set:  function (root, win) { if (root && root._trApi) { root._trApi.set(win); } }
+  };
 
   if (document.readyState !== 'loading') { initAll(); }
   else { document.addEventListener('DOMContentLoaded', function () { initAll(); }); }

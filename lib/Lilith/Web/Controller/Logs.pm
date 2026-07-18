@@ -189,6 +189,8 @@ sub dashboard {
 		measures        => ( $reader                        ? $reader->measures($source) : [] ),
 		geoip           => ( scalar @{ $self->geoip_mmdbs } ? 1                          : 0 ),
 		go_back_minutes => $mins,
+		start           => ( $self->param('start') // '' ),
+		end             => ( $self->param('end')   // '' ),
 		error           => $error,
 	);
 
@@ -203,13 +205,14 @@ C<GET /api/logs/summary> -- C<< { total, distinct_host } >> for the source/windo
 
 sub summary {
 	my $self = shift;
-	my ( $source, $mins ) = $self->_dparams;
+	my ( $source, $mins, @range ) = $self->_dparams;
 	return $self->_ljson(
 		sub {
 			my $r = shift;
 			return {
-				total         => $r->total( source => $source, go_back_minutes => $mins ),
-				distinct_host => $r->distinct( source => $source, column => 'host', go_back_minutes => $mins ),
+				total         => $r->total( source => $source, go_back_minutes => $mins, @range ),
+				distinct_host =>
+					$r->distinct( source => $source, column => 'host', go_back_minutes => $mins, @range ),
 			};
 		}
 	);
@@ -225,7 +228,7 @@ selects what C<count> holds.
 
 sub top {
 	my $self = shift;
-	my ( $source, $mins ) = $self->_dparams;
+	my ( $source, $mins, @range ) = $self->_dparams;
 	my $column  = $self->param('column');
 	my $limit   = $self->param('limit');
 	my $measure = $self->param('measure');
@@ -236,6 +239,7 @@ sub top {
 				source          => $source,
 				column          => $column,
 				go_back_minutes => $mins,
+				@range,
 				( defined $limit   && $limit ne ''   ? ( limit   => $limit )   : () ),
 				( defined $measure && $measure ne '' ? ( measure => $measure ) : () ),
 			);
@@ -255,7 +259,7 @@ actually used, so an C<auto> request can be labelled.
 
 sub timeseries {
 	my $self = shift;
-	my ( $source, $mins ) = $self->_dparams;
+	my ( $source, $mins, @range ) = $self->_dparams;
 	my $bucket   = $self->param('bucket');
 	my $group_by = $self->param('group_by');
 	my $measure  = $self->param('measure');
@@ -266,6 +270,7 @@ sub timeseries {
 			my $rows = $r->timeseries(
 				source          => $source,
 				go_back_minutes => $mins,
+				@range,
 				( defined $bucket && $bucket ne ''   ? ( bucket   => $bucket )   : () ),
 				( $grouped                           ? ( group_by => $group_by ) : () ),
 				( defined $measure && $measure ne '' ? ( measure  => $measure )  : () ),
@@ -286,7 +291,7 @@ C<< { enabled => 0|1, rows => [ { country, count }, ... ] } >>. C<enabled> is 0
 
 sub countries {
 	my $self = shift;
-	my ( $source, $mins ) = $self->_dparams;
+	my ( $source, $mins, @range ) = $self->_dparams;
 
 	return $self->render( json => { enabled => 0, rows => [] } )
 		unless scalar @{ $self->geoip_mmdbs };
@@ -294,7 +299,7 @@ sub countries {
 	return $self->_ljson(
 		sub {
 			my $r   = shift;
-			my $ips = $r->top_ips( source => $source, go_back_minutes => $mins, limit => 500 );
+			my $ips = $r->top_ips( source => $source, go_back_minutes => $mins, limit => 500, @range );
 
 			my %by;
 			for my $row (@$ips) {
@@ -312,15 +317,24 @@ sub countries {
 	);
 } ## end sub countries
 
-# Shared source/window parsing for the dashboard API. The source is validated by
-# the reader (a bad one dies -> 400 via _ljson), so it is passed through as-is.
+# Shared source/window parsing for the dashboard API: the source, the relative
+# window, and an absolute start/end range as a (possibly empty) list of pairs the
+# caller spreads into the reader. The source is validated by the reader (a bad
+# one dies -> 400 via _ljson), so it is passed through as-is.
 sub _dparams {
 	my $self   = shift;
 	my $source = $self->param('source') // 'syslog';
 	my $mins   = $self->param('go_back_minutes');
 	$mins = 1440 unless defined $mins && $mins =~ /^[0-9]+$/;
-	return ( $source, $mins );
-}
+
+	my @range;
+	for my $bound (qw( start end )) {
+		my $val = $self->param($bound);
+		push( @range, ( $bound => $val ) ) if defined $val && $val ne '';
+	}
+
+	return ( $source, $mins, @range );
+} ## end sub _dparams
 
 # Render whatever $code->($reader) returns as JSON, turning a reader die (bad
 # source/column, unreachable database) into a 400 with the message, and a
