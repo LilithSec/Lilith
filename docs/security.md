@@ -51,6 +51,18 @@ The config file holds the database credentials — keep
 `/usr/local/etc/lilith.toml` owned and readable by the user that needs it
 and nobody else.
 
+## The Allani log store, if configured, is exposed read-only
+
+With an `[allani]` block configured, the `/logs` page reads an
+[Allani](https://github.com/LilithSec/Allani) store — *every* log line it
+holds, not just the alerts Lilith keeps. Lilith only ever SELECTs Allani (no
+writes, no ingest), so `/logs` cannot alter the store, but it does widen what
+the unauthenticated frontend can read from the distilled annals to the whole
+syslog corpus behind it. Treat it like the alert tables: put the UI behind
+authentication before configuring `[allani]`. The block holds its own database
+credentials, so guard the config file the same way, and point the DSN at a
+read-only Allani role if you want defence in depth.
+
 ## Features that reach outward are gated, and default off
 
 Several web features cause the server to *send* data somewhere, so each is

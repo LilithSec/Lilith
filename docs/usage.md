@@ -148,14 +148,24 @@ All the standard Mojolicious server commands work. Read
 
 - **/search** — the same filters as the CLI search, in a form. Escalated
   events are badged with a red **E**.
+- **/logs** — browse the logs an [Allani](https://github.com/LilithSec/Allani)
+  store holds, when an `[allani]` block is configured. A source selector
+  switches between syslog, http (access), http error, and an interleaved
+  http view; per-source filters, a minutes-back window, paging, and
+  optional auto-refresh mirror the search page, and each row opens the full
+  stored record with its raw JSON. The page and its navbar entry stay hidden
+  without `[allani]` — see [configuration](configuration.md).
 - **Event view** — the full event with the decoded EVE record. IPs open an
   info modal (reverse DNS, whois, GeoIP when databases are configured);
   domains an info panel with whois and DNS, plus an **HTTPS** button
   (certificate and per-phase timing detail against `https://DOMAIN:PORT/`)
   and a **Mail** button (combined SPF / DMARC / DKIM check). With
   `[virani.*]` remotes configured, a **Download PCAP** control fetches the
-  flow PCAP (see below). With `escalation_enable` on, an **Escalate**
-  button and the escalation history appear ([escalation](escalation.md)).
+  flow PCAP (see below). With `[allani]` configured, a **Logs** dropdown
+  deep-links to `/logs` pre-filtered by the event's host (syslog) and source
+  IP (interleaved http), windowed to reach back around the event. With
+  `escalation_enable` on, an **Escalate** button and the escalation history
+  appear ([escalation](escalation.md)).
 - **Virani dropdown** — appears in the navbar when any `[virani.*]` remote
   is configured. **PCAP Search** takes an arbitrary BPF filter and time
   range: it always builds a ready-to-copy local `virani` command, and with
