@@ -193,7 +193,7 @@ sub search {
 	my $entry = $SOURCE{$key};
 	my $meta  = Allani::Sources::source( $entry->{src} )
 		or die( '"' . $entry->{src} . "\" is unknown to Allani::Sources\n" );
-	my $tscol = $meta->{default_ts};
+	my $tscol = $self->_ts_col($meta);
 
 	# Reuse Allani's column/filter definitions for the WHERE (via an accessor shim)
 	# and the selected columns; we fetch positionally and zip against its headers. The
@@ -578,7 +578,19 @@ sub _agg_meta {
 	my $entry = $SOURCE{$key} or die( '"' . $key . "\" is not a known log source\n" );
 	die("http_all has no aggregate view\n") unless defined $entry->{src};
 	my $meta = Allani::Sources::source( $entry->{src} ) or die("unknown source\n");
-	return ( $meta, $meta->{default_ts}, $entry->{src} );
+	return ( $meta, $self->_ts_col($meta), $entry->{src} );
+}
+
+# The timestamp column to anchor time windows, timeseries buckets and the
+# displayed time on. The aggregator's receive time (r_isodate) is authoritative
+# -- a sending host's clock may be wrong -- so prefer it whenever the source
+# records it, falling back to the source's own default_ts otherwise. This is a
+# no-op for the http sources (already default_ts => r_isodate) and flips syslog
+# off its host-stamped s_isodate. The original stamp survives in raw and the
+# single-record view, so nothing is hidden.
+sub _ts_col {
+	my ( $self, $meta ) = @_;
+	return $meta->{ts}{r_isodate} ? 'r_isodate' : $meta->{default_ts};
 }
 
 # The SQL aggregate a measure resolves to (count(*) by default), from the

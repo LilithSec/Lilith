@@ -109,8 +109,8 @@ my $reader = Lilith::Allani->new( dsn => 'dbi:Pg:dbname=bogus' );
     $reader->search( source => 'syslog', around => '2026-07-17T00:00:00', window_minutes => 30 );
     my $sql = $MockDbh::SQL[0];
     like( $sql,
-        qr/s_isodate BETWEEN \?::timestamptz - interval '30 minutes' AND \?::timestamptz \+ interval '30 minutes'/,
-        'anchored syslog window is a BETWEEN sized by window_minutes' );
+        qr/r_isodate BETWEEN \?::timestamptz - interval '30 minutes' AND \?::timestamptz \+ interval '30 minutes'/,
+        'anchored syslog window is a BETWEEN sized by window_minutes, on the aggregator receive time' );
     unlike( $sql, qr/now\(\) - interval/, 'anchored window is not now-relative' );
     unlike( $sql, qr/2026-07-17/,         'the anchor timestamp is bound, not interpolated' );
 
@@ -141,7 +141,7 @@ my $reader = Lilith::Allani->new( dsn => 'dbi:Pg:dbname=bogus' );
 
     @MockDbh::SQL = ();
     $reader->timeseries( source => 'syslog', bucket => 'day' );
-    like( $MockDbh::SQL[0], qr/date_trunc\('day', s_isodate\)/, 'timeseries buckets by the chosen unit' );
+    like( $MockDbh::SQL[0], qr/date_trunc\('day', r_isodate\)/, 'timeseries buckets by the chosen unit, on the aggregator receive time' );
 
     eval { $reader->top( source => 'syslog', column => 'raw' ) };
     like( $@, qr/not an aggregatable column/, 'top rejects a non-dimension column' );
@@ -164,7 +164,7 @@ my $reader = Lilith::Allani->new( dsn => 'dbi:Pg:dbname=bogus' );
 
     @MockDbh::SQL = ();
     $reader->timeseries( source => 'syslog', bucket => 'auto', go_back_minutes => 60 );
-    like( $MockDbh::SQL[0], qr/date_trunc\('minute', s_isodate\)/, 'auto bucket is applied to the query' );
+    like( $MockDbh::SQL[0], qr/date_trunc\('minute', r_isodate\)/, 'auto bucket is applied to the query' );
 }
 
 # ---------------------------------------------------------------------------
@@ -214,14 +214,14 @@ my $reader = Lilith::Allani->new( dsn => 'dbi:Pg:dbname=bogus' );
     @MockDbh::SQL = ();
     $reader->search( source => 'syslog', start => '2026-07-18 00:00', end => '2026-07-18 12:00' );
     my $sql = $MockDbh::SQL[0];
-    like( $sql, qr/s_isodate >= \?::timestamptz AND s_isodate <= \?::timestamptz/,
-        'start+end bind an absolute range on the source time column' );
+    like( $sql, qr/r_isodate >= \?::timestamptz AND r_isodate <= \?::timestamptz/,
+        'start+end bind an absolute range on the aggregator receive time column' );
     unlike( $sql, qr/now\(\) - interval/, 'an absolute range is not now-relative' );
     unlike( $sql, qr/2026-07-18/,         'the bounds are bound, not interpolated' );
 
     @MockDbh::SQL = ();
     $reader->search( source => 'syslog', start => '2026-07-18 00:00' );
-    like( $MockDbh::SQL[0],   qr/s_isodate >= \?::timestamptz/, 'start alone is a lower bound' );
+    like( $MockDbh::SQL[0],   qr/r_isodate >= \?::timestamptz/, 'start alone is a lower bound' );
     unlike( $MockDbh::SQL[0], qr/<= \?::timestamptz/,           'and adds no upper bound' );
 
     @MockDbh::SQL = ();
