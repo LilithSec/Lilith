@@ -187,13 +187,17 @@ sub _virani_fetch_args {
 =head2 _log_links
 
 Builds the "logs around this event" deep-links into the Allani C</logs> page,
-as an array ref of C<< { label, url } >>. Keys the links off the event's host
-(syslog on that host) and source IP (interleaved http on that client), each only
-when the event carries the field. When the event time parses, the links anchor
-C</logs> on it (C<around>) with a C<window> of C<$LOG_WINDOW> minutes either
-side, so the view shows the log lines around the alert rather than merely those
-since it; otherwise they fall back to the default now-relative window. Returns
-an empty list for no event.
+as an array ref of C<< { label, url } >>. One link keys off the event's host
+(syslog on that host, matching both the FQDN and its short first-label form
+unless the host is an IP); then, for each endpoint IP the event carries (source and
+destination), two more: that IP as the client of the interleaved http
+(access+error) logs, and that IP as a substring of the syslog messages -- so the
+dropdown offers searching for either address either way. A blank or duplicated
+field is skipped. When the event time parses, the links anchor C</logs> on it
+(C<around>) with a C<window> of C<$LOG_WINDOW> minutes either side, so the view
+shows the log lines around the alert rather than merely those since it;
+otherwise they fall back to the default now-relative window. Returns an empty
+list for no event.
 
 =cut
 
@@ -212,26 +216,48 @@ sub _log_links {
 
 	my @links;
 	if ( defined $event->{host} && $event->{host} ne '' ) {
+		my $host      = $event->{host};
+		my @host_vals = ($host);
+		# Also match the short hostname (the first label) so a syslog store that
+		# records bare hostnames turns up alongside the FQDN; host accepts both as
+		# whitespace-separated values. Skip when the host is an IP address, where a
+		# leading label is meaningless.
+		if ( $host =~ /\./ && $host !~ /:/ && $host !~ /^[0-9]{1,3}(?:\.[0-9]{1,3}){3}$/ ) {
+			my ($short) = split( /\./, $host, 2 );
+			push( @host_vals, $short ) if length $short && $short ne $host;
+		}
 		push(
 			@links,
 			{
-				label => 'syslog · host ' . $event->{host},
-				url   =>
-					$self->url_for('/logs')->query( source => 'syslog', host => $event->{host}, @anchor )->to_string,
-			}
-		);
-	} ## end if ( defined $event->{host} && $event->{host...})
-	if ( defined $event->{src_ip} && $event->{src_ip} ne '' ) {
-		push(
-			@links,
-			{
-				label => 'http · client ' . $event->{src_ip},
+				label => 'syslog · host ' . join( ' / ', @host_vals ),
 				url   => $self->url_for('/logs')
-					->query( source => 'http_all', client_ip => $event->{src_ip}, @anchor )
+					->query( source => 'syslog', host => join( ' ', @host_vals ), @anchor )
 					->to_string,
 			}
 		);
-	} ## end if ( defined $event->{src_ip} && $event->{...})
+	} ## end if ( defined $event->{host} && $event->{host...})
+
+	# Each endpoint IP is worth chasing two ways: as the client IP of the
+	# interleaved http (access+error) logs, and as a substring of the syslog
+	# messages. Offer both for the source and the destination as separate menu
+	# options, skipping a blank or duplicated address.
+	my %seen;
+	for my $endpoint ( [ src => $event->{src_ip} ], [ dest => $event->{dest_ip} ] ) {
+		my ( $role, $ip ) = @$endpoint;
+		next unless defined $ip && $ip ne '';
+		next if $seen{$ip}++;
+		push(
+			@links,
+			{
+				label => "http · client ($role) " . $ip,
+				url   => $self->url_for('/logs')->query( source => 'http_all', client_ip => $ip, @anchor )->to_string,
+			},
+			{
+				label => "syslog · message ($role) " . $ip,
+				url   => $self->url_for('/logs')->query( source => 'syslog', message => $ip, @anchor )->to_string,
+			},
+		);
+	} ## end for my $endpoint ( [ src => $event->{src_ip...}])
 
 	return \@links;
 } ## end sub _log_links

@@ -4,11 +4,11 @@
 % # Filter fields, each tagged with the sources it applies to. The JS below shows
 % # only those matching the selected source, mirroring the search page's cape toggle.
 % my @filter_fields = (
-%   { name => 'host',      label => 'Host',      sources => 'syslog http http_error http_all' },
-%   { name => 'program',   label => 'Program',   sources => 'syslog' },
+%   { name => 'host',      label => 'Host(s)',    sources => 'syslog http http_error http_all', placeholder => 'space-separated; % wildcard' },
+%   { name => 'program',   label => 'Program(s)', sources => 'syslog', placeholder => 'space-separated; % wildcard' },
 %   { name => 'facility',  label => 'Facility',  sources => 'syslog' },
 %   { name => 'priority',  label => 'Priority',  sources => 'syslog' },
-%   { name => 'vhost',     label => 'VHost',     sources => 'http http_error http_all' },
+%   { name => 'vhost',     label => 'VHost(s)',   sources => 'http http_error http_all', placeholder => 'space-separated' },
 %   { name => 'client_ip', label => 'Client IP', sources => 'http http_error http_all' },
 %   { name => 'method',    label => 'Method',    sources => 'http' },
 %   { name => 'status',    label => 'Status',    sources => 'http' },
@@ -104,6 +104,7 @@
           <div class="col-md-2 log-filter-field" data-sources="<%= $field->{sources} %>">
             <label class="form-label"><%= $field->{label} %></label>
             <input type="text" name="<%= $field->{name} %>" class="form-control form-control-sm"
+                   placeholder="<%= $field->{placeholder} // '' %>"
                    value="<%= param($field->{name}) // '' %>">
           </div>
           % }

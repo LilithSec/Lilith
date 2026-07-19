@@ -55,6 +55,16 @@ my %SOURCE = map { $_->{key} => $_ } @SOURCES;
 my @HTTP_ALL_HEADERS = qw( source id time host client vhost status detail message );
 my %HTTP_ALL_FILTER  = map { $_ => 1 } qw( host vhost client_ip message );
 
+# Filter columns that accept several whitespace-separated values on /logs,
+# matched as an OR of per-value predicates -- the same per-value rule build_where
+# applies to a single value, just spread over each token.
+my %MULTI = map { $_ => 1 } qw( host program vhost );
+
+# Of those, the columns Allani::Sources treats as LIKEABLE: a token carrying a %
+# wildcard is matched with LIKE for these, and =, wildcard taken literally, for
+# the rest -- mirroring build_where's single-value behavior per column.
+my %LIKEABLE = map { $_ => 1 } qw( host program );
+
 # date_trunc units a timeseries may be bucketed on.
 my %BUCKET = map { $_ => 1 } qw( minute hour day week month );
 
@@ -167,6 +177,12 @@ Runs one windowed query and returns
 C<< { source => ..., headers => [...], rows => [ {header=>value,...}, ... ] } >>.
 Column names and the WHERE come from C<Allani::Sources>; every value is bound.
 
+The C<host>, C<program> and C<vhost> filters each accept several
+whitespace-separated values and match any of them. For C<host> and C<program> a
+token carrying a C<%> wildcard is matched with LIKE (a plain token with C<=>);
+C<vhost> matches every token with C<=> (its C<%> is literal). The other filters
+are single exact matches.
+
 The time window is, in precedence: an explicit absolute range (C<start> and/or
 C<end> timestamps); an event-anchored window (C<around> a timestamp, within
 C<window_minutes> either side, default 60); or now-relative (C<go_back_minutes>,
@@ -195,11 +211,26 @@ sub search {
 		or die( '"' . $entry->{src} . "\" is unknown to Allani::Sources\n" );
 	my $tscol = $self->_ts_col($meta);
 
+	# host and program each accept several whitespace-separated values; pull those
+	# out and match them ourselves (an OR of per-value = / LIKE), leaving
+	# build_where to handle the remaining single-value filters unchanged.
+	my %single = %$filt;
+	my ( @multi_where, @multi_binds );
+	for my $col ( grep { $MULTI{$_} && $meta->{eq}{$_} } sort keys %single ) {
+		my ( $frag, @vbinds ) = $self->_multi_clause( $col, delete $single{$col} );
+		next unless defined $frag;
+		push( @multi_where, $frag );
+		push( @multi_binds, @vbinds );
+	}
+
 	# Reuse Allani's column/filter definitions for the WHERE (via an accessor shim)
-	# and the selected columns; we fetch positionally and zip against its headers. The
-	# time window (now-relative, or anchored around an event) appends its own
-	# binds after build_where's, in WHERE order.
-	my ( $where, $binds ) = Allani::Sources::build_where( $meta, Lilith::Allani::_Opt->new(%$filt) );
+	# and the selected columns; we fetch positionally and zip against its headers.
+	# The multi-value clauses follow build_where's, then the time window
+	# (now-relative, or anchored around an event) appends its own binds last, so
+	# clause order and bind order stay aligned.
+	my ( $where, $binds ) = Allani::Sources::build_where( $meta, Lilith::Allani::_Opt->new(%single) );
+	push( @$where, @multi_where );
+	push( @$binds, @multi_binds );
 	my $tclause = $self->_time_clause( $tscol, \%opts, $binds );
 	my ( $select, $headers ) = Allani::Sources::select_and_headers( $meta, $tscol, 0, 1 );
 
@@ -232,9 +263,18 @@ sub _search_http_all {
 		my @where = ( $self->_time_clause( 'r_isodate', $opts, \@hbinds ) );
 		for my $col (qw( host vhost client_ip )) {
 			next unless defined $filt->{$col} && $filt->{$col} ne '';
-			push( @where,  "$col = ?" );
-			push( @hbinds, $filt->{$col} );
-		}
+			# host and vhost accept several whitespace-separated values (matched as an
+			# OR of per-value predicates); client_ip stays a single exact match.
+			if ( $MULTI{$col} ) {
+				my ( $frag, @vbinds ) = $self->_multi_clause( $col, $filt->{$col} );
+				next unless defined $frag;
+				push( @where,  $frag );
+				push( @hbinds, @vbinds );
+			} else {
+				push( @where,  "$col = ?" );
+				push( @hbinds, $filt->{$col} );
+			}
+		} ## end for my $col (qw( host vhost client_ip ))
 		if ( defined $filt->{message} && $filt->{message} ne '' ) {
 			push( @where,  "$msg_col ILIKE ?" );
 			push( @hbinds, '%' . $filt->{message} . '%' );
@@ -611,6 +651,26 @@ sub _val_expr {
 	my ( $self, $col ) = @_;
 	return $INET{$col} ? "host($col)" : "($col)::text";
 }
+
+# A WHERE fragment matching $col against one or more whitespace-separated values
+# from $raw, returned with its binds. For a LIKEABLE column a value carrying a %
+# wildcard is matched with LIKE; otherwise = (as build_where does for a single
+# value). Several values are ORed in one parenthesized group. Every value is
+# bound. Returns an empty list when $raw holds no non-blank tokens.
+sub _multi_clause {
+	my ( $self, $col, $raw ) = @_;
+
+	my @vals = split( ' ', ( defined $raw ? $raw : '' ) );
+	return unless @vals;
+
+	my ( @preds, @binds );
+	for my $val (@vals) {
+		push( @preds, ( $LIKEABLE{$col} && index( $val, '%' ) >= 0 ? "$col LIKE ?" : "$col = ?" ) );
+		push( @binds, $val );
+	}
+	my $frag = ( @preds > 1 ) ? '(' . join( ' OR ', @preds ) . ')' : $preds[0];
+	return ( $frag, @binds );
+} ## end sub _multi_clause
 
 # A group/count dimension, checked against the source's Allani::Sources dims (dies otherwise).
 sub _dim {
