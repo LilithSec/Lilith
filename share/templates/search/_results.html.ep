@@ -4,21 +4,7 @@
 % my $count = scalar @$results;
 % my $escalated = stash('escalated') || {};
 <div id="search-results">
-  <div class="d-flex align-items-center mb-2 gap-3">
-    <span class="text-muted small"><%= $count %> result<%= $count == 1 ? '' : 's' %></span>
-    % if ($offset > 0 || $count >= $limit) {
-    <div class="d-flex gap-1">
-      % if ($offset > 0) {
-        % my $prev = $offset - $limit;
-        % $prev = 0 if $prev < 0;
-      <a href="<%= url_with->query({offset => $prev, partial => undef}) %>" class="btn btn-sm btn-outline-secondary">&larr; Prev</a>
-      % }
-      % if ($count >= $limit) {
-      <a href="<%= url_with->query({offset => $offset + $limit, partial => undef}) %>" class="btn btn-sm btn-outline-secondary">Next &rarr;</a>
-      % }
-    </div>
-    % }
-  </div>
+  %= include 'partials/_results_pager', count => $count, noun => 'result', offset => $offset, limit => $limit
 
   % if ($count > 0) {
   <div class="table-responsive">
@@ -35,14 +21,14 @@
       <tbody>
         % for my $row (@$results) {
         <tr>
-          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a><% if (my $escalation_count = $escalated->{$row->{id}}) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $escalation_count %> time<%= $escalation_count == 1 ? '' : 's' %>">E</span><% } %></td>
+          <td><%= include 'partials/_event_id_cell', table => $table, row_id => $row->{id}, escalation_count => $escalated->{$row->{id}} %></td>
           <td><%= $row->{timestamp} // '' %></td>
           <td><% if (my $instance = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $instance %>"><%= $instance %></a><% } %></td>
           <td class="col-host" style="display:none"><% if (my $host = $row->{host}) { %><a href="#" class="host-filter" data-host="<%= $host %>"><%= $host %></a><% } %></td>
           <td><% if (my $in_iface = $row->{in_iface}) { %><a href="#" class="iface-filter" data-iface="<%= $in_iface %>"><%= $in_iface %></a><% } %></td>
-          <td><% if (my $src_ip = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $src_ip %>"><%= $src_ip %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $src_ip %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $country = $self->ip_country($src_ip)) { %> <span class="text-muted small" title="<%= $country %>"><%= $self->country_flag($country) %> <%= $country %><% if (my $subdivision = $self->ip_subdivision($src_ip)) { %>/<%= $subdivision %><% } %><% if (my $city = $self->ip_city($src_ip)) { %><span class="geoip-city"> <%= $city %></span><% } %></span><% } %><% } %></td>
+          <td><%= include 'partials/_ip_cell', ip => $row->{src_ip} %></td>
           <td><% if (my $src_port = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $src_port %>"><%= $src_port %></a><% } %></td>
-          <td><% if (my $dest_ip = $row->{dest_ip}) { %><a href="#" class="ip-filter" data-ip="<%= $dest_ip %>"><%= $dest_ip %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $dest_ip %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $country = $self->ip_country($dest_ip)) { %> <span class="text-muted small" title="<%= $country %>"><%= $self->country_flag($country) %> <%= $country %><% if (my $subdivision = $self->ip_subdivision($dest_ip)) { %>/<%= $subdivision %><% } %><% if (my $city = $self->ip_city($dest_ip)) { %><span class="geoip-city"> <%= $city %></span><% } %></span><% } %><% } %></td>
+          <td><%= include 'partials/_ip_cell', ip => $row->{dest_ip} %></td>
           <td><% if (my $dest_port = $row->{dest_port}) { %><a href="#" class="port-filter" data-port="<%= $dest_port %>"><%= $dest_port %></a><% } %></td>
           <td><% if (my $proto = $row->{proto}) { %><a href="#" class="proto-filter" data-proto="<%= $proto %>"><%= $proto %></a><% } %></td>
           <td><% if (my $app_proto = $row->{app_proto}) { %><a href="#" class="aproto-filter" data-aproto="<%= $app_proto %>"><%= $app_proto %></a><% } %></td>
@@ -69,11 +55,11 @@
       <tbody>
         % for my $row (@$results) {
         <tr>
-          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a><% if (my $escalation_count = $escalated->{$row->{id}}) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $escalation_count %> time<%= $escalation_count == 1 ? '' : 's' %>">E</span><% } %></td>
+          <td><%= include 'partials/_event_id_cell', table => $table, row_id => $row->{id}, escalation_count => $escalated->{$row->{id}} %></td>
           <td><%= $row->{timestamp} // '' %></td>
           <td><% if (my $instance = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $instance %>"><%= $instance %></a><% } %></td>
           <td class="col-host" style="display:none"><% if (my $instance_host = $row->{instance_host}) { %><a href="#" class="instance-host-filter" data-instance-host="<%= $instance_host %>"><%= $instance_host %></a><% } %></td>
-          <td><% if (my $src_ip = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $src_ip %>"><%= $src_ip %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $src_ip %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $country = $self->ip_country($src_ip)) { %> <span class="text-muted small" title="<%= $country %>"><%= $self->country_flag($country) %> <%= $country %><% if (my $subdivision = $self->ip_subdivision($src_ip)) { %>/<%= $subdivision %><% } %><% if (my $city = $self->ip_city($src_ip)) { %><span class="geoip-city"> <%= $city %></span><% } %></span><% } %><% } %></td>
+          <td><%= include 'partials/_ip_cell', ip => $row->{src_ip} %></td>
           <td><% if (my $src_port = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $src_port %>"><%= $src_port %></a><% } %></td>
           <td><%= $row->{host}      // '' %></td>
           <td><%= $row->{program}   // '' %></td>
@@ -102,7 +88,7 @@
       <tbody>
         % for my $row (@$results) {
         <tr>
-          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a><% if (my $escalation_count = $escalated->{$row->{id}}) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $escalation_count %> time<%= $escalation_count == 1 ? '' : 's' %>">E</span><% } %></td>
+          <td><%= include 'partials/_event_id_cell', table => $table, row_id => $row->{id}, escalation_count => $escalated->{$row->{id}} %></td>
           <td><% if (my $instance = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $instance %>"><%= $instance %></a><% } %></td>
           <td class="col-host" style="display:none"><% if (my $instance_host = $row->{instance_host}) { %><a href="#" class="instance-host-filter" data-instance-host="<%= $instance_host %>"><%= $instance_host %></a><% } %></td>
           <td><%= $row->{target}    // '' %></td>
@@ -132,12 +118,12 @@
       <tbody>
         % for my $row (@$results) {
         <tr>
-          <td><a href="/event/<%= $table %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a><% if (my $escalation_count = $escalated->{$row->{id}}) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $escalation_count %> time<%= $escalation_count == 1 ? '' : 's' %>">E</span><% } %></td>
+          <td><%= include 'partials/_event_id_cell', table => $table, row_id => $row->{id}, escalation_count => $escalated->{$row->{id}} %></td>
           <td><%= $row->{timestamp} // '' %></td>
           <td><% if (my $instance = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $instance %>"><%= $instance %></a><% } %></td>
           <td class="col-host" style="display:none"><% if (my $host = $row->{host}) { %><a href="#" class="host-filter" data-host="<%= $host %>"><%= $host %></a><% } %></td>
           <td><%= $row->{event_type} // '' %></td>
-          <td><% if (my $src_ip = $row->{src_ip})  { %><a href="#" class="ip-filter" data-ip="<%= $src_ip %>"><%= $src_ip %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $src_ip %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $country = $self->ip_country($src_ip)) { %> <span class="text-muted small" title="<%= $country %>"><%= $self->country_flag($country) %> <%= $country %><% if (my $subdivision = $self->ip_subdivision($src_ip)) { %>/<%= $subdivision %><% } %><% if (my $city = $self->ip_city($src_ip)) { %><span class="geoip-city"> <%= $city %></span><% } %></span><% } %><% } %></td>
+          <td><%= include 'partials/_ip_cell', ip => $row->{src_ip} %></td>
           <td><%= $row->{subject} // '' %></td>
           <td><%= $row->{severity} // '' %></td>
           <td title="<%= $row->{classification} // '' %>"><%= $row->{classification} // '' %></td>

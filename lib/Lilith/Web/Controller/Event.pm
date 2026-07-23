@@ -346,6 +346,23 @@ sub _load_event {
 				$event->{raw} = $decoded;
 			}
 		}
+
+		# A Baphomet verdict that judged a Suricata line carries the original EVE
+		# record under its own raw key. That nested raw is generally already a
+		# hash, but may sometimes arrive as a JSON string; promote it to a hash
+		# so the protocol cards can render it. Leave anything else untouched.
+		if (   $table eq 'baphomet'
+			&& $event
+			&& ref $event->{raw} eq 'HASH'
+			&& defined $event->{raw}{raw}
+			&& !ref $event->{raw}{raw} )
+		{
+			my $inner;
+			eval { $inner = decode_json( $event->{raw}{raw} ) };
+			if ( !$@ && ref $inner eq 'HASH' ) {
+				$event->{raw}{raw} = $inner;
+			}
+		}
 	};
 	$error = $@ if $@;
 

@@ -4,20 +4,7 @@
 % my $rows    = $result->{rows}    || [];
 % my $count   = scalar @$rows;
 <div id="log-results">
-  <div class="d-flex align-items-center mb-2 gap-3">
-    <span class="text-muted small"><%= $count %> row<%= $count == 1 ? '' : 's' %></span>
-    % if ($offset > 0 || $count >= $limit) {
-    <div class="d-flex gap-1">
-      % if ($offset > 0) {
-        % my $prev = $offset - $limit; $prev = 0 if $prev < 0;
-      <a href="<%= url_with->query({offset => $prev, partial => undef}) %>" class="btn btn-sm btn-outline-secondary">&larr; Prev</a>
-      % }
-      % if ($count >= $limit) {
-      <a href="<%= url_with->query({offset => $offset + $limit, partial => undef}) %>" class="btn btn-sm btn-outline-secondary">Next &rarr;</a>
-      % }
-    </div>
-    % }
-  </div>
+  %= include 'partials/_results_pager', count => $count, noun => 'row', offset => $offset, limit => $limit
 
   % if ($count > 0) {
   <div class="table-responsive">

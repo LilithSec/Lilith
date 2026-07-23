@@ -100,7 +100,6 @@ sub index {
 		order_dir       => $order_dir,
 		limit           => $limit,
 		offset          => $offset,
-		filters         => \%filters,
 		around          => $around,
 		window          => ( $window // 60 ),
 	);
@@ -341,17 +340,13 @@ sub _dparams {
 
 # Render whatever $code->($reader) returns as JSON, turning a reader die (bad
 # source/column, unreachable database) into a 400 with the message, and a
-# missing [allani] into a 400 rather than a 500.
+# missing [allani] into a 400 rather than a 500. The shared die-to-400 logic
+# lives in the render_json_or_400 helper in Lilith::Web.
 sub _ljson {
 	my ( $self, $code ) = @_;
 	return $self->render( json => { error => 'Allani is not configured' }, status => 400 )
 		unless $self->allani_enabled;
-	my $data = eval { $code->( $self->allani ) };
-	if ($@) {
-		( my $why = $@ ) =~ s/\s+\z//;
-		return $self->render( json => { error => $why }, status => 400 );
-	}
-	return $self->render( json => $data );
-} ## end sub _ljson
+	return $self->render_json_or_400( $code, $self->allani );
+}
 
 1;

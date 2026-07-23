@@ -116,7 +116,7 @@ sub check_rule {
 			die( $where . " 'note' must be a string\n" );
 		}
 		$i++;
-	} ## end foreach my $action ( @{ $rule->{actions...}})
+	} ## end foreach my $action ( @{ $rule->{actions} } )
 
 	return 1;
 } ## end sub check_rule
@@ -134,6 +134,20 @@ sub _check_node {
 		die( $where . " may only have one of 'all', 'any', or 'not'\n" );
 	}
 
+	# a node mixing a combinator with leaf keys would have the leaf part
+	# silently ignored by compile, so it does not do what was written
+	if (@combinators) {
+		my @leaf_keys = grep { exists $node->{$_} } ( 'field', 'op', 'value' );
+		if (@leaf_keys) {
+			die(      $where
+					. " may not mix '"
+					. $combinators[0]
+					. "' with the leaf keys "
+					. join( ', ', map { "'" . $_ . "'" } @leaf_keys )
+					. "\n" );
+		}
+	} ## end if (@combinators)
+
 	if ( exists( $node->{all} ) || exists( $node->{any} ) ) {
 		my $key = exists( $node->{all} ) ? 'all' : 'any';
 		if ( ref( $node->{$key} ) ne 'ARRAY' || !@{ $node->{$key} } ) {
@@ -145,7 +159,7 @@ sub _check_node {
 			$i++;
 		}
 		return 1;
-	} ## end if ( exists( $node->{all...}))
+	} ## end if ( exists( $node->{all} ) || exists( $node...))
 
 	if ( exists( $node->{not} ) ) {
 		$class->_check_node( $node->{not}, $where . '.not' );
@@ -159,8 +173,33 @@ sub _check_node {
 	if ( !defined( $node->{op} ) || !$OPS{ $node->{op} } ) {
 		die( $where . " leaf has a missing or unknown 'op' (allowed: " . join( ', ', sort keys %OPS ) . ")\n" );
 	}
-	if ( $node->{op} eq 'in' && ref( $node->{value} ) ne 'ARRAY' ) {
-		die( $where . " leaf with op 'in' needs a 'value' array\n" );
+	if ( $node->{op} eq 'in' ) {
+		if ( ref( $node->{value} ) ne 'ARRAY' ) {
+			die( $where . " leaf with op 'in' needs a 'value' array\n" );
+		}
+		foreach my $item ( @{ $node->{value} } ) {
+			if ( !defined($item) || ref($item) ) {
+				die( $where . " leaf with op 'in' must have only defined scalar 'value' items\n" );
+			}
+		}
+	} ## end if ( $node->{op} eq 'in' )
+
+	# the comparison ops numify the value at compile time, so a non-numeric
+	# value would validate cleanly but silently compare against 0
+	if ( $node->{op} eq '>' || $node->{op} eq '>=' || $node->{op} eq '<' || $node->{op} eq '<=' ) {
+		if (  !defined( $node->{value} )
+			|| ref( $node->{value} )
+			|| $node->{value} !~ /^-?[0-9]+(?:\.[0-9]+)?$/ )
+		{
+			die( $where . " leaf with op '" . $node->{op} . "' needs a numeric 'value'\n" );
+		}
+	}
+
+	# ==, != and contains compare against a single scalar
+	if ( ( $node->{op} eq '==' || $node->{op} eq '!=' || $node->{op} eq 'contains' )
+		&& ref( $node->{value} ) )
+	{
+		die( $where . " leaf with op '" . $node->{op} . "' needs a scalar 'value'\n" );
 	}
 	if ( $node->{op} eq 'regex' ) {
 		if ( !defined( $node->{value} ) || ref( $node->{value} ) ) {
@@ -192,7 +231,7 @@ sub compile {
 
 	my $match = ref($rule) eq 'HASH' ? $rule->{match} : undef;
 	if ( ref($match) ne 'HASH' ) {
-		return sub {0};
+		return sub { 0 };
 	}
 
 	return $class->_compile_node($match);
@@ -203,7 +242,7 @@ sub _compile_node {
 	my ( $class, $node ) = @_;
 
 	if ( ref($node) ne 'HASH' ) {
-		return sub {0};
+		return sub { 0 };
 	}
 
 	if ( exists( $node->{all} ) ) {
@@ -215,7 +254,7 @@ sub _compile_node {
 			}
 			return 1;
 		};
-	} ## end if ( exists( $node->{all...}))
+	} ## end if ( exists( $node->{all} ) )
 
 	if ( exists( $node->{any} ) ) {
 		my @subs = map { $class->_compile_node($_) } @{ $node->{any} };
@@ -226,7 +265,7 @@ sub _compile_node {
 			}
 			return 0;
 		};
-	} ## end if ( exists( $node->{any...}))
+	} ## end if ( exists( $node->{any} ) )
 
 	if ( exists( $node->{not} ) ) {
 		my $sub = $class->_compile_node( $node->{not} );
@@ -258,11 +297,13 @@ sub _compile_leaf {
 			my $v = $class->_field_value( $_[0], $field );
 			return 0 if !defined($v) || ref($v) || $v !~ /^-?\d+(?:\.\d+)?$/;
 			my $n = $v + 0;
-			return ( $op eq '>' ? $n > $target : $op eq '>=' ? $n >= $target : $op eq '<' ? $n < $target : $n <= $target )
-				? 1
+			return ( $op eq '>' ? $n > $target
+				: $op eq '>=' ? $n >= $target
+				: $op eq '<'  ? $n < $target
+				: $n <= $target ) ? 1
 				: 0;
-		};
-	} ## end if ( $op eq '>' || $op eq...)
+		}; ## end sub
+	} ## end if ( $op eq '>' || $op eq '>=' || $op eq '<'...)
 
 	if ( $op eq '==' || $op eq '!=' ) {
 		my $eq = ( $op eq '==' );
@@ -305,7 +346,7 @@ sub _compile_leaf {
 		}
 		return 0 if ref($v);
 		return ( index( $v, $value ) >= 0 ) ? 1 : 0;
-	};
+	}; ## end sub
 } ## end sub _compile_leaf
 
 # equality that is numeric when both sides look numeric, else string eq
@@ -347,7 +388,7 @@ sub _field_value {
 			eval { $decoded = decode_json($cur); };
 			$cur = $decoded if defined($decoded);
 		}
-	} ## end foreach my $part ( split( /\./...))
+	} ## end foreach my $part ( split( /\./, $field ) )
 
 	return $cur;
 } ## end sub _field_value
@@ -379,7 +420,8 @@ sub evaluate {
 	require Rule::Engine::Rule;
 
 	my @ordered = sort {
-		( defined( $a->{priority} ) ? $a->{priority} : 100 ) <=> ( defined( $b->{priority} ) ? $b->{priority} : 100 )
+		( defined( $a->{priority} ) ? $a->{priority} : 100 )
+			<=> ( defined( $b->{priority} ) ? $b->{priority} : 100 )
 			|| ( defined( $a->{id} ) ? $a->{id} : 0 ) <=> ( defined( $b->{id} ) ? $b->{id} : 0 )
 	} @{$rules};
 

@@ -11,30 +11,27 @@ sub abstract { 'delete a auto escalation rule' }
 sub usage_desc { '%c ae_delete %o' }
 
 sub opt_spec {
-	return ( [ 'id=s@', 'the auto escalation rule ID' ], );
+	return ( [ 'id=s', 'the auto escalation rule ID' ], );
 }
 
 sub validate_args {
 	my ( $self, $opt, $args ) = @_;
 
-	my @id = @{ $opt->{id} // [] };
-	if ( !defined( $id[0] ) ) {
+	if ( !defined( $opt->{id} ) ) {
 		$self->usage_error('--id is required for deleting a auto escalation rule');
 	}
 
 	return;
-} ## end sub validate_args
+}
 
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 
-	my @id = @{ $opt->{id} // [] };
+	$self->lilith->auto_escalation_delete( $opt->{id} );
 
-	$self->lilith->auto_escalation_delete( $id[0] );
-
-	print 'deleted auto escalation ' . $id[0] . "\n";
+	print 'deleted auto escalation ' . $opt->{id} . "\n";
 
 	return;
-} ## end sub execute
+}
 
 1;

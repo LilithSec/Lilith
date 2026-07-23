@@ -3,7 +3,6 @@ package Lilith::CLI::Command::Search;
 use strict;
 use warnings;
 use parent 'Lilith::CLI::Command';
-use Text::ANSITable ();
 use Term::ANSIColor qw( color );
 use JSON            ();
 
@@ -12,44 +11,44 @@ sub abstract { 'search the database' }
 sub usage_desc { '%c search %o' }
 
 sub opt_spec {
+	my ($class) = @_;
 	return (
-		[ 't=s',         'table to operate on',        { default => 'suricata' } ],
-		[ 'output=s',    'output type: table or json', { default => 'table' } ],
-		[ 'pretty',      'pretty print the JSON output' ],
-		[ 'm=s',         'how far back to search, in minutes' ],
-		[ 'order=s',     'column to sort by' ],
-		[ 'orderdir=s',  'sort direction, ASC or DSC' ],
-		[ 'limit=s',     'row limit' ],
-		[ 'offset=s',    'row offset' ],
-		[ 'columns=s',   'comma separated list of columns' ],
-		[ 'columnset=s', 'named column set', { default => 'default' } ],
-		[ 'si=s',        'source IP' ],
-		[ 'di=s',        'destination IP' ],
-		[ 'ip=s',        'IP, either source or destination' ],
-		[ 'sp=s@',       'source port' ],
-		[ 'dp=s@',       'destination port' ],
-		[ 'p=s',         'port, either source or destination' ],
-		[ 'host=s',      'host' ],
-		[ 'ih=s',        'instance host' ],
-		[ 'i=s',         'instance' ],
-		[ 'c=s@',        'classification' ],
-		[ 'cN=s',        'classification, negated' ],
-		[ 'cl',          'match classification using like' ],
-		[ 's=s',         'signature' ],
-		[ 'if=s',        'in interface' ],
-		[ 'proto=s',     'proto' ],
-		[ 'ap=s',        'app proto' ],
-		[ 'gid=s@',      'GID' ],
-		[ 'sid=s@',      'SID' ],
-		[ 'rev=s@',      'rev' ],
-		[ 'subip=s',     'the IP the sample was submitted from' ],
-		[ 'subhost=s',   'the host the sample was submitted from' ],
-		[ 'slug=s',      'the slug it was submitted with' ],
-		[ 'pkg=s',       'the detonation package used with CAPEv2' ],
-		[ 'malscore=s@', 'the malscore of the sample' ],
-		[ 'size=s@',     'the size of the sample' ],
-		[ 'target=s',    'the detonation target' ],
-		[ 'task=s@',     'the task ID of the run' ],
+		[ 't=s', 'table to operate on', { default => 'suricata' } ],
+		$class->output_opt_spec,
+		[ 'm=s',              'how far back to search, in minutes' ],
+		[ 'order=s',          'column to sort by' ],
+		[ 'orderdir=s',       'sort direction, ASC or DESC' ],
+		[ 'limit=s',          'row limit' ],
+		[ 'offset=s',         'row offset' ],
+		[ 'columns=s',        'comma separated list of columns' ],
+		[ 'columnset=s',      'named column set', { default => 'default' } ],
+		[ 'si=s',             'source IP' ],
+		[ 'di=s',             'destination IP' ],
+		[ 'ip=s',             'IP, either source or destination' ],
+		[ 'sp=s@',            'source port' ],
+		[ 'dp=s@',            'destination port' ],
+		[ 'p=s',              'port, either source or destination' ],
+		[ 'host=s',           'host' ],
+		[ 'ih=s',             'instance host' ],
+		[ 'i=s',              'instance' ],
+		[ 'c=s@',             'classification' ],
+		[ 'class_not|cN=s@',  'classification to exclude; appended to the class list with a leading !' ],
+		[ 'class_like|cl=s@', 'classification to match using like; wrapped in % unless the value contains one' ],
+		[ 's=s',              'signature' ],
+		[ 'if=s',             'in interface' ],
+		[ 'proto=s',          'proto' ],
+		[ 'ap=s',             'app proto' ],
+		[ 'gid=s@',           'GID' ],
+		[ 'sid=s@',           'SID' ],
+		[ 'rev=s@',           'rev' ],
+		[ 'subip=s',          'the IP the sample was submitted from' ],
+		[ 'subhost=s',        'the host the sample was submitted from' ],
+		[ 'slug=s',           'the slug it was submitted with' ],
+		[ 'pkg=s',            'the detonation package used with CAPEv2' ],
+		[ 'malscore=s@',      'the malscore of the sample' ],
+		[ 'size=s@',          'the size of the sample' ],
+		[ 'target=s',         'the detonation target' ],
+		[ 'task=s@',          'the task ID of the run' ],
 	);
 } ## end sub opt_spec
 
@@ -67,6 +66,20 @@ sub execute {
 	my @class = @{ $opt->{c} // [] };
 	@class = split( /\s*,\s*/, join( ',', @class ) );
 
+	# --cN excludes a class via the leading ! Lilith::search supports
+	foreach my $class_not_value ( @{ $opt->{class_not} // [] } ) {
+		push( @class, '!' . $class_not_value );
+	}
+
+	# --cl like-matches a class; a % in the value triggers like matching in
+	# Lilith::search, so wrap the value in % unless it already contains one
+	foreach my $class_like_value ( @{ $opt->{class_like} // [] } ) {
+		if ( $class_like_value !~ /\%/ ) {
+			$class_like_value = '%' . $class_like_value . '%';
+		}
+		push( @class, $class_like_value );
+	}
+
 	#
 	# run the search
 	#
@@ -79,13 +92,9 @@ sub execute {
 		port             => $opt->{p},
 		table            => $table,
 		host             => $opt->{host},
-		host_not         => undef,
-		host_like        => undef,
 		instance_host    => $opt->{ih},
 		instance         => $opt->{i},
 		class            => \@class,
-		class_not        => $opt->{cN},
-		class_like       => $opt->{cl},
 		signature        => $opt->{s},
 		app_proto        => $opt->{ap},
 		proto            => $opt->{proto},
@@ -155,12 +164,16 @@ sub execute {
 			} elsif ( $table eq 'cape' ) {
 				if ( $column_set eq 'default' ) {
 					$columns = 'id,instance,slug,target,size,pkg,malscore,subbed_from_ip,subbed_from_host';
+				} else {
+					die( '"' . $column_set . '" is not a known column set' );
 				}
 			} elsif ( $table eq 'baphomet' ) {
 				if ( $column_set eq 'default' ) {
 					$columns = 'id,instance,event_type,src_ip,subject,severity,signature,classification,score';
 				} elsif ( $column_set eq 'default_timestamp' ) {
 					$columns = 'timestamp,instance,event_type,src_ip,subject,severity,signature,classification,score';
+				} else {
+					die( '"' . $column_set . '" is not a known column set' );
 				}
 			}
 		} ## end if ( !defined($columns) )
@@ -171,7 +184,6 @@ sub execute {
 			'instance'            => 'instance',
 			'host'                => 'host',
 			'timestamp'           => 'timestamp',
-			'event_id'            => 'event_id',
 			'flow_id'             => 'flow_id',
 			'in_iface'            => 'if',
 			'src_ip'              => 'src_ip',
@@ -216,27 +228,9 @@ sub execute {
 		#
 		# init the table
 		#
-		my $tb = Text::ANSITable->new;
-		$tb->border_style( $ENV{Lilith_table_border} );
-		$tb->color_theme( $ENV{Lilith_table_color} );
-
 		my @columns_array = split( /,/, $columns );
-		my $header_int    = 0;
-		my $padding       = 0;
-		my @headers;
-		foreach my $header (@columns_array) {
-
-			push( @headers, $column_names->{$header} );
-
-			if   ( ( $header_int % 2 ) != 0 ) { $padding = 1; }
-			else                              { $padding = 0; }
-
-			$tb->set_column_style( $header_int, pad => $padding );
-
-			$header_int++;
-		} ## end foreach my $header (@columns_array)
-
-		$tb->columns( \@headers );
+		my @headers       = map { $column_names->{$_} // $_ } @columns_array;
+		my $tb            = $self->table(@headers);
 
 		#
 		# process each found row
@@ -247,35 +241,17 @@ sub execute {
 
 			foreach my $column (@columns_array) {
 
+				# rule_id is not a real column but gid:sid:rev of the row
 				if ( $column eq 'rule_id' ) {
-					$row->{rule_id} = $row->{gid} . ':' . $row->{sid} . ':' . $row->{rev};
-				}
-
-				if ( defined( $row->{$column} ) && $column eq 'rule_id' ) {
-					push( @new_line, $row->{gid} . ':' . $row->{sid} . ':' . $row->{rev} );
+					push( @new_line,
+						( $row->{gid} // '' ) . ':' . ( $row->{sid} // '' ) . ':' . ( $row->{rev} // '' ) );
 				} elsif ( defined( $row->{$column} ) && $column eq 'classification' ) {
 					push( @new_line, $lilith->get_short_class( $row->{$column} ) );
 				} elsif ( defined( $row->{$column} ) && ( $column eq 'src_ip' || $column eq 'dest_ip' ) ) {
-					if ( defined( $ENV{Lilith_IP_color} ) ) {
-						if (   $row->{$column} =~ /^192\.168\./
-							|| $row->{$column} =~ /^10\./
-							|| $row->{$column} =~ /^172\.16/
-							|| $row->{$column} =~ /^172\.17/
-							|| $row->{$column} =~ /^172\.19/
-							|| $row->{$column} =~ /^172\.19/
-							|| $row->{$column} =~ /^172\.20/
-							|| $row->{$column} =~ /^172\.21/
-							|| $row->{$column} =~ /^172\.22/
-							|| $row->{$column} =~ /^172\.23/
-							|| $row->{$column} =~ /^172\.24/
-							|| $row->{$column} =~ /^172\.25/
-							|| $row->{$column} =~ /^172\.26/
-							|| $row->{$column} =~ /^172\.26/
-							|| $row->{$column} =~ /^172\.27/
-							|| $row->{$column} =~ /^172\.28/
-							|| $row->{$column} =~ /^172\.29/
-							|| $row->{$column} =~ /^172\.30/
-							|| $row->{$column} =~ /^172\.31/ )
+					if ( $ENV{Lilith_IP_color} ) {
+						if (   $row->{$column} =~ /^10\./
+							|| $row->{$column} =~ /^172\.(?:1[6-9]|2[0-9]|3[01])\./
+							|| $row->{$column} =~ /^192\.168\./ )
 						{
 							$row->{$column} = color( $ENV{Lilith_IP_private_color} ) . $row->{$column} . color('reset');
 						} elsif ( $row->{$column} =~ /^127\./ ) {
@@ -283,13 +259,13 @@ sub execute {
 						} else {
 							$row->{$column} = color( $ENV{Lilith_IP_remote_color} ) . $row->{$column} . color('reset');
 						}
-					} ## end if ( defined( $ENV{Lilith_IP_color} ) )
+					} ## end if ( $ENV{Lilith_IP_color} )
 					push( @new_line, $row->{$column} );
 				} elsif ( defined( $row->{$column} ) && $column eq 'timestamp' ) {
-					if ( $ENV{Lilith_timesamp_drop_micro} ) {
+					if ( $ENV{Lilith_timestamp_drop_micro} ) {
 						$row->{$column} =~ s/\.[0-9]+//;
 					}
-					if ( $ENV{Lilith_timesamp_drop_offset} ) {
+					if ( $ENV{Lilith_timestamp_drop_offset} ) {
 						$row->{$column} =~ s/\-[0-9]+$//;
 					}
 					push( @new_line, $row->{$column} );

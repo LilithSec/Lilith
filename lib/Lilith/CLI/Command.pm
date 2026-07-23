@@ -41,6 +41,39 @@ C<$pretty> is true, with a trailing newline only when not pretty.
 Returns a L<Text::ANSITable> with the standard Lilith border/theme and the
 given columns, styled with the alternating padding the old output used.
 
+=head2 output_opt_spec
+
+Returns the shared C<--output>/C<--pretty> opt spec entries used by the
+commands that can render either a table or JSON. Meant to be included in
+a command's C<opt_spec> like below.
+
+    sub opt_spec {
+        my ($class) = @_;
+        return (
+            [ 'id=s', 'the row ID' ],
+            $class->output_opt_spec,
+        );
+    }
+
+=head2 output_dispatch( $opt, %renderers )
+
+Dispatches on C<< $opt->{output} >>, calling the matching code ref from
+C<%renderers> (keyed C<table>, C<json>, etc) and returning its return
+value. Dies with C<No applicable output found> when C<--output> names an
+output no renderer was passed for.
+
+    return $self->output_dispatch(
+        $opt,
+        json  => sub { $self->print_json( $rows, $opt->{pretty} ) },
+        table => sub { ... },
+    );
+
+=head2 migration
+
+Returns a L<DBIx::Class::Migration> for L<Lilith::Schema>, built with the
+dsn/user/pass from the config file. Used by the deploy, migrate, and
+schema_version commands.
+
 =cut
 
 # Reproduce the old getopt behavior (no_ignore_case + bundling) for every
@@ -127,5 +160,37 @@ sub table {
 
 	return $tb;
 } ## end sub table
+
+sub output_opt_spec {
+	return (
+		[ 'output=s', 'output type: table or json', { default => 'table' } ],
+		[ 'pretty',   'pretty print the JSON' ],
+	);
+}
+
+sub output_dispatch {
+	my ( $self, $opt, %renderers ) = @_;
+
+	my $renderer = $renderers{ $opt->{output} };
+	if ( !defined($renderer) ) {
+		die('No applicable output found');
+	}
+
+	return $renderer->();
+} ## end sub output_dispatch
+
+sub migration {
+	my ($self) = @_;
+
+	my $toml = $self->config;
+
+	require Lilith::Schema;
+	require DBIx::Class::Migration;
+
+	return DBIx::Class::Migration->new(
+		schema_class => 'Lilith::Schema',
+		schema_args  => [ $toml->{dsn}, $toml->{user}, $toml->{pass} ],
+	);
+} ## end sub migration
 
 1;

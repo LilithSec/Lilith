@@ -206,6 +206,32 @@ sub type_info {
 	};
 } ## end sub type_info
 
+=head2 decode_event_raw
+
+Returns a copy of the event hash ref with C<raw> decoded from JSON
+when it is still a string, so escalation payloads get structure
+instead of a string. The event is returned as is when C<raw> is
+already a reference, is undef, or does not decode to a reference. The
+passed event is never modified.
+
+    $event = Lilith::Escalate->decode_event_raw($event);
+
+=cut
+
+sub decode_event_raw {
+	my ( $class, $event ) = @_;
+
+	if ( ref $event eq 'HASH' && defined( $event->{raw} ) && !ref( $event->{raw} ) ) {
+		my $decoded;
+		eval { $decoded = JSON::decode_json( $event->{raw} ) };
+		if ( !$@ && ref $decoded ) {
+			return { %{$event}, raw => $decoded };
+		}
+	}
+
+	return $event;
+} ## end sub decode_event_raw
+
 =head2 event_summary
 
 Builds a multi-line plain text summary of an event for use in

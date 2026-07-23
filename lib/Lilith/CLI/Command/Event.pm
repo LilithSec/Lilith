@@ -13,7 +13,7 @@ sub usage_desc { '%c event %o' }
 sub opt_spec {
 	return (
 		[ 't=s',      'table to operate on', { default => 'suricata' } ],
-		[ 'id=s@',    'fetch event via row ID' ],
+		[ 'id=s',     'fetch event via row ID' ],
 		[ 'event=s',  'fetch event via event ID' ],
 		[ 'raw',      'do not decode the EVE JSON' ],
 		[ 'pretty',   'pretty print the JSON' ],
@@ -26,8 +26,7 @@ sub opt_spec {
 sub validate_args {
 	my ( $self, $opt, $args ) = @_;
 
-	my @id = @{ $opt->{id} // [] };
-	if ( !defined( $id[0] ) && !defined( $opt->{event} ) ) {
+	if ( !defined( $opt->{id} ) && !defined( $opt->{event} ) ) {
 		$self->usage_error('either --id or --event is required for fetching a event');
 	}
 
@@ -42,7 +41,6 @@ sub execute {
 	my ( $self, $opt, $args ) = @_;
 
 	my $lilith   = $self->lilith;
-	my @id       = @{ $opt->{id} // [] };
 	my $event_id = $opt->{event};
 	my $table    = $opt->{t};
 
@@ -52,8 +50,9 @@ sub execute {
 		no_time => 1,
 		limit   => 1,
 	);
-	$search_args{id}       = $id[0]    if defined( $id[0] );
-	$search_args{event_id} = $event_id if defined($event_id);
+	# id is one of search()'s numeric items, which take an array ref
+	$search_args{id}       = [ $opt->{id} ] if defined( $opt->{id} );
+	$search_args{event_id} = $event_id      if defined($event_id);
 
 	my $returned = $lilith->search(%search_args);
 
@@ -77,10 +76,6 @@ sub execute {
 		}
 
 		print "\n";
-
-		if ( !defined $returned->[0] ) {
-			die('No such event, unable to fetch PCAP');
-		}
 
 		my $remote_arg = $opt->{virani};
 		if ( !defined( $opt->{virani} ) ) {

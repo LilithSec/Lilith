@@ -11,10 +11,8 @@ sub abstract { 'list the auto escalation rules' }
 sub usage_desc { '%c ae_list %o' }
 
 sub opt_spec {
-	return (
-		[ 'output=s', 'output type: table or json', { default => 'table' } ],
-		[ 'pretty',   'pretty print the JSON' ],
-	);
+	my ($class) = @_;
+	return $class->output_opt_spec;
 }
 
 sub execute {
@@ -22,32 +20,33 @@ sub execute {
 
 	my $rules = $self->lilith->auto_escalations;
 
-	if ( $opt->{output} eq 'json' ) {
-		$self->print_json( $rules, $opt->{pretty} );
-		return;
-	}
+	return $self->output_dispatch(
+		$opt,
+		json  => sub { $self->print_json( $rules, $opt->{pretty} ) },
+		table => sub {
+			my $tb = $self->table( 'ID', 'Name', 'Enabled', 'Priority', 'Stop', 'Tables', 'Matches', 'Description' );
+			my @td;
+			foreach my $rule ( @{$rules} ) {
+				push(
+					@td,
+					[
+						$rule->{id},
+						$rule->{name},
+						$rule->{enabled} ? 'yes' : 'no',
+						$rule->{priority},
+						$rule->{stop_on_match} ? 'yes' : 'no',
+						join( ',', @{ $rule->{tables} } ),
+						$rule->{match_count},
+						defined( $rule->{description} ) ? $rule->{description} : '',
+					]
+				);
+			} ## end foreach my $rule ( @{$rules} )
+			$tb->add_rows( \@td );
+			print $tb->draw;
 
-	my $tb = $self->table( 'ID', 'Name', 'Enabled', 'Priority', 'Stop', 'Tables', 'Matches', 'Description' );
-	my @td;
-	foreach my $rule ( @{$rules} ) {
-		push(
-			@td,
-			[
-				$rule->{id},
-				$rule->{name},
-				$rule->{enabled} ? 'yes' : 'no',
-				$rule->{priority},
-				$rule->{stop_on_match} ? 'yes' : 'no',
-				join( ',', @{ $rule->{tables} } ),
-				$rule->{match_count},
-				defined( $rule->{description} ) ? $rule->{description} : '',
-			]
-		);
-	} ## end foreach my $rule ( @{$rules} )
-	$tb->add_rows( \@td );
-	print $tb->draw;
-
-	return;
+			return;
+		},
+	);
 } ## end sub execute
 
 1;

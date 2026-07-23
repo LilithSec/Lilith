@@ -4,7 +4,6 @@ use 5.006;
 use strict;
 use warnings;
 use Sys::Hostname    qw( hostname );
-use JSON             qw( decode_json );
 use Lilith::Escalate ();
 
 =head1 NAME
@@ -52,6 +51,14 @@ sub config_fields {
 		{ name => 'pass',       label => 'SMTP Pass',       type => 'secret',  required => 0 },
 		{ name => 'from',       label => 'From',            type => 'string',  required => 1 },
 		{ name => 'to',         label => 'To (comma sep)',  type => 'string',  required => 1 },
+		{ name => 'timeout',    label => 'Timeout (sec)',   type => 'integer', required => 0, default => 30 },
+		{
+			name     => 'probe_timeout',
+			label    => 'Cert Probe Timeout (sec)',
+			type     => 'integer',
+			required => 0,
+			default  => 10
+		},
 		{
 			name     => 'subject_prefix',
 			label    => 'Subject Prefix',
@@ -85,6 +92,14 @@ sub check_config {
 		die( '"' . $config->{port} . '" for port is not numeric' . "\n" );
 	}
 
+	# zero would disable Net::SMTP's connection timeout entirely, hanging
+	# the escalation worker indefinitely, so require at least one second
+	foreach my $item (qw( timeout probe_timeout )) {
+		if ( defined( $config->{$item} ) && ( $config->{$item} !~ /^[0-9]+$/ || $config->{$item} < 1 ) ) {
+			die( '"' . $config->{$item} . '" for ' . $item . ' is not a positive whole number' . "\n" );
+		}
+	}
+
 	return 1;
 } ## end sub check_config
 
@@ -105,13 +120,7 @@ sub escalate {
 
 	# the raw may still be a JSON string depending on where the event came
 	# from; decode it so the summary can pretty print it
-	if ( defined( $event->{raw} ) && !ref( $event->{raw} ) ) {
-		my $decoded;
-		eval { $decoded = decode_json( $event->{raw} ) };
-		if ( !$@ && ref $decoded ) {
-			$event = { %{$event}, raw => $decoded };
-		}
-	}
+	$event = Lilith::Escalate->decode_event_raw($event);
 
 	my @to = grep { $_ ne '' } split( /\s*,\s*/, $config->{to} );
 	if ( !@to ) {
@@ -126,6 +135,10 @@ sub escalate {
 		. ( defined( $args{table} )        ? $args{table}               : '' )
 		. ( defined( $event->{id} )        ? ' #' . $event->{id}        : '' )
 		. ( defined( $event->{signature} ) ? ': ' . $event->{signature} : '' );
+
+	# the signature comes from sensor data; a CR/LF in it would inject
+	# additional headers into the message
+	$subject =~ s/[\r\n]+/ /g;
 
 	my $body = Lilith::Escalate->event_summary( $args{table}, $event );
 	foreach my $key (qw( note requested_by target_name )) {
@@ -148,7 +161,7 @@ sub escalate {
 		$config->{host},
 		Port    => ( defined( $config->{port} ) ? $config->{port} + 0 : 25 ),
 		Hello   => hostname,
-		Timeout => 30,
+		Timeout => ( defined( $config->{timeout} ) ? $config->{timeout} + 0 : 30 ),
 	);
 	if ( !$smtp ) {
 		die( 'failed to connect to SMTP server "' . $config->{host} . '"' . "\n" );
@@ -192,7 +205,8 @@ sub escalate {
 			# reconnect without verification purely to report what
 			# certificate the server actually presented, so a name mismatch
 			# is obvious from the escalation error without server side digging
-			my ( $cn, @sans ) = eval { $class->_peer_cert_names( $host, $port ) };
+			my $probe_timeout = defined( $config->{probe_timeout} ) ? $config->{probe_timeout} + 0 : 10;
+			my ( $cn, @sans ) = eval { $class->_peer_cert_names( $host, $port, $probe_timeout ) };
 			if ( ( defined($cn) && $cn ne '' ) || @sans ) {
 				$detail .= '; server presented certificate with';
 				$detail .= ' CN=' . $cn if defined($cn) && $cn ne '';
@@ -225,14 +239,15 @@ sub escalate {
 
 Best effort diagnostic helper. Connects to the given host/port, performs
 STARTTLS with certificate verification disabled, and returns the presented
-certificate's common name followed by its subjectAltName entries. Returns an
-empty list if it cannot connect or negotiate TLS. Only used to make a
-verification failure legible in the escalation error.
+certificate's common name followed by its subjectAltName entries. The
+optional third arg is the connection timeout in seconds, defaulting to 10.
+Returns an empty list if it cannot connect or negotiate TLS. Only used to
+make a verification failure legible in the escalation error.
 
 =cut
 
 sub _peer_cert_names {
-	my ( $class, $host, $port ) = @_;
+	my ( $class, $host, $port, $timeout ) = @_;
 
 	require Net::SMTP;
 	require IO::Socket::SSL;
@@ -241,7 +256,7 @@ sub _peer_cert_names {
 		$host,
 		Port    => $port,
 		Hello   => hostname,
-		Timeout => 10,
+		Timeout => ( defined($timeout) ? $timeout + 0 : 10 ),
 	);
 	return unless $smtp;
 

@@ -63,17 +63,13 @@ sub _params {
 } ## end sub _params
 
 # Render whatever $code returns as JSON, turning a Lilith::Stats die (bad
-# column, unreachable database, ...) into a 400 with the message.
+# column, unreachable database, ...) into a 400 with the message. The shared
+# logic lives in the render_json_or_400 helper in Lilith::Web.
 sub _json {
 	my ( $self, $code ) = @_;
 
-	my $data = eval { $code->() };
-	if ($@) {
-		( my $why = $@ ) =~ s/\s+\z//;
-		return $self->render( json => { error => $why }, status => 400 );
-	}
-	return $self->render( json => $data );
-} ## end sub _json
+	return $self->render_json_or_400($code);
+}
 
 # A dashboard name a user may create: trimmed, 1-64 chars of a conservative set,
 # so a board name is safe to show and to round-trip. Returns the cleaned name or

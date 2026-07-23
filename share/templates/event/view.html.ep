@@ -111,8 +111,22 @@
   </div>
 </div>
 
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'http' && ref $event->{raw}{http} eq 'HASH') {
-  % my $http = $event->{raw}{http};
+% # The protocol cards below read a proto selector ($proto_app) and a root hash
+% # whose keys are the protocol sub-objects ($proto_root). Suricata/Sagan/CAPE
+% # carry both at the top of raw; a Baphomet verdict that judged a Suricata line
+% # nests the original EVE under raw.raw (generally a hash, promoted from a string
+% # in the controller when needed), so point the cards there. .raw may not be a
+% # hash at all, hence the ref checks.
+% my $proto_root = ref $event->{raw} eq 'HASH' ? $event->{raw} : undef;
+% my $proto_app  = $event->{app_proto};
+% if ($table eq 'baphomet' && ref $event->{raw} eq 'HASH'
+%     && ref $event->{raw}{raw} eq 'HASH' && $event->{raw}{raw}{app_proto}) {
+%   $proto_root = $event->{raw}{raw};
+%   $proto_app  = $event->{raw}{raw}{app_proto};
+% }
+
+% if (ref $proto_root eq 'HASH' && $proto_app && lc($proto_app) eq 'http' && ref $proto_root->{http} eq 'HASH') {
+  % my $http = $proto_root->{http};
 <div class="card border-secondary mb-3">
   <div class="card-header py-1 small text-muted">HTTP Details</div>
   <div class="p-0">
@@ -160,8 +174,8 @@
 </div>
 % }
 
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'dns' && ref $event->{raw}{dns} eq 'HASH') {
-  % my $dns = $event->{raw}{dns};
+% if (ref $proto_root eq 'HASH' && $proto_app && lc($proto_app) eq 'dns' && ref $proto_root->{dns} eq 'HASH') {
+  % my $dns = $proto_root->{dns};
 <div class="card border-secondary mb-3">
   <div class="card-header py-1 small text-muted">DNS Details</div>
   <div class="p-0">
@@ -208,51 +222,9 @@
 </div>
 % }
 
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'tls' && ref $event->{raw}{tls} eq 'HASH') {
-  % my $tls = $event->{raw}{tls};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">TLS Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(sni version subject issuerdn serial fingerprint notbefore notafter)) {
-          % next unless defined $tls->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $tls->{$field} %>
-            % if ($field eq 'sni') {
-            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 domain-info-btn ms-1" data-domain="<%= $tls->{$field} %>" style="font-size:0.65rem;line-height:1.2">?</button>
-            % }
-          </td>
-        </tr>
-        % }
-        % if (ref $tls->{ja3} eq 'HASH') {
-          % for my $field (qw(hash string)) {
-            % next unless defined $tls->{ja3}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">ja3.<%= $field %></th>
-          <td class="font-monospace"><%= $tls->{ja3}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $tls->{ja3s} eq 'HASH') {
-          % for my $field (qw(hash string)) {
-            % next unless defined $tls->{ja3s}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">ja3s.<%= $field %></th>
-          <td class="font-monospace"><%= $tls->{ja3s}{$field} %></td>
-        </tr>
-          % }
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'smtp' && ref $event->{raw}{smtp} eq 'HASH') {
-  % my $smtp = $event->{raw}{smtp};
-  % my $email = ref $event->{raw}{email} eq 'HASH' ? $event->{raw}{email} : {};
+% if (ref $proto_root eq 'HASH' && $proto_app && lc($proto_app) eq 'smtp' && ref $proto_root->{smtp} eq 'HASH') {
+  % my $smtp = $proto_root->{smtp};
+  % my $email = ref $proto_root->{email} eq 'HASH' ? $proto_root->{email} : {};
 <div class="card border-secondary mb-3">
   <div class="card-header py-1 small text-muted">SMTP Details</div>
   <div class="p-0">
@@ -298,1083 +270,254 @@
 </div>
 % }
 
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'ssh' && ref $event->{raw}{ssh} eq 'HASH') {
-  % my $ssh = $event->{raw}{ssh};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">SSH Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % if (ref $ssh->{client} eq 'HASH') {
-          % for my $field (qw(proto_version software_version)) {
-            % next unless defined $ssh->{client}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">client.<%= $field %></th>
-          <td class="font-monospace"><%= $ssh->{client}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $ssh->{server} eq 'HASH') {
-          % for my $field (qw(proto_version software_version)) {
-            % next unless defined $ssh->{server}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">server.<%= $field %></th>
-          <td class="font-monospace"><%= $ssh->{server}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $ssh->{hassh} eq 'HASH') {
-          % for my $field (qw(hash string)) {
-            % next unless defined $ssh->{hassh}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">hassh.<%= $field %></th>
-          <td class="font-monospace"><%= $ssh->{hassh}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $ssh->{hassh_server} eq 'HASH') {
-          % for my $field (qw(hash string)) {
-            % next unless defined $ssh->{hassh_server}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">hassh_server.<%= $field %></th>
-          <td class="font-monospace"><%= $ssh->{hassh_server}{$field} %></td>
-        </tr>
-          % }
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
+% # ---------------------------------------------------------------------------
+% # Per-protocol detail cards. Each one is the same card/table/row skeleton, so
+% # the protocols are described as data and rendered by the single loop below.
+% # HTTP, DNS and SMTP have genuinely unique rendering (body downloads, query /
+% # answer layouts, address domain extraction) and stay hand written above.
+% #
+% # Card spec keys:
+% #   proto   - lc(app_proto) value the card is shown for
+% #   raw_key - key under raw holding the protocol hash (defaults to proto; an
+% #             explicit undef means the row groups walk raw itself, as for FTP)
+% #   title   - card header text
+% #   rows    - ordered row groups, each one a hash of:
+% #     kind          - 'scalars' (default), 'array', 'list' or 'all_scalars'
+% #     path          - hash keys to descend through before looking fields up;
+% #                     the whole group is skipped unless every step is a hash
+% #     prefix        - row label prefix (defaults to the path joined by '.')
+% #     fields        - ordered field names ('scalars' and 'array' kinds)
+% #     join_arrays   - 'scalars': render array values joined by ', '
+% #     domain_fields - 'scalars': fields that get a Domain Info button
+% #     field         - 'list': field holding the array of entries
+% #     label         - 'list': row label (defaults to prefix plus field)
+% #     format        - 'list': entry formatter (defaults to sorted k=v pairs)
+% # Row group kinds:
+% #   scalars     - one row per defined field
+% #   array       - one row per field holding a non-empty array, joined by ', '
+% #   list        - one row for `field`, one line per array entry
+% #   all_scalars - one row per non-reference value, keys sorted
+% my $format_key_value_entry = sub {
+%   my ($entry) = @_;
+%   return ref $entry eq 'HASH' ? join(' ', map { "$_=$entry->{$_}" } sort keys %$entry) : $entry;
+% };
+% my @protocol_detail_cards = (
+%   { proto => 'tls', title => 'TLS Details', rows => [
+%     { fields => [qw(sni version subject issuerdn serial fingerprint notbefore notafter)],
+%       domain_fields => { sni => 1 } },
+%     { path => ['ja3'],  fields => [qw(hash string)] },
+%     { path => ['ja3s'], fields => [qw(hash string)] },
+%   ] },
+%   { proto => 'ssh', title => 'SSH Details', rows => [
+%     { path => ['client'],       fields => [qw(proto_version software_version)] },
+%     { path => ['server'],       fields => [qw(proto_version software_version)] },
+%     { path => ['hassh'],        fields => [qw(hash string)] },
+%     { path => ['hassh_server'], fields => [qw(hash string)] },
+%   ] },
+%   { proto => 'rdp', title => 'RDP Details', rows => [
+%     { fields => [qw(tx_id event_type cookie)] },
+%     { path => ['client'], fields => [qw(version build client_name desktop_width desktop_height color_depth keyboard_layout keyboard_type function_keys product_id)] },
+%     { kind => 'array', fields => [qw(x509_serials channels)] },
+%   ] },
+%   { proto => 'ftp', raw_key => undef, title => 'FTP Details', rows => [
+%     { path => ['ftp'], prefix => '', fields => [qw(command command_data reply_code dynamic_port)] },
+%     { path => ['ftp'], prefix => '', fields => [qw(reply_message completion_code)], join_arrays => 1 },
+%     { path => ['ftp_data'], fields => [qw(filename command)] },
+%   ] },
+%   { proto => 'dcerpc', title => 'DCERPC Details', rows => [
+%     { fields => [qw(type pkt_type call_id rpc_version rpc_version_minor request response)] },
+%     { path => ['req'], fields => [qw(opnum frag_cnt stub_data_size)] },
+%     { path => ['res'], fields => [qw(frag_cnt stub_data_size)] },
+%     { kind => 'list', field => 'interfaces' },
+%   ] },
+%   { proto => 'smb', title => 'SMB Details', rows => [
+%     { fields => [qw(id dialect command status status_code session_id tree_id filename fuid share named_pipe service host disposition access created accessed modified changed size)] },
+%     { path => ['ntlmssp'],  fields => [qw(domain user host)] },
+%     { path => ['kerberos'], fields => [qw(realm)] },
+%     { kind => 'array', fields => [qw(errors)] },
+%   ] },
+%   { proto => 'nfs', title => 'NFS Details', rows => [
+%     { fields => [qw(version type procedure filename status nak_reason id file_tx)], join_arrays => 1 },
+%   ] },
+%   { proto => 'krb5', title => 'KRB5 Details', rows => [
+%     { fields => [qw(msg_type cname realm sname encryption error_code failed_request weak_encryption)], join_arrays => 1 },
+%   ] },
+%   { proto => 'ikev2', title => 'IKEv2 Details', rows => [
+%     { fields => [qw(version_major version_minor exchange_type message_id initiator_spi responder_spi role alg_enc alg_auth alg_prf alg_dh alg_esn)] },
+%     { kind => 'array', fields => [qw(notify payload errors)] },
+%   ] },
+%   { proto => 'dhcp', title => 'DHCP Details', rows => [
+%     { fields => [qw(type dhcp_type id hostname client_mac client_ip assigned_ip requested_ip subnet_mask lease_time renewal_time rebinding_time)],
+%       domain_fields => { hostname => 1 } },
+%     { kind => 'array', fields => [qw(routers dns_servers params)] },
+%   ] },
+%   { proto => 'snmp', title => 'SNMP Details', rows => [
+%     { fields => [qw(version community pdu_type error error_index trap_address trap_community trap_oid usm)] },
+%     { kind => 'list', field => 'vars' },
+%   ] },
+%   { proto => 'bittorrent-dht', raw_key => 'bittorrent_dht', title => 'Bittorrent-DHT Details', rows => [
+%     { fields => [qw(type transaction_id num_answers)] },
+%     { kind => 'list', field => 'queries' },
+%   ] },
+%   { proto => 'http2', title => 'HTTP2 Details', rows => [
+%     { fields => [qw(sid)] },
+%     { kind => 'list', field => 'header', label => 'headers',
+%       format => sub { my ($header) = @_; return ref $header eq 'HASH' ? ($header->{name} // '') . ': ' . ($header->{value} // '') : $header; } },
+%   ] },
+%   { proto => 'imap', title => 'IMAP Details', rows => [
+%     { kind => 'all_scalars' },
+%   ] },
+%   { proto => 'tftp', title => 'TFTP Details', rows => [
+%     { fields => [qw(packet file mode)] },
+%   ] },
+%   { proto => 'modbus', title => 'Modbus Details', rows => [
+%     { fields => [qw(transaction_id unit_id)] },
+%     { path => ['function'], fields => [qw(category code)] },
+%     { kind => 'array', fields => [qw(errors)] },
+%   ] },
+%   { proto => 'ntp', title => 'NTP Details', rows => [
+%     { fields => [qw(type version mode stratum poll precision leap reference_id reference_ts origin_ts receive_ts transmit_ts)] },
+%   ] },
+%   { proto => 'quic', title => 'QUIC Details', rows => [
+%     { fields => [qw(version quic_version sni ua)], domain_fields => { sni => 1 } },
+%     { kind => 'list', field => 'cyu' },
+%   ] },
+%   { proto => 'enip', title => 'ENIP Details', rows => [
+%     { path => ['header'], fields => [qw(command session_handle status length sender_context options)] },
+%     { kind => 'all_scalars', path => ['cip'] },
+%   ] },
+%   { proto => 'dnp3', title => 'DNP3 Details', rows => [
+%     { fields => [qw(type src dst)] },
+%     { path => ['control'], fields => [qw(dir pri fcv seq fc)] },
+%     { path => ['iin'], fields => [qw(iin1 iin2)] },
+%   ] },
+%   { proto => 'sip', title => 'SIP Details', rows => [
+%     { fields => [qw(method uri version code reason request_line response_line from to via)], join_arrays => 1 },
+%   ] },
+%   { proto => 'mqtt', title => 'MQTT Details', rows => [
+%     { fields => [qw(tx_id type qos retain dup)] },
+%     { path => ['connect'], fields => [qw(protocol version client_id username keepalive)] },
+%     { path => [qw(connect flags)], fields => [qw(username password will clean_session)] },
+%     { path => [qw(connect will)], fields => [qw(topic message)] },
+%     { path => ['publish'], fields => [qw(topic message_id message)] },
+%     { path => ['subscribe'], fields => [qw(message_id)] },
+%     { kind => 'array', path => ['subscribe'], fields => [qw(topics)] },
+%     { path => ['connack'], fields => [qw(return_code session_present)] },
+%   ] },
+%   { proto => 'telnet', title => 'Telnet Details', rows => [
+%     { kind => 'all_scalars' },
+%   ] },
+%   { proto => 'rfb', title => 'RFB Details', rows => [
+%     { path => ['client'], fields => [qw(protocol_major protocol_minor)] },
+%     { path => ['server'], fields => [qw(protocol_major protocol_minor)] },
+%     { path => ['authentication'], prefix => 'auth.', fields => [qw(security_type security_result)] },
+%     { path => [qw(authentication vnc)], prefix => 'auth.vnc.', fields => [qw(challenge response)] },
+%     { path => ['screen'], fields => [qw(width height name)] },
+%   ] },
+%   { proto => 'pgsql', title => 'PGSQL Details', rows => [
+%     { fields => [qw(tx_id user database application_name is_tls query command_tag rows_affected)] },
+%     { path => ['error'], fields => [qw(code severity message)] },
+%     { kind => 'all_scalars', path => ['frontend'] },
+%     { kind => 'all_scalars', path => ['backend'] },
+%   ] },
+%   { proto => 'ldap', title => 'LDAP Details', rows => [
+%     { fields => [qw(message_id type operation)] },
+%     { path => ['request'], fields => [qw(operation)] },
+%     { path => [qw(request bind)], fields => [qw(dn version)] },
+%     { path => [qw(request search)], fields => [qw(base_dn filter scope)] },
+%     { kind => 'array', path => [qw(request search)], fields => [qw(attributes)] },
+%     { path => ['response'], fields => [qw(result_code dn message)] },
+%   ] },
+%   { proto => 'mdns', title => 'MDNS Details', rows => [
+%     { fields => [qw(type id flags)] },
+%     { kind => 'list', field => 'queries' },
+%     { kind => 'list', field => 'answers' },
+%   ] },
+%   { proto => 'llmnr', title => 'LLMNR Details', rows => [
+%     { fields => [qw(type id rrname rrtype rcode)] },
+%     { kind => 'list', field => 'answers' },
+%   ] },
+%   { proto => 'pop3', title => 'POP3 Details', rows => [
+%     { path => ['request'],  fields => [qw(command)] },
+%     { path => ['response'], fields => [qw(status message)] },
+%     { kind => 'all_scalars' },
+%   ] },
+%   { proto => 'websocket', title => 'WebSocket Details', rows => [
+%     { fields => [qw(opcode fin mask payload)] },
+%   ] },
+%   { proto => 'ike', title => 'IKE Details', rows => [
+%     { fields => [qw(init_spi resp_spi message_id maj_ver min_ver exchange_type role doi encrypted_payloads)] },
+%     { kind => 'array', fields => [qw(errors notify vendor_ids payload)] },
+%     { path => ['ikev1'], fields => [qw(sa_life_type sa_life_duration enc_alg hash_alg auth_method dh_group)] },
+%     { kind => 'list', path => ['ikev1'], field => 'transforms' },
+%     { path => ['ikev2'], fields => [qw(alg_enc alg_auth alg_prf alg_dh alg_esn)] },
+%     { kind => 'array', path => ['ikev2'], fields => [qw(notify child_sa)] },
+%   ] },
+% );
 
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'rdp' && ref $event->{raw}{rdp} eq 'HASH') {
-  % my $rdp = $event->{raw}{rdp};
+% for my $card (@protocol_detail_cards) {
+%   next unless ref $proto_root eq 'HASH' && $proto_app && lc($proto_app) eq $card->{proto};
+%   my $protocol_data = !exists $card->{raw_key} ? $proto_root->{ $card->{proto} }
+%                     : defined $card->{raw_key} ? $proto_root->{ $card->{raw_key} }
+%                     :                            $proto_root;
+%   next unless ref $protocol_data eq 'HASH';
 <div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">RDP Details</div>
+  <div class="card-header py-1 small text-muted"><%= $card->{title} %></div>
   <div class="p-0">
     <table class="table table-dark table-sm table-bordered mb-0">
       <tbody>
-        % for my $field (qw(tx_id event_type cookie)) {
-          % next unless defined $rdp->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $rdp->{$field} %></td>
-        </tr>
-        % }
-        % if (ref $rdp->{client} eq 'HASH') {
-          % for my $field (qw(version build client_name desktop_width desktop_height color_depth keyboard_layout keyboard_type function_keys product_id)) {
-            % next unless defined $rdp->{client}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">client.<%= $field %></th>
-          <td class="font-monospace"><%= $rdp->{client}{$field} %></td>
-        </tr>
+        % for my $row_group (@{ $card->{rows} }) {
+          % my $group_data = $protocol_data;
+          % my $path_present = 1;
+          % for my $path_key (@{ $row_group->{path} // [] }) {
+          %   if (ref $group_data->{$path_key} eq 'HASH') { $group_data = $group_data->{$path_key}; }
+          %   else { $path_present = 0; last; }
           % }
-        % }
-        % if (ref $rdp->{x509_serials} eq 'ARRAY' && @{$rdp->{x509_serials}}) {
+          % next unless $path_present;
+          % my $label_prefix = $row_group->{prefix}
+          %   // (@{ $row_group->{path} // [] } ? join('.', @{ $row_group->{path} }) . '.' : '');
+          % my $kind = $row_group->{kind} // 'scalars';
+          % if ($kind eq 'scalars') {
+            % for my $field (@{ $row_group->{fields} }) {
+              % next unless defined $group_data->{$field};
         <tr>
-          <th style="width:180px" class="text-muted ps-3">x509_serials</th>
-          <td class="font-monospace"><%= join(', ', @{$rdp->{x509_serials}}) %></td>
+          <th style="width:180px" class="text-muted ps-3"><%= $label_prefix . $field %></th>
+          <td class="font-monospace"><%= $row_group->{join_arrays} && ref $group_data->{$field} eq 'ARRAY' ? join(', ', @{ $group_data->{$field} }) : $group_data->{$field} %>
+            % if ($row_group->{domain_fields} && $row_group->{domain_fields}{$field}) {
+            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 domain-info-btn ms-1" data-domain="<%= $group_data->{$field} %>" style="font-size:0.65rem;line-height:1.2">?</button>
+            % }
+          </td>
         </tr>
-        % }
-        % if (ref $rdp->{channels} eq 'ARRAY' && @{$rdp->{channels}}) {
+            % }
+          % } elsif ($kind eq 'array') {
+            % for my $field (@{ $row_group->{fields} }) {
+              % next unless ref $group_data->{$field} eq 'ARRAY' && @{ $group_data->{$field} };
         <tr>
-          <th style="width:180px" class="text-muted ps-3">channels</th>
-          <td class="font-monospace"><%= join(', ', @{$rdp->{channels}}) %></td>
+          <th style="width:180px" class="text-muted ps-3"><%= $label_prefix . $field %></th>
+          <td class="font-monospace"><%= join(', ', @{ $group_data->{$field} }) %></td>
         </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'ftp') {
-  % my $ftp      = ref $event->{raw}{ftp}      eq 'HASH' ? $event->{raw}{ftp}      : {};
-  % my $ftp_data = ref $event->{raw}{ftp_data} eq 'HASH' ? $event->{raw}{ftp_data} : {};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">FTP Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(command command_data reply_code dynamic_port)) {
-          % next unless defined $ftp->{$field};
+            % }
+          % } elsif ($kind eq 'list') {
+            % my $entries = $group_data->{ $row_group->{field} };
+            % if (ref $entries eq 'ARRAY' && @$entries) {
+              % my $format_entry = $row_group->{format} // $format_key_value_entry;
         <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $ftp->{$field} %></td>
-        </tr>
-        % }
-        % for my $field (qw(reply_message completion_code)) {
-          % next unless defined $ftp->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= ref $ftp->{$field} eq 'ARRAY' ? join(', ', @{$ftp->{$field}}) : $ftp->{$field} %></td>
-        </tr>
-        % }
-        % for my $field (qw(filename command)) {
-          % next unless defined $ftp_data->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">ftp_data.<%= $field %></th>
-          <td class="font-monospace"><%= $ftp_data->{$field} %></td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'dcerpc' && ref $event->{raw}{dcerpc} eq 'HASH') {
-  % my $dcerpc = $event->{raw}{dcerpc};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">DCERPC Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(type pkt_type call_id rpc_version rpc_version_minor request response)) {
-          % next unless defined $dcerpc->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $dcerpc->{$field} %></td>
-        </tr>
-        % }
-        % if (ref $dcerpc->{req} eq 'HASH') {
-          % for my $field (qw(opnum frag_cnt stub_data_size)) {
-            % next unless defined $dcerpc->{req}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">req.<%= $field %></th>
-          <td class="font-monospace"><%= $dcerpc->{req}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $dcerpc->{res} eq 'HASH') {
-          % for my $field (qw(frag_cnt stub_data_size)) {
-            % next unless defined $dcerpc->{res}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">res.<%= $field %></th>
-          <td class="font-monospace"><%= $dcerpc->{res}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $dcerpc->{interfaces} eq 'ARRAY' && @{$dcerpc->{interfaces}}) {
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">interfaces</th>
+          <th style="width:180px" class="text-muted ps-3"><%= $row_group->{label} // $label_prefix . $row_group->{field} %></th>
           <td class="font-monospace">
-            % for my $iface (@{$dcerpc->{interfaces}}) {
-              <%= ref $iface eq 'HASH' ? join(' ', map { "$_=$iface->{$_}" } sort keys %$iface) : $iface %><br>
+            % for my $entry (@$entries) {
+              <%= $format_entry->($entry) %><br>
             % }
           </td>
         </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'smb' && ref $event->{raw}{smb} eq 'HASH') {
-  % my $smb = $event->{raw}{smb};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">SMB Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(id dialect command status status_code session_id tree_id filename fuid share named_pipe service host disposition access created accessed modified changed size)) {
-          % next unless defined $smb->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $smb->{$field} %></td>
-        </tr>
-        % }
-        % if (ref $smb->{ntlmssp} eq 'HASH') {
-          % for my $field (qw(domain user host)) {
-            % next unless defined $smb->{ntlmssp}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">ntlmssp.<%= $field %></th>
-          <td class="font-monospace"><%= $smb->{ntlmssp}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $smb->{kerberos} eq 'HASH') {
-          % for my $field (qw(realm)) {
-            % next unless defined $smb->{kerberos}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">kerberos.<%= $field %></th>
-          <td class="font-monospace"><%= $smb->{kerberos}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $smb->{errors} eq 'ARRAY' && @{$smb->{errors}}) {
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">errors</th>
-          <td class="font-monospace"><%= join(', ', @{$smb->{errors}}) %></td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'nfs' && ref $event->{raw}{nfs} eq 'HASH') {
-  % my $nfs = $event->{raw}{nfs};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">NFS Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(version type procedure filename status nak_reason id file_tx)) {
-          % next unless defined $nfs->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= ref $nfs->{$field} eq 'ARRAY' ? join(', ', @{$nfs->{$field}}) : $nfs->{$field} %></td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'krb5' && ref $event->{raw}{krb5} eq 'HASH') {
-  % my $krb5 = $event->{raw}{krb5};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">KRB5 Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(msg_type cname realm sname encryption error_code failed_request weak_encryption)) {
-          % next unless defined $krb5->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= ref $krb5->{$field} eq 'ARRAY' ? join(', ', @{$krb5->{$field}}) : $krb5->{$field} %></td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'ikev2' && ref $event->{raw}{ikev2} eq 'HASH') {
-  % my $ikev2 = $event->{raw}{ikev2};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">IKEv2 Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(version_major version_minor exchange_type message_id initiator_spi responder_spi role alg_enc alg_auth alg_prf alg_dh alg_esn)) {
-          % next unless defined $ikev2->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $ikev2->{$field} %></td>
-        </tr>
-        % }
-        % for my $field (qw(notify payload errors)) {
-          % next unless defined $ikev2->{$field} && ref $ikev2->{$field} eq 'ARRAY' && @{$ikev2->{$field}};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= join(', ', @{$ikev2->{$field}}) %></td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'dhcp' && ref $event->{raw}{dhcp} eq 'HASH') {
-  % my $dhcp = $event->{raw}{dhcp};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">DHCP Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(type dhcp_type id hostname client_mac client_ip assigned_ip requested_ip subnet_mask lease_time renewal_time rebinding_time)) {
-          % next unless defined $dhcp->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $dhcp->{$field} %>
-            % if ($field eq 'hostname') {
-            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 domain-info-btn ms-1" data-domain="<%= $dhcp->{$field} %>" style="font-size:0.65rem;line-height:1.2">?</button>
             % }
-          </td>
-        </tr>
-        % }
-        % for my $field (qw(routers dns_servers params)) {
-          % next unless defined $dhcp->{$field} && ref $dhcp->{$field} eq 'ARRAY' && @{$dhcp->{$field}};
+          % } elsif ($kind eq 'all_scalars') {
+            % for my $field (sort keys %$group_data) {
+              % next if ref $group_data->{$field};
         <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= join(', ', @{$dhcp->{$field}}) %></td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'snmp' && ref $event->{raw}{snmp} eq 'HASH') {
-  % my $snmp = $event->{raw}{snmp};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">SNMP Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(version community pdu_type error error_index trap_address trap_community trap_oid usm)) {
-          % next unless defined $snmp->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $snmp->{$field} %></td>
-        </tr>
-        % }
-        % if (ref $snmp->{vars} eq 'ARRAY' && @{$snmp->{vars}}) {
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">vars</th>
-          <td class="font-monospace">
-            % for my $var (@{$snmp->{vars}}) {
-              <%= ref $var eq 'HASH' ? join(' ', map { "$_=$var->{$_}" } sort keys %$var) : $var %><br>
-            % }
-          </td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'bittorrent-dht' && ref $event->{raw}{bittorrent_dht} eq 'HASH') {
-  % my $bittorrent_dht = $event->{raw}{bittorrent_dht};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">Bittorrent-DHT Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(type transaction_id num_answers)) {
-          % next unless defined $bittorrent_dht->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $bittorrent_dht->{$field} %></td>
-        </tr>
-        % }
-        % if (ref $bittorrent_dht->{queries} eq 'ARRAY' && @{$bittorrent_dht->{queries}}) {
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">queries</th>
-          <td class="font-monospace">
-            % for my $query (@{$bittorrent_dht->{queries}}) {
-              <%= ref $query eq 'HASH' ? join(' ', map { "$_=$query->{$_}" } sort keys %$query) : $query %><br>
-            % }
-          </td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'http2' && ref $event->{raw}{http2} eq 'HASH') {
-  % my $http2 = $event->{raw}{http2};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">HTTP2 Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(sid)) {
-          % next unless defined $http2->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $http2->{$field} %></td>
-        </tr>
-        % }
-        % if (ref $http2->{header} eq 'ARRAY' && @{$http2->{header}}) {
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">headers</th>
-          <td class="font-monospace">
-            % for my $hdr (@{$http2->{header}}) {
-              <%= ref $hdr eq 'HASH' ? ($hdr->{name} // '') . ': ' . ($hdr->{value} // '') : $hdr %><br>
-            % }
-          </td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'imap' && ref $event->{raw}{imap} eq 'HASH') {
-  % my $imap = $event->{raw}{imap};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">IMAP Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (sort keys %$imap) {
-          % next if ref $imap->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $imap->{$field} %></td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'tftp' && ref $event->{raw}{tftp} eq 'HASH') {
-  % my $tftp = $event->{raw}{tftp};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">TFTP Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(packet file mode)) {
-          % next unless defined $tftp->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $tftp->{$field} %></td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'modbus' && ref $event->{raw}{modbus} eq 'HASH') {
-  % my $modbus = $event->{raw}{modbus};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">Modbus Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(transaction_id unit_id)) {
-          % next unless defined $modbus->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $modbus->{$field} %></td>
-        </tr>
-        % }
-        % if (ref $modbus->{function} eq 'HASH') {
-          % for my $field (qw(category code)) {
-            % next unless defined $modbus->{function}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">function.<%= $field %></th>
-          <td class="font-monospace"><%= $modbus->{function}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $modbus->{errors} eq 'ARRAY' && @{$modbus->{errors}}) {
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">errors</th>
-          <td class="font-monospace"><%= join(', ', @{$modbus->{errors}}) %></td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'ntp' && ref $event->{raw}{ntp} eq 'HASH') {
-  % my $ntp = $event->{raw}{ntp};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">NTP Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(type version mode stratum poll precision leap reference_id reference_ts origin_ts receive_ts transmit_ts)) {
-          % next unless defined $ntp->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $ntp->{$field} %></td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'quic' && ref $event->{raw}{quic} eq 'HASH') {
-  % my $quic = $event->{raw}{quic};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">QUIC Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(version quic_version sni ua)) {
-          % next unless defined $quic->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $quic->{$field} %>
-            % if ($field eq 'sni') {
-            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 domain-info-btn ms-1" data-domain="<%= $quic->{$field} %>" style="font-size:0.65rem;line-height:1.2">?</button>
-            % }
-          </td>
-        </tr>
-        % }
-        % if (ref $quic->{cyu} eq 'ARRAY' && @{$quic->{cyu}}) {
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">cyu</th>
-          <td class="font-monospace">
-            % for my $cyu_entry (@{$quic->{cyu}}) {
-              <%= ref $cyu_entry eq 'HASH' ? join(' ', map { "$_=$cyu_entry->{$_}" } sort keys %$cyu_entry) : $cyu_entry %><br>
-            % }
-          </td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'enip' && ref $event->{raw}{enip} eq 'HASH') {
-  % my $enip = $event->{raw}{enip};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">ENIP Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % if (ref $enip->{header} eq 'HASH') {
-          % for my $field (qw(command session_handle status length sender_context options)) {
-            % next unless defined $enip->{header}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">header.<%= $field %></th>
-          <td class="font-monospace"><%= $enip->{header}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $enip->{cip} eq 'HASH') {
-          % for my $field (sort keys %{$enip->{cip}}) {
-            % next if ref $enip->{cip}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">cip.<%= $field %></th>
-          <td class="font-monospace"><%= $enip->{cip}{$field} %></td>
-        </tr>
-          % }
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'dnp3' && ref $event->{raw}{dnp3} eq 'HASH') {
-  % my $dnp3 = $event->{raw}{dnp3};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">DNP3 Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(type src dst)) {
-          % next unless defined $dnp3->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $dnp3->{$field} %></td>
-        </tr>
-        % }
-        % if (ref $dnp3->{control} eq 'HASH') {
-          % for my $field (qw(dir pri fcv seq fc)) {
-            % next unless defined $dnp3->{control}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">control.<%= $field %></th>
-          <td class="font-monospace"><%= $dnp3->{control}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $dnp3->{iin} eq 'HASH') {
-          % for my $field (qw(iin1 iin2)) {
-            % next unless defined $dnp3->{iin}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">iin.<%= $field %></th>
-          <td class="font-monospace"><%= $dnp3->{iin}{$field} %></td>
-        </tr>
-          % }
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'sip' && ref $event->{raw}{sip} eq 'HASH') {
-  % my $sip = $event->{raw}{sip};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">SIP Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(method uri version code reason request_line response_line from to via)) {
-          % next unless defined $sip->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= ref $sip->{$field} eq 'ARRAY' ? join(', ', @{$sip->{$field}}) : $sip->{$field} %></td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'mqtt' && ref $event->{raw}{mqtt} eq 'HASH') {
-  % my $mqtt = $event->{raw}{mqtt};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">MQTT Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(tx_id type qos retain dup)) {
-          % next unless defined $mqtt->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $mqtt->{$field} %></td>
-        </tr>
-        % }
-        % if (ref $mqtt->{connect} eq 'HASH') {
-          % my $connect = $mqtt->{connect};
-          % for my $field (qw(protocol version client_id username keepalive)) {
-            % next unless defined $connect->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">connect.<%= $field %></th>
-          <td class="font-monospace"><%= $connect->{$field} %></td>
-        </tr>
-          % }
-          % if (ref $connect->{flags} eq 'HASH') {
-            % for my $field (qw(username password will clean_session)) {
-              % next unless defined $connect->{flags}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">connect.flags.<%= $field %></th>
-          <td class="font-monospace"><%= $connect->{flags}{$field} %></td>
+          <th style="width:180px" class="text-muted ps-3"><%= $label_prefix . $field %></th>
+          <td class="font-monospace"><%= $group_data->{$field} %></td>
         </tr>
             % }
-          % }
-          % if (ref $connect->{will} eq 'HASH') {
-            % for my $field (qw(topic message)) {
-              % next unless defined $connect->{will}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">connect.will.<%= $field %></th>
-          <td class="font-monospace"><%= $connect->{will}{$field} %></td>
-        </tr>
-            % }
-          % }
-        % }
-        % if (ref $mqtt->{publish} eq 'HASH') {
-          % for my $field (qw(topic message_id message)) {
-            % next unless defined $mqtt->{publish}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">publish.<%= $field %></th>
-          <td class="font-monospace"><%= $mqtt->{publish}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $mqtt->{subscribe} eq 'HASH') {
-          % for my $field (qw(message_id)) {
-            % next unless defined $mqtt->{subscribe}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">subscribe.<%= $field %></th>
-          <td class="font-monospace"><%= $mqtt->{subscribe}{$field} %></td>
-        </tr>
-          % }
-          % if (ref $mqtt->{subscribe}{topics} eq 'ARRAY' && @{$mqtt->{subscribe}{topics}}) {
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">subscribe.topics</th>
-          <td class="font-monospace"><%= join(', ', @{$mqtt->{subscribe}{topics}}) %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $mqtt->{connack} eq 'HASH') {
-          % for my $field (qw(return_code session_present)) {
-            % next unless defined $mqtt->{connack}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">connack.<%= $field %></th>
-          <td class="font-monospace"><%= $mqtt->{connack}{$field} %></td>
-        </tr>
-          % }
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'telnet' && ref $event->{raw}{telnet} eq 'HASH') {
-  % my $telnet = $event->{raw}{telnet};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">Telnet Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (sort keys %$telnet) {
-          % next if ref $telnet->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $telnet->{$field} %></td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'rfb' && ref $event->{raw}{rfb} eq 'HASH') {
-  % my $rfb = $event->{raw}{rfb};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">RFB Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % if (ref $rfb->{client} eq 'HASH') {
-          % for my $field (qw(protocol_major protocol_minor)) {
-            % next unless defined $rfb->{client}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">client.<%= $field %></th>
-          <td class="font-monospace"><%= $rfb->{client}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $rfb->{server} eq 'HASH') {
-          % for my $field (qw(protocol_major protocol_minor)) {
-            % next unless defined $rfb->{server}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">server.<%= $field %></th>
-          <td class="font-monospace"><%= $rfb->{server}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $rfb->{authentication} eq 'HASH') {
-          % my $auth = $rfb->{authentication};
-          % for my $field (qw(security_type security_result)) {
-            % next unless defined $auth->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">auth.<%= $field %></th>
-          <td class="font-monospace"><%= $auth->{$field} %></td>
-        </tr>
-          % }
-          % if (ref $auth->{vnc} eq 'HASH') {
-            % for my $field (qw(challenge response)) {
-              % next unless defined $auth->{vnc}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">auth.vnc.<%= $field %></th>
-          <td class="font-monospace"><%= $auth->{vnc}{$field} %></td>
-        </tr>
-            % }
-          % }
-        % }
-        % if (ref $rfb->{screen} eq 'HASH') {
-          % for my $field (qw(width height name)) {
-            % next unless defined $rfb->{screen}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">screen.<%= $field %></th>
-          <td class="font-monospace"><%= $rfb->{screen}{$field} %></td>
-        </tr>
-          % }
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'pgsql' && ref $event->{raw}{pgsql} eq 'HASH') {
-  % my $pgsql = $event->{raw}{pgsql};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">PGSQL Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(tx_id user database application_name is_tls query command_tag rows_affected)) {
-          % next unless defined $pgsql->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $pgsql->{$field} %></td>
-        </tr>
-        % }
-        % if (ref $pgsql->{error} eq 'HASH') {
-          % for my $field (qw(code severity message)) {
-            % next unless defined $pgsql->{error}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">error.<%= $field %></th>
-          <td class="font-monospace"><%= $pgsql->{error}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $pgsql->{frontend} eq 'HASH') {
-          % for my $field (sort keys %{$pgsql->{frontend}}) {
-            % next if ref $pgsql->{frontend}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">frontend.<%= $field %></th>
-          <td class="font-monospace"><%= $pgsql->{frontend}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $pgsql->{backend} eq 'HASH') {
-          % for my $field (sort keys %{$pgsql->{backend}}) {
-            % next if ref $pgsql->{backend}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">backend.<%= $field %></th>
-          <td class="font-monospace"><%= $pgsql->{backend}{$field} %></td>
-        </tr>
-          % }
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'ldap' && ref $event->{raw}{ldap} eq 'HASH') {
-  % my $ldap = $event->{raw}{ldap};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">LDAP Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(message_id type operation)) {
-          % next unless defined $ldap->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $ldap->{$field} %></td>
-        </tr>
-        % }
-        % if (ref $ldap->{request} eq 'HASH') {
-          % my $request = $ldap->{request};
-          % for my $field (qw(operation)) {
-            % next unless defined $request->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">request.<%= $field %></th>
-          <td class="font-monospace"><%= $request->{$field} %></td>
-        </tr>
-          % }
-          % if (ref $request->{bind} eq 'HASH') {
-            % for my $field (qw(dn version)) {
-              % next unless defined $request->{bind}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">request.bind.<%= $field %></th>
-          <td class="font-monospace"><%= $request->{bind}{$field} %></td>
-        </tr>
-            % }
-          % }
-          % if (ref $request->{search} eq 'HASH') {
-            % for my $field (qw(base_dn filter scope)) {
-              % next unless defined $request->{search}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">request.search.<%= $field %></th>
-          <td class="font-monospace"><%= $request->{search}{$field} %></td>
-        </tr>
-            % }
-            % if (ref $request->{search}{attributes} eq 'ARRAY' && @{$request->{search}{attributes}}) {
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">request.search.attributes</th>
-          <td class="font-monospace"><%= join(', ', @{$request->{search}{attributes}}) %></td>
-        </tr>
-            % }
-          % }
-        % }
-        % if (ref $ldap->{response} eq 'HASH') {
-          % for my $field (qw(result_code dn message)) {
-            % next unless defined $ldap->{response}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">response.<%= $field %></th>
-          <td class="font-monospace"><%= $ldap->{response}{$field} %></td>
-        </tr>
-          % }
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'mdns' && ref $event->{raw}{mdns} eq 'HASH') {
-  % my $mdns = $event->{raw}{mdns};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">MDNS Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(type id flags)) {
-          % next unless defined $mdns->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $mdns->{$field} %></td>
-        </tr>
-        % }
-        % if (ref $mdns->{queries} eq 'ARRAY' && @{$mdns->{queries}}) {
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">queries</th>
-          <td class="font-monospace">
-            % for my $query (@{$mdns->{queries}}) {
-              <%= ref $query eq 'HASH' ? join(' ', map { "$_=$query->{$_}" } sort keys %$query) : $query %><br>
-            % }
-          </td>
-        </tr>
-        % }
-        % if (ref $mdns->{answers} eq 'ARRAY' && @{$mdns->{answers}}) {
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">answers</th>
-          <td class="font-monospace">
-            % for my $answer (@{$mdns->{answers}}) {
-              <%= ref $answer eq 'HASH' ? join(' ', map { "$_=$answer->{$_}" } sort keys %$answer) : $answer %><br>
-            % }
-          </td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'llmnr' && ref $event->{raw}{llmnr} eq 'HASH') {
-  % my $llmnr = $event->{raw}{llmnr};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">LLMNR Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(type id rrname rrtype rcode)) {
-          % next unless defined $llmnr->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $llmnr->{$field} %></td>
-        </tr>
-        % }
-        % if (ref $llmnr->{answers} eq 'ARRAY' && @{$llmnr->{answers}}) {
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">answers</th>
-          <td class="font-monospace">
-            % for my $answer (@{$llmnr->{answers}}) {
-              <%= ref $answer eq 'HASH' ? join(' ', map { "$_=$answer->{$_}" } sort keys %$answer) : $answer %><br>
-            % }
-          </td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'pop3' && ref $event->{raw}{pop3} eq 'HASH') {
-  % my $pop3 = $event->{raw}{pop3};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">POP3 Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % if (ref $pop3->{request} eq 'HASH') {
-          % for my $field (qw(command)) {
-            % next unless defined $pop3->{request}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">request.<%= $field %></th>
-          <td class="font-monospace"><%= $pop3->{request}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % if (ref $pop3->{response} eq 'HASH') {
-          % for my $field (qw(status message)) {
-            % next unless defined $pop3->{response}{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">response.<%= $field %></th>
-          <td class="font-monospace"><%= $pop3->{response}{$field} %></td>
-        </tr>
-          % }
-        % }
-        % for my $field (sort keys %$pop3) {
-          % next if ref $pop3->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $pop3->{$field} %></td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'websocket' && ref $event->{raw}{websocket} eq 'HASH') {
-  % my $websocket = $event->{raw}{websocket};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">WebSocket Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(opcode fin mask payload)) {
-          % next unless defined $websocket->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $websocket->{$field} %></td>
-        </tr>
-        % }
-      </tbody>
-    </table>
-  </div>
-</div>
-% }
-
-% if (ref $event->{raw} eq 'HASH' && $event->{app_proto} && lc($event->{app_proto}) eq 'ike' && ref $event->{raw}{ike} eq 'HASH') {
-  % my $ike = $event->{raw}{ike};
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">IKE Details</div>
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $field (qw(init_spi resp_spi message_id maj_ver min_ver exchange_type role doi encrypted_payloads)) {
-          % next unless defined $ike->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= $ike->{$field} %></td>
-        </tr>
-        % }
-        % for my $field (qw(errors notify vendor_ids payload)) {
-          % next unless defined $ike->{$field} && ref $ike->{$field} eq 'ARRAY' && @{$ike->{$field}};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
-          <td class="font-monospace"><%= join(', ', @{$ike->{$field}}) %></td>
-        </tr>
-        % }
-        % if (ref $ike->{ikev1} eq 'HASH') {
-          % my $ikev1 = $ike->{ikev1};
-          % for my $field (qw(sa_life_type sa_life_duration enc_alg hash_alg auth_method dh_group)) {
-            % next unless defined $ikev1->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">ikev1.<%= $field %></th>
-          <td class="font-monospace"><%= $ikev1->{$field} %></td>
-        </tr>
-          % }
-          % if (ref $ikev1->{transforms} eq 'ARRAY' && @{$ikev1->{transforms}}) {
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">ikev1.transforms</th>
-          <td class="font-monospace">
-            % for my $transform (@{$ikev1->{transforms}}) {
-              <%= ref $transform eq 'HASH' ? join(' ', map { "$_=$transform->{$_}" } sort keys %$transform) : $transform %><br>
-            % }
-          </td>
-        </tr>
-          % }
-        % }
-        % if (ref $ike->{ikev2} eq 'HASH') {
-          % my $ikev2 = $ike->{ikev2};
-          % for my $field (qw(alg_enc alg_auth alg_prf alg_dh alg_esn)) {
-            % next unless defined $ikev2->{$field};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">ikev2.<%= $field %></th>
-          <td class="font-monospace"><%= $ikev2->{$field} %></td>
-        </tr>
-          % }
-          % for my $field (qw(notify child_sa)) {
-            % next unless defined $ikev2->{$field} && ref $ikev2->{$field} eq 'ARRAY' && @{$ikev2->{$field}};
-        <tr>
-          <th style="width:180px" class="text-muted ps-3">ikev2.<%= $field %></th>
-          <td class="font-monospace"><%= join(', ', @{$ikev2->{$field}}) %></td>
-        </tr>
           % }
         % }
       </tbody>
@@ -1393,9 +536,9 @@
     <button class="btn btn-sm btn-outline-secondary" type="button" id="download-json-btn">
       Download JSON
     </button>
-    % if (ref $event->{raw} eq 'HASH' && defined $event->{raw}{payload}) {
+    % if (ref $proto_root eq 'HASH' && defined $proto_root->{payload}) {
     <button class="btn btn-sm btn-outline-secondary" type="button" id="download-payload-btn"
-            data-payload="<%= $event->{raw}{payload} %>"
+            data-payload="<%= $proto_root->{payload} %>"
             data-filename="payload-<%= $table %>-<%= $id %>.bin">
       Download Payload
     </button>
@@ -1459,38 +602,6 @@
 
 % }
 
-<!-- Domain Info Modal -->
-<div class="modal fade" id="domaininfo-modal" tabindex="-1">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content bg-dark text-light border-secondary">
-      <div class="modal-header py-2 border-secondary">
-        <h6 class="modal-title" id="domaininfo-modal-title">Domain Info</h6>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div id="domaininfo-loading" class="text-center text-muted py-3">Loading…</div>
-        <div id="domaininfo-content" style="display:none">
-          <div class="mb-2">
-            <span class="text-muted small fw-semibold">DNS Records</span>
-            <div id="domaininfo-dns" class="font-monospace small mt-1"></div>
-            <div id="domaininfo-dns-error" class="text-warning small mt-1" style="display:none"></div>
-          </div>
-          <div class="mb-2">
-            <span class="text-muted small fw-semibold" id="domaininfo-whois-label">WHOIS</span>
-            <pre id="domaininfo-whois" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
-          </div>
-          <div id="domaininfo-dnstracer-section" style="display:none">
-            <span class="text-muted small fw-semibold">dnstracer</span>
-            <div id="domaininfo-dnstracer-error" class="text-warning small mt-1" style="display:none"></div>
-            <pre id="domaininfo-dnstracer" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-
 <script>
 document.addEventListener('DOMContentLoaded', function() {
   document.querySelectorAll('.http-body-dl').forEach(function(btn) {
@@ -1511,60 +622,10 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 
-  var domainModal = new bootstrap.Modal(document.getElementById('domaininfo-modal'));
+  // The Domain Info modal + lookup lives in the layout; just wire the buttons.
   document.querySelectorAll('.domain-info-btn').forEach(function(el) {
     el.addEventListener('click', function() {
-      var domain = this.dataset.domain;
-      document.getElementById('domaininfo-modal-title').textContent = domain;
-      document.getElementById('domaininfo-loading').style.display = '';
-      document.getElementById('domaininfo-content').style.display = 'none';
-      domainModal.show();
-      fetch('/api/domaininfo/' + encodeURIComponent(domain))
-        .then(function(response) { return response.json(); })
-        .then(function(data) {
-          var dnsEl = document.getElementById('domaininfo-dns');
-          if (data.dns && Object.keys(data.dns).length) {
-            var order = ['A','AAAA','CNAME','MX','NS','TXT','SOA','CAA','SRV','PTR'];
-            var keys  = Object.keys(data.dns).sort(function(a,b) {
-              var ai = order.indexOf(a), bi = order.indexOf(b);
-              if (ai === -1) ai = 999;
-              if (bi === -1) bi = 999;
-              return ai - bi;
-            });
-            dnsEl.innerHTML = keys.map(function(type) {
-              return data.dns[type].map(function(value) {
-                return '<strong>' + type + '</strong> ' + value;
-              }).join('<br>');
-            }).join('<br>');
-          } else {
-            dnsEl.textContent = '(none)';
-          }
-          var errEl = document.getElementById('domaininfo-dns-error');
-          if (data.dns_error) { errEl.textContent = data.dns_error; errEl.style.display = ''; }
-          else { errEl.style.display = 'none'; }
-          document.getElementById('domaininfo-whois-label').textContent =
-            (data.whois_domain && data.whois_domain !== domain)
-              ? 'WHOIS (' + data.whois_domain + ')' : 'WHOIS';
-          document.getElementById('domaininfo-whois').textContent = data.whois || '(none)';
-          var dtSection = document.getElementById('domaininfo-dnstracer-section');
-          var dtErrEl   = document.getElementById('domaininfo-dnstracer-error');
-          if (data.dnstracer || data.dnstracer_error) {
-            dtSection.style.display = '';
-            document.getElementById('domaininfo-dnstracer').textContent = data.dnstracer || '';
-            if (data.dnstracer_error) { dtErrEl.textContent = data.dnstracer_error; dtErrEl.style.display = ''; }
-            else { dtErrEl.style.display = 'none'; }
-          } else {
-            dtSection.style.display = 'none';
-          }
-          document.getElementById('domaininfo-loading').style.display = 'none';
-          document.getElementById('domaininfo-content').style.display = '';
-        })
-        .catch(function() {
-          document.getElementById('domaininfo-dns').textContent = 'Error fetching data';
-          document.getElementById('domaininfo-whois').textContent = '';
-          document.getElementById('domaininfo-loading').style.display = 'none';
-          document.getElementById('domaininfo-content').style.display = '';
-        });
+      window.showDomainInfo(this.dataset.domain);
     });
   });
 

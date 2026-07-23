@@ -2,7 +2,7 @@ package Lilith::Stats;
 
 use strict;
 use warnings;
-use DBI ();
+use Lilith::DBUtil qw( connect_cached_dbh host_or_text_expr measure_expr time_window_clause validate_bucket );
 
 =head1 NAME
 
@@ -94,13 +94,6 @@ my %DIMENSION = (
 			src_ip dest_ip subject signature country )
 	},
 );
-
-# date_trunc units accepted for timeseries buckets.
-my %BUCKET = map { $_ => 1 } qw( minute hour day week month );
-
-# inet columns, whose text form we want as the bare host address ('1.2.3.4')
-# rather than the '1.2.3.4/32' that ::text yields.
-my %INET = map { $_ => 1 } qw( src_ip dest_ip );
 
 # Virtual (computed) dimensions: pseudo-column names that map to a SQL expression
 # rather than a real column, so a widget can group by a field kept only in the
@@ -338,7 +331,7 @@ sub top {
 
 	my $rows = $dbh->selectall_arrayref( $sql, { Slice => {} } );
 
-	return [ map { { value => $_->{value}, count => $_->{count} + 0 } } @$rows ];
+	return [ map { { value => $_->{value}, count => ( $_->{count} // 0 ) + 0 } } @$rows ];
 } ## end sub top
 
 =head2 timeseries
@@ -399,13 +392,13 @@ sub timeseries {
 			. "from $tbl where $where group by 1, 2 order by 1 asc, $gord";
 		my $rows = $dbh->selectall_arrayref( $sql, { Slice => {} } );
 
-		return [ map { { bucket => $_->{bucket} + 0, group => $_->{group}, count => $_->{count} + 0 } } @$rows ];
+		return [ map { { bucket => $_->{bucket} + 0, group => $_->{group}, count => ( $_->{count} // 0 ) + 0 } } @$rows ];
 	} ## end if ( defined $opts{group_by} && $opts{group_by...})
 
 	my $sql  = "select $epoch as bucket, $magg as count from $tbl where $window group by 1 order by 1 asc";
 	my $rows = $dbh->selectall_arrayref( $sql, { Slice => {} } );
 
-	return [ map { { bucket => $_->{bucket} + 0, count => $_->{count} + 0 } } @$rows ];
+	return [ map { { bucket => $_->{bucket} + 0, count => ( $_->{count} // 0 ) + 0 } } @$rows ];
 } ## end sub timeseries
 
 =head2 columns
@@ -448,34 +441,26 @@ sub measures {
 
 sub _dbh {
 	my ($self) = @_;
-
-	my $dbh;
-	eval { $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } ); };
-	if ( $@ || !$dbh ) {
-		die( 'Lilith::Stats: DBI->connect_cached failure... ' . $@ );
-	}
-
-	return $dbh;
-} ## end sub _dbh
+	return connect_cached_dbh( ref($self), $self->{dsn}, $self->{user}, $self->{pass} );
+}
 
 # The time-window WHERE fragment for time column $tc: an explicit absolute range
 # (start and/or end, quoted and cast to timestamptz, so read in the DB session's
 # timezone) when either is given, else the now-relative go_back_minutes. Quoted
 # rather than interpolated raw, mirroring _exclude_frag; a bad value is a query
-# error, not an injection. Callers append $exf (the classification exclude).
+# error, not an injection, and the fragment carries no binds so it can be reused
+# verbatim inside subqueries. Callers append $exf (the classification exclude).
 sub _window_frag {
 	my ( $self, $dbh, $tc, $opts, $mins ) = @_;
 
-	my $start = ( defined $opts->{start} && $opts->{start} ne '' ) ? $opts->{start} : undef;
-	my $end   = ( defined $opts->{end}   && $opts->{end} ne '' )   ? $opts->{end}   : undef;
-	if ( $start || $end ) {
-		my @conds;
-		push( @conds, "$tc >= " . $dbh->quote($start) . '::timestamptz' ) if $start;
-		push( @conds, "$tc <= " . $dbh->quote($end) . '::timestamptz' )   if $end;
-		return join( ' and ', @conds );
-	}
-
-	return "$tc >= CURRENT_TIMESTAMP - interval '$mins minutes'";
+	return time_window_clause(
+		time_column => $tc,
+		opts        => $opts,
+		quote_dbh   => $dbh,
+		minutes     => $mins,
+		and_joiner  => ' and ',
+		now_sql     => 'CURRENT_TIMESTAMP',
+	);
 } ## end sub _window_frag
 
 sub _table {
@@ -494,21 +479,18 @@ sub _dimension {
 }
 
 # The SQL aggregate a measure resolves to (count(*) by default). expr/col come
-# from the server-defined %MEASURE catalog, never from the request.
+# from the server-defined %MEASURE catalog, never from the request. A distinct
+# measure's column resolves through _col_expr so a virtual column would count
+# by its expression.
 sub _measure_expr {
 	my ( $self, $type, $name ) = @_;
-	$name = 'count' unless defined $name && $name ne '';
-
-	my ($m) = grep { $_->{name} eq $name } @{ $MEASURE{$type} };
-	die( '"' . $name . '" is not a known measure for ' . $type . "\n" ) unless $m;
-
-	my $agg = $m->{agg} || 'count';
-	return 'count(*)' if $agg eq 'count';
-	return 'count(distinct ' . $self->_col_expr( $type, $self->_dimension( $type, $m->{col} ) ) . ')'
-		if $agg eq 'distinct';
-	return 'coalesce(round(avg(' . $m->{expr} . ')::numeric, 1), 0)' if $agg eq 'avg';
-	return $agg . '(' . $m->{expr} . ')';    # sum / max / min
-} ## end sub _measure_expr
+	return measure_expr(
+		list            => $MEASURE{$type},
+		name            => $name,
+		context         => $type,
+		column_expr_for => sub { $self->_col_expr( $type, $self->_dimension( $type, $_[0] ) ) },
+	);
+}
 
 # The raw SQL reference for an already-validated column: a virtual column's grouping
 # expression, or the bare column name. This is what null checks, distinct, and
@@ -528,8 +510,7 @@ sub _value_expr {
 		my $v = $VIRTUAL{$type}{$col};
 		return $v->{label} // '(' . $v->{expr} . ')';
 	}
-	return "host($col)" if $INET{$col};
-	return "$col\::text";
+	return host_or_text_expr($col);
 }
 
 # Optional "and classification <> ..." fragment for the exclude_classification
@@ -548,9 +529,7 @@ sub _exclude_frag {
 sub _bucket {
 	my ( $self, $bucket ) = @_;
 	$bucket = 'hour' unless defined $bucket && $bucket ne '';
-	die( '"' . $bucket . '" is not a valid bucket (minute, hour, day, week, month)' . "\n" )
-		unless $BUCKET{$bucket};
-	return $bucket;
+	return validate_bucket($bucket);
 }
 
 sub _minutes {

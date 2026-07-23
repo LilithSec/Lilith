@@ -26,6 +26,16 @@ sub opt_spec {
 	);
 } ## end sub opt_spec
 
+sub validate_args {
+	my ( $self, $opt, $args ) = @_;
+
+	if ( $opt->{enable} && $opt->{disable} ) {
+		$self->usage_error('--enable and --disable are mutually exclusive');
+	}
+
+	return;
+}
+
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 

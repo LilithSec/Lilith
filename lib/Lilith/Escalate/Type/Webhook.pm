@@ -3,8 +3,8 @@ package Lilith::Escalate::Type::Webhook;
 use 5.006;
 use strict;
 use warnings;
-use POSIX qw(strftime);
-use JSON  qw(decode_json);
+use POSIX            qw(strftime);
+use Lilith::Escalate ();
 
 =head1 NAME
 
@@ -64,15 +64,17 @@ sub check_config {
 	}
 
 	if ( !defined( $config->{url} ) || $config->{url} eq '' ) {
-		die('"url" is required' . "\n");
+		die( '"url" is required' . "\n" );
 	}
 
 	if ( $config->{url} !~ /^https?\:\/\// ) {
 		die( '"' . $config->{url} . '" for url does not look like a http(s) URL' . "\n" );
 	}
 
-	if ( defined( $config->{timeout} ) && $config->{timeout} !~ /^[0-9]+$/ ) {
-		die( '"' . $config->{timeout} . '" for timeout is not numeric' . "\n" );
+	# zero would disable Mojo::UserAgent's request timeout entirely, hanging
+	# the escalation worker indefinitely, so require at least one second
+	if ( defined( $config->{timeout} ) && ( $config->{timeout} !~ /^[0-9]+$/ || $config->{timeout} < 1 ) ) {
+		die( '"' . $config->{timeout} . '" for timeout is not a positive whole number' . "\n" );
 	}
 
 	return 1;
@@ -95,13 +97,7 @@ sub escalate {
 
 	# the raw may still be a JSON string depending on where the event came
 	# from; decode it so the receiver gets structure instead of a string
-	if ( defined( $event->{raw} ) && !ref( $event->{raw} ) ) {
-		my $decoded;
-		eval { $decoded = decode_json( $event->{raw} ) };
-		if ( !$@ && ref $decoded ) {
-			$event = { %{$event}, raw => $decoded };
-		}
-	}
+	$event = Lilith::Escalate->decode_event_raw($event);
 
 	my $body = {
 		source       => 'lilith',
@@ -124,7 +120,15 @@ sub escalate {
 	my $ua = Mojo::UserAgent->new;
 	$ua->request_timeout( defined( $config->{timeout} ) ? $config->{timeout} + 0 : 30 );
 
-	my $tx  = $ua->post( $config->{url}, $headers, json => $body );
+	my $tx = $ua->post( $config->{url}, $headers, json => $body );
+
+	# a connection level failure (timeout, DNS, refused) has no result;
+	# report it with the target URL rather than dying with Mojo's raw error
+	if ( my $connection_error = $tx->error ) {
+		if ( !defined( $connection_error->{code} ) ) {
+			die( 'webhook POST to "' . $config->{url} . '" failed: ' . $connection_error->{message} . "\n" );
+		}
+	}
 	my $res = $tx->result;
 	if ( !$res->is_success ) {
 		die( 'webhook POST to "' . $config->{url} . '" failed: HTTP ' . $res->code . ' ' . $res->message . "\n" );

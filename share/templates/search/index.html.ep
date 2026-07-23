@@ -119,7 +119,7 @@
                 <input type="text" name="src_ip" class="form-control form-control-sm"
                        value="<%= param('src_ip') // '' %>">
               </div>
-              <div class="col-md-2">
+              <div class="col-md-2" id="src-port-field">
                 <label class="form-label">Src Port(s)</label>
                 <input type="text" name="src_port" class="form-control form-control-sm"
                        value="<%= param('src_port') // '' %>" placeholder="">
@@ -129,7 +129,7 @@
                 <input type="text" name="dest_ip" class="form-control form-control-sm"
                        value="<%= param('dest_ip') // '' %>">
               </div>
-              <div class="col-md-2">
+              <div class="col-md-2" id="dest-port-field">
                 <label class="form-label">Dst Port(s)</label>
                 <input type="text" name="dest_port" class="form-control form-control-sm"
                        value="<%= param('dest_port') // '' %>">
@@ -139,7 +139,7 @@
                 <input type="text" name="ip" id="ip-input" class="form-control form-control-sm"
                        value="<%= param('ip') // '' %>">
               </div>
-              <div class="col-md-2">
+              <div class="col-md-2" id="port-field">
                 <label class="form-label">Port (src <em>or</em> dst)</label>
                 <input type="text" name="port" id="port-input" class="form-control form-control-sm"
                        value="<%= param('port') // '' %>">
@@ -189,17 +189,17 @@
                 <input type="text" name="signature" id="signature-input" class="form-control form-control-sm"
                        value="<%= param('signature') // '' %>">
               </div>
-              <div class="col-md-2">
+              <div class="col-md-2" id="gid-field">
                 <label class="form-label">GID</label>
                 <input type="text" name="gid" id="gid-input" class="form-control form-control-sm"
                        value="<%= param('gid') // '' %>">
               </div>
-              <div class="col-md-2">
+              <div class="col-md-2" id="sid-field">
                 <label class="form-label">SID</label>
                 <input type="text" name="sid" id="sid-input" class="form-control form-control-sm"
                        value="<%= param('sid') // '' %>">
               </div>
-              <div class="col-md-2">
+              <div class="col-md-2" id="rev-field">
                 <label class="form-label">Rev</label>
                 <input type="text" name="rev" id="rev-input" class="form-control form-control-sm"
                        value="<%= param('rev') // '' %>">
@@ -368,6 +368,7 @@
 % }
 
 <script src="/js/time-range.js"></script>
+<script src="/js/auto-refresh.js"></script>
 <script>
 var _orderByCols = {
   suricata: ['timestamp','id','src_ip','dest_ip','src_port','dest_port','proto','app_proto',
@@ -380,7 +381,10 @@ var _orderByCols = {
   cape:     ['stop','start','id','malscore','task','target','instance','instance_host',
              'pkg','size','proto','src_ip','src_port','dest_ip','dest_port',
              'subbed_from_ip','subbed_from_host','slug','url','url_hostname',
-             'md5','sha1','sha256']
+             'md5','sha1','sha256'],
+  baphomet: ['timestamp','id','src_ip','dest_ip','signature','classification','severity',
+             'score','event_type','host','instance','event_id','country','ban_time',
+             'recidive','path','kur','subject']
 };
 function syncOrderBy(keepVal) {
   var table = document.getElementById('table-sel').value;
@@ -407,6 +411,15 @@ function syncOrderBy(keepVal) {
   ruleFilters.style.display = (table === 'cape') ? 'none' : '';
   var classFilter = document.getElementById('class-filter');
   classFilter.style.display = (table === 'cape') ? 'none' : 'flex';
+  // Baphomet has no gid/sid/rev and no port columns, so hide those inputs for
+  // it. The Signature, Event ID, and classification filters stay, as baphomet
+  // does have those columns.
+  var missingForBaphomet = ['gid-field', 'sid-field', 'rev-field',
+                            'src-port-field', 'dest-port-field', 'port-field'];
+  missingForBaphomet.forEach(function(fieldId) {
+    var fieldEl = document.getElementById(fieldId);
+    if (fieldEl) { fieldEl.style.display = (table === 'baphomet') ? 'none' : ''; }
+  });
 }
 function applyHostCol(show) {
   document.querySelectorAll('.col-host').forEach(function(el) {
@@ -502,61 +515,6 @@ function initResults() {
   });
 }
 
-// Show the outcome of the latest refresh next to the auto-refresh control.
-function setRefreshStatus(ok) {
-  var el = document.getElementById('ar-status');
-  if (!el) { return; }
-  var now = new Date();
-  function pad2(value) { return (value < 10 ? '0' : '') + value; }
-  var timeStr = pad2(now.getHours()) + ':' + pad2(now.getMinutes()) + ':' + pad2(now.getSeconds());
-  if (ok) {
-    el.textContent = 'updated ' + timeStr;
-    el.className = 'small text-muted';
-  } else {
-    el.textContent = '⚠ refresh failed ' + timeStr + ' (showing stale data)';
-    el.className = 'small text-warning';
-  }
-  el.style.whiteSpace = 'nowrap';
-}
-
-// Collect the set of event IDs currently shown in the results table.
-function currentRowIds() {
-  var ids = new Set();
-  var box = document.getElementById('search-results');
-  if (box) {
-    box.querySelectorAll('tbody tr .event-link').forEach(function(link) { ids.add(link.textContent.trim()); });
-  }
-  return ids;
-}
-
-// Fetch just the results fragment (partial=1) and swap #search-results in place,
-// then rebind and flash any rows whose event ID was not present before. On any
-// failure the existing content is left untouched. Calls done() when finished.
-function refreshResults(done) {
-  var priorIds = currentRowIds();
-  var url = new URL(window.location.href);
-  url.searchParams.set('partial', '1');
-  fetch(url.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-    .then(function(response) { if (!response.ok) { throw new Error('HTTP ' + response.status); } return response.text(); })
-    .then(function(html) {
-      var fresh   = new DOMParser().parseFromString(html, 'text/html').getElementById('search-results');
-      var current = document.getElementById('search-results');
-      if (fresh && current) {
-        current.innerHTML = fresh.innerHTML;
-        current.querySelectorAll('tbody tr').forEach(function(tr) {
-          var link = tr.querySelector('.event-link');
-          if (link && !priorIds.has(link.textContent.trim())) { tr.classList.add('row-new'); }
-        });
-        initResults();
-        setRefreshStatus(true);
-      } else {
-        setRefreshStatus(false);   // response had no results fragment (e.g. an error page)
-      }
-    })
-    .catch(function() { setRefreshStatus(false); /* keep the current results */ })
-    .finally(function() { if (done) { done(); } });
-}
-
 document.addEventListener('DOMContentLoaded', function() {
   syncOrderBy(false);
   document.getElementById('order-by').value = '<%= $order_by %>' || document.getElementById('order-by').value;
@@ -595,60 +553,21 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   });
 
-  // Auto-refresh: fetch fresh results every N seconds and swap them in place,
-  // with no full page reload (so scroll position and form state are kept).
-  // State is kept in localStorage so it persists across navigation.
-  var autoRefreshCheckbox  = document.getElementById('auto-refresh');
-  var autoRefreshSecsInput = document.getElementById('auto-refresh-secs');
-  var autoRefreshTimer     = null;
-  var lastRefresh = Date.now();   // the page load is itself a "refresh"
-  function refreshIntervalSecs() {
-    var secs = parseInt(autoRefreshSecsInput.value, 10);
-    return (!secs || secs < 1) ? 30 : secs;
-  }
-  function stopAutoRefresh() {
-    if (autoRefreshTimer) { clearTimeout(autoRefreshTimer); autoRefreshTimer = null; }
-  }
-  // Schedule the next tick, unless disabled or the tab is hidden (polling is
-  // paused while hidden to avoid needless server load and bandwidth).
-  function scheduleNext() {
-    stopAutoRefresh();
-    if (!autoRefreshCheckbox.checked || document.hidden) { return; }
-    autoRefreshTimer = setTimeout(function() {
-      refreshResults(function() { lastRefresh = Date.now(); scheduleNext(); });
-    }, refreshIntervalSecs() * 1000);
-  }
-  var storedRefreshSecs = localStorage.getItem('autoRefreshSecs');
-  if (storedRefreshSecs) { autoRefreshSecsInput.value = storedRefreshSecs; }
-  autoRefreshCheckbox.checked = localStorage.getItem('autoRefresh') === 'true';
-  scheduleNext();
-  autoRefreshCheckbox.addEventListener('change', function() {
-    localStorage.setItem('autoRefresh', this.checked);
-    scheduleNext();
-  });
-  autoRefreshSecsInput.addEventListener('change', function() {
-    localStorage.setItem('autoRefreshSecs', this.value);
-    scheduleNext();
-  });
-  // When the tab becomes visible again, refresh immediately if the data is
-  // older than the refresh interval, then resume normal scheduling.
-  document.addEventListener('visibilitychange', function() {
-    if (document.hidden) {
-      stopAutoRefresh();
-    } else if (autoRefreshCheckbox.checked) {
-      if (Date.now() - lastRefresh >= refreshIntervalSecs() * 1000) {
-        refreshResults(function() { lastRefresh = Date.now(); scheduleNext(); });
-      } else {
-        scheduleNext();
-      }
-    }
-  });
   // Bind everything inside the results container. Re-run after an auto-refresh
   // swaps in fresh rows so the new elements get their handlers.
   initResults();
-  // Seed the status with the load time so "updated HH:MM:SS" reflects the data
-  // currently on screen, but only when a search actually produced results.
-  if (document.getElementById('search-results')) { setRefreshStatus(true); }
+
+  // Auto-refresh (shared module): fetch fresh results every N seconds and swap
+  // them in place, with no full page reload (so scroll position and form state
+  // are kept). State is kept in localStorage so it persists across navigation.
+  LilithAutoRefresh.init({
+    checkboxId:     'auto-refresh',
+    secondsInputId: 'auto-refresh-secs',
+    statusId:       'ar-status',
+    containerId:    'search-results',
+    storagePrefix:  'autoRefresh',
+    afterSwap:      initResults
+  });
 });
 
 </script>

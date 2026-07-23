@@ -280,6 +280,123 @@ sub _make_app {
 }
 
 # ---------------------------------------------------------------------------
+# 3-0.  Suricata protocol cards — the top-level EVE drives the card selection
+# ---------------------------------------------------------------------------
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $t = Test::Mojo->new('Lilith::Web');
+
+    # a normal Suricata row: app_proto column + http sub-object at the top of raw
+    no warnings qw(redefine once);
+    local *Lilith::search = sub {
+        return [
+            {   id        => 1,
+                app_proto => 'http',
+                raw       => encode_json( { http => { hostname => 'plain.suricata.example', http_method => 'GET' } } ),
+            }
+        ];
+    };
+    use warnings qw(redefine once);
+
+    $t->get_ok('/event/suricata/1')->status_is( 200, 'suricata event renders 200' )
+        ->content_like( qr/HTTP Details/,          'suricata http card still renders after the refactor' )
+        ->content_like( qr/plain\.suricata\.example/, 'and shows the http hostname' );
+}
+
+# ---------------------------------------------------------------------------
+# 3-1.  Baphomet protocol cards — a verdict that judged a Suricata line carries
+#       the original EVE under raw.raw, and the cards render off of it
+# ---------------------------------------------------------------------------
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $t = Test::Mojo->new('Lilith::Web');
+
+    # Case A: nested raw is already a hash; app_proto=http picks the HTTP card,
+    # and the payload rides along under the embedded EVE.
+    {
+        no warnings qw(redefine once);
+        local *Lilith::search = sub {
+            return [
+                {   id         => 1,
+                    event_type => 'alert',
+                    kur        => 'baphomet-ids',
+                    raw        => encode_json(
+                        {   event_type => 'alert',
+                            kur        => 'baphomet-ids',
+                            raw        => {
+                                app_proto => 'http',
+                                http      => { hostname => 'login.evil.example', http_method => 'POST', url => '/steal' },
+                                payload   => 'YmFzZTY0cGF5bG9hZA==',
+                            },
+                        }
+                    ),
+                }
+            ];
+        };
+        use warnings qw(redefine once);
+
+        $t->get_ok('/event/baphomet/1')->status_is( 200, 'baphomet event renders 200' )
+            ->content_like( qr/HTTP Details/,        'embedded suricata http card renders for baphomet' )
+            ->content_like( qr/login\.evil\.example/, 'and shows the embedded http hostname' )
+            ->element_exists( '#download-payload-btn', 'the embedded payload download button appears' )
+            ->content_unlike( qr/TLS Details/, 'only the card matching the embedded app_proto renders' );
+    }
+
+    # Case B: nested raw arrives as a JSON *string*; the controller promotes it
+    # to a hash so a declarative card (TLS) still renders.
+    {
+        no warnings qw(redefine once);
+        local *Lilith::search = sub {
+            return [
+                {   id         => 2,
+                    event_type => 'alert',
+                    raw        => encode_json(
+                        {   event_type => 'alert',
+                            raw        => encode_json(
+                                { app_proto => 'tls', tls => { sni => 'c2.evil.example', version => 'TLS 1.3' } }
+                            ),
+                        }
+                    ),
+                }
+            ];
+        };
+        use warnings qw(redefine once);
+
+        $t->get_ok('/event/baphomet/2')->status_is( 200, 'baphomet event with a string-nested raw renders 200' )
+            ->content_like( qr/TLS Details/,     'a string-nested embedded EVE is promoted and its card renders' )
+            ->content_like( qr/c2\.evil\.example/, 'and shows the embedded tls sni' );
+    }
+
+    # Case C: nested raw is a plain, non-JSON string; the defensive ref checks
+    # mean no protocol cards render, but the page is still fine.
+    {
+        no warnings qw(redefine once);
+        local *Lilith::search = sub {
+            return [
+                {   id         => 3,
+                    event_type => 'banish',
+                    raw        => encode_json( { event_type => 'banish', raw => 'not json, just a log line' } ),
+                }
+            ];
+        };
+        use warnings qw(redefine once);
+
+        $t->get_ok('/event/baphomet/3')->status_is( 200, 'baphomet event with a non-JSON raw string renders 200' )
+            ->content_unlike( qr/HTTP Details|TLS Details/, 'no protocol cards render when raw is not a decodable EVE' );
+    }
+}
+
+# ---------------------------------------------------------------------------
 # 3a.  Virani PCAP download — GET /event/:t/:id/pcap
 # ---------------------------------------------------------------------------
 
@@ -582,6 +699,48 @@ sub _make_app {
         my $got = `unzip -p -P infected \Q$zpath\E response-body-7 2>/dev/null`;
         is( $got, $payload, 'zip decrypts with password "infected" back to the original body' );
     }
+}
+
+# ---------------------------------------------------------------------------
+# CAPE submission — off by default (no nav button, routes 404); on when
+# cape_enable is set with a [cape_servers.*] configured.
+# ---------------------------------------------------------------------------
+{
+    my $t = _make_app('');
+    $t->get_ok('/search')->status_is( 200, 'search renders with cape off' )
+        ->element_exists_not( '#nav-cape-submit', 'no CAPE nav button when disabled' );
+    $t->get_ok('/cape_submit')->status_is( 404, 'GET /cape_submit is 404 when disabled' );
+    $t->post_ok('/api/cape_submit/submit')->status_is( 404, 'submit endpoint is 404 when disabled' );
+}
+
+# cape_enable = false (the TOML parser yields the string "false", which is truthy
+# in Perl) must still read as off, even with a server configured.
+{
+    my $t = _make_app( "cape_enable = false\n\n[cape_servers.main]\nurl = \"http://127.0.0.1:9/\"\n" );
+    $t->get_ok('/search')->status_is( 200, 'search renders with cape_enable=false' )
+        ->element_exists_not( '#nav-cape-submit', 'cape_enable=false leaves the feature off' );
+    $t->get_ok('/cape_submit')->status_is( 404, 'GET /cape_submit is 404 with cape_enable=false' );
+}
+
+{
+    my $extra = "cape_enable = true\n"
+        . "cape_slug = \"lil\"\n\n"
+        . "[cape_servers.main]\n"
+        . "url = \"http://127.0.0.1:9/\"\n"
+        . "apikey_needed = false\n";
+    my $t = _make_app($extra);
+
+    $t->get_ok('/search')->status_is( 200, 'search renders with cape on' )
+        ->element_exists( 'a#nav-cape-submit', 'CAPE nav button present when enabled' );
+
+    $t->get_ok('/cape_submit')->status_is( 200, 'GET /cape_submit renders when enabled' )
+        ->element_exists( 'form#cape-submit-form', 'submission form present' )
+        ->element_exists( 'input#cape-file',       'file input present' )
+        ->content_like( qr/value="lil"/, 'slug defaults to cape_slug' );
+
+    # a submit with no file is rejected before any network call
+    $t->post_ok('/api/cape_submit/submit')->status_is( 400, 'submit with no file is 400' )
+        ->json_is( '/status' => 'error', 'no-file submit reports an error' );
 }
 
 done_testing();

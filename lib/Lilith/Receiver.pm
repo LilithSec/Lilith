@@ -116,8 +116,10 @@ sub startup {
 	my $config_file = $ENV{LILITH_CONFIG} // '/usr/local/etc/lilith.toml';
 	die "Config file '$config_file' does not exist\n" unless -f $config_file;
 
+	# read_file croaks on real I/O errors itself, so an empty config file is
+	# the only way to land in the die
 	my $toml_raw = read_file($config_file)
-		or die 'Failed to read "' . $config_file . '"';
+		or die 'Config file "' . $config_file . '" is empty' . "\n";
 	my ( $toml, $err ) = from_toml($toml_raw);
 	die "Error parsing toml '$config_file': $err\n" unless $toml;
 
@@ -245,18 +247,21 @@ sub _ingest_ws {
 	# One frame == one alert row (the JSON body of the POST path). Decode it
 	# ourselves so a frame that is not JSON at all gets an error frame back
 	# rather than being silently dropped; _process_row then handles JSON that is
-	# not an object (array/scalar) with its usual 400.
-	$c->on(
-		message => sub {
-			my ( $c, $bytes ) = @_;
-			my $body = eval { decode_json($bytes) };
-			if ($@) {
-				return $c->tx->send( { json => { status => 'error', error => 'frame must be JSON' } } );
-			}
-			my ( undef, $resp ) = _process_row( $c, $type, $body );
-			$c->tx->send( { json => $resp } );
+	# not an object (array/scalar) with its usual 400. Subscribed to the typed
+	# frame events rather than message, as message UTF-8 decodes text frames to
+	# characters, which broke decode_json (it expects bytes) for any frame
+	# carrying a non-ASCII character; text and binary both deliver raw bytes.
+	my $handle_frame = sub {
+		my ( $c, $bytes ) = @_;
+		my $body = eval { decode_json($bytes) };
+		if ($@) {
+			return $c->tx->send( { json => { status => 'error', error => 'frame must be JSON' } } );
 		}
-	);
+		my ( undef, $resp ) = _process_row( $c, $type, $body );
+		$c->tx->send( { json => $resp } );
+	};
+	$c->on( text   => $handle_frame );
+	$c->on( binary => $handle_frame );
 
 	return;
 } ## end sub _ingest_ws

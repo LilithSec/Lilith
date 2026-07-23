@@ -3,8 +3,8 @@ package Lilith::Escalate::Type::Syslog;
 use 5.006;
 use strict;
 use warnings;
-use Sys::Syslog qw( closelog openlog syslog );
-use JSON        qw( decode_json );
+use Sys::Syslog      qw( closelog openlog syslog );
+use Lilith::Escalate ();
 
 =head1 NAME
 
@@ -179,15 +179,11 @@ sub escalate {
 
 	my $message = 'escalation table=' . ( defined( $args{table} ) ? $args{table} : '' );
 	if ( defined( $event->{id} ) && !ref( $event->{id} ) ) {
-		my $value = $event->{id};
-		$value =~ s/\"/\\\"/g;
-		$message = $message . ' id="' . $value . '"';
+		$message = $message . ' id="' . _escape_log_value( $event->{id} ) . '"';
 	}
 	foreach my $key (qw( note requested_by target_name )) {
 		if ( defined( $args{$key} ) && $args{$key} ne '' ) {
-			my $value = $args{$key};
-			$value =~ s/\"/\\\"/g;
-			$message = $message . ' ' . $key . '="' . $value . '"';
+			$message = $message . ' ' . $key . '="' . _escape_log_value( $args{$key} ) . '"';
 		}
 	}
 	if ( $args{test} ) {
@@ -202,11 +198,7 @@ sub escalate {
 	my $json_paths = defined( $config->{json_paths} ) ? $config->{json_paths} : \@default_json_paths;
 	if ( ref($json_paths) eq 'ARRAY' && @{$json_paths} ) {
 		require JSON::Path;
-		my $doc = $event;
-		if ( defined( $event->{raw} ) && !ref( $event->{raw} ) ) {
-			my $decoded = eval { decode_json( $event->{raw} ) };
-			$doc = { %{$event}, raw => $decoded } if ref $decoded;
-		}
+		my $doc = Lilith::Escalate->decode_event_raw($event);
 		foreach my $spec ( @{$json_paths} ) {
 			next unless ref($spec) eq 'HASH' && defined( $spec->{path} ) && $spec->{path} ne '';
 			my $key    = ( defined( $spec->{key} ) && $spec->{key} ne '' ) ? $spec->{key} : 'jsonpath';
@@ -219,7 +211,7 @@ sub escalate {
 			# key="a,b,c" value and skip the field entirely when nothing matched
 			my @scalars = grep { !ref($_) && defined($_) } @values;
 			next unless @scalars;
-			my $joined = join( ',', map { ( my $s = $_ ) =~ s/\"/\\\"/g; $s } @scalars );
+			my $joined = join( ',', map { _escape_log_value($_) } @scalars );
 			$message = $message . ' ' . $key . '="' . $joined . '"';
 		} ## end foreach my $spec ( @{$json_paths} )
 	} ## end if ( ref($json_paths) eq 'ARRAY' && @{$json_paths...})
@@ -239,6 +231,17 @@ sub escalate {
 		message  => $message,
 	};
 } ## end sub escalate
+
+# values land inside key="value" pairs and come from event data; escape
+# backslashes and quotes so the quoting cannot be broken out of, and control
+# characters so a newline cannot forge additional pairs or split the line
+sub _escape_log_value {
+	my $value = shift;
+	$value =~ s/\\/\\\\/g;
+	$value =~ s/\"/\\\"/g;
+	$value =~ s/([\x00-\x1f\x7f])/sprintf( '\\x%02x', ord($1) )/ge;
+	return $value;
+}
 
 =head1 AUTHOR
 

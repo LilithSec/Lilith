@@ -33,27 +33,27 @@ sub execute {
 
 	$message = 'dsn: ';
 	if ( defined( $toml->{dsn} ) ) {
-		$message = $message . $toml->{dsn} . "\n";
+		$message = $message . $toml->{dsn};
 	} else {
-		$message = $message . "***undefined***\n";
+		$message = $message . '***undefined***';
 	}
 	syslog( 'info', $message );
 	print $message. "\n";
 
 	$message = 'user: ';
 	if ( defined( $toml->{user} ) ) {
-		$message = $message . $toml->{user} . "\n";
+		$message = $message . $toml->{user};
 	} else {
-		$message = $message . "***undefined***\n";
+		$message = $message . '***undefined***';
 	}
 	syslog( 'info', $message );
 	print $message. "\n";
 
 	$message = 'pass: ';
 	if ( defined( $toml->{pass} ) ) {
-		$message = $message . "***defined***\n";
+		$message = $message . '***defined***';
 	} else {
-		$message = $message . "***undefined***\n";
+		$message = $message . '***undefined***';
 	}
 	syslog( 'info', $message );
 	print $message. "\n\n";

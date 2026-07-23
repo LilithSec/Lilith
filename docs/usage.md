@@ -128,6 +128,38 @@ counts. `-Z` enables gzip+base64 extend compression; `-m` sets the window
 extend lilith /usr/local/bin/lilith extend
 ```
 
+### cape_submit
+
+Submit local files to a [CAPEv2](https://github.com/kevoreilly/CAPEv2) box
+(`mojo_cape_submit`) for detonation. Each file's md5/sha1/sha256, size, and
+libmagic description are computed and sent alongside the file as a
+`lilith_cape_submit` submission; the file is uploaded as
+`<slug>-<unixtime>-<filename>`. The API key, when the server needs one, goes in
+the `Authorization: Bearer` header and `apikey` form field — never in the JSON.
+
+Needs `cape_enable` set and at least one server under `[cape_servers.NAME]`:
+
+```toml
+cape_enable = true
+cape_slug   = "lilith"    # default slug; overridden per-run with --slug
+
+[cape_servers.main]
+url           = "http://192.168.14.15:8080/"
+apikey_needed = true
+apikey        = "deadbeefdeadbeefdeadbeef"
+```
+
+```shell
+# submit one file to the only configured server
+lilith cape_submit /tmp/putty.exe
+
+# pick a server and slug, submit several, get JSON back
+lilith cape_submit --server main --slug hunt /tmp/a.exe /tmp/b.dll --output json
+```
+
+`--server` is optional when exactly one server is configured. It exits non-zero
+if any file failed to submit.
+
 ### And the rest
 
 | command                     | what                                              |
@@ -172,6 +204,14 @@ All the standard Mojolicious server commands work. Read
   IP (interleaved http), windowed to reach back around the event. With
   `escalation_enable` on, an **Escalate** button and the escalation history
   appear ([escalation](escalation.md)).
+- **/cape_submit** — a **CAPE** navbar button and page for handing a file to a
+  configured CAPEv2 box (`mojo_cape_submit`) for detonation, the web equivalent
+  of the `cape_submit` CLI command. Pick a server, set a slug (defaults to
+  `cape_slug`), choose a file, and submit; the computed hashes/size/magic and the
+  upload name come back. Hidden and 404 unless `cape_enable` is set with at least
+  one `[cape_servers.*]` — like the CLI, it pushes a file to an outside service,
+  so it is off by default. Uploads are capped at 1 GiB (raise or lower with
+  `cape_max_upload_size`, in bytes).
 - **Virani dropdown** — appears in the navbar when any `[virani.*]` remote
   is configured. **PCAP Search** takes an arbitrary BPF filter and time
   range: it always builds a ready-to-copy local `virani` command, and with
@@ -257,8 +297,8 @@ These shape the CLI's table output.
 | `Lilith_IP_private_color`    | ANSI color for private IPs.                | `bright_green` |
 | `Lilith_IP_remote_color`     | ANSI color for remote IPs.                 | `bright_yellow` |
 | `Lilith_IP_local_color`      | ANSI color for local IPs.                  | `bright_red` |
-| `Lilith_timesamp_drop_micro` | Drop microseconds from timestamps.         | `0` |
-| `Lilith_timesamp_drop_offset`| Drop the TZ offset from timestamps.        | `0` |
+| `Lilith_timestamp_drop_micro` | Drop microseconds from timestamps.         | `0` |
+| `Lilith_timestamp_drop_offset`| Drop the TZ offset from timestamps.        | `0` |
 | `Lilith_instance_color`      | Color the instance column.                 | `1` |
 | `Lilith_instance_type_color` | Color for the instance name.               | `bright_blue` |
 | `Lilith_instance_slug_color` | Color for the instance slug.               | `bright_magenta` |

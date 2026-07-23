@@ -19,7 +19,6 @@
 % my $show_filters = grep { my $value = param($_->{name}); defined($value) && $value ne '' } @filter_fields;
 
 <form method="GET" action="/logs" id="logs-form">
-  <input type="hidden" name="search" value="1">
 
   <div class="card mb-2 border-secondary">
     <div class="card-body py-2">
@@ -124,6 +123,7 @@
 % }
 
 <script src="/js/time-range.js"></script>
+<script src="/js/auto-refresh.js"></script>
 <script>
 // Show only the filter fields that apply to the selected source.
 function syncFilters() {
@@ -134,51 +134,17 @@ function syncFilters() {
   });
 }
 
-function setLogsRefreshStatus(succeeded) {
-  var statusEl = document.getElementById('logs-ar-status');
-  if (!statusEl) { return; }
-  var now = new Date();
-  function pad(num) { return (num < 10 ? '0' : '') + num; }
-  var timeText = pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
-  statusEl.textContent = succeeded ? ('updated ' + timeText) : ('⚠ refresh failed ' + timeText + ' (stale)');
-  statusEl.className = succeeded ? 'small text-muted' : 'small text-warning';
-}
-
-// Fetch just the results fragment (partial=1) and swap #log-results in place.
-function refreshLogs() {
-  var url = new URL(window.location.href);
-  url.searchParams.set('partial', '1');
-  fetch(url.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-    .then(function(response) { if (!response.ok) { throw new Error('HTTP ' + response.status); } return response.text(); })
-    .then(function(html) {
-      var freshResults   = new DOMParser().parseFromString(html, 'text/html').getElementById('log-results');
-      var currentResults = document.getElementById('log-results');
-      if (freshResults && currentResults) { currentResults.innerHTML = freshResults.innerHTML; setLogsRefreshStatus(true); }
-      else { setLogsRefreshStatus(false); }
-    })
-    .catch(function() { setLogsRefreshStatus(false); });
-}
-
 document.addEventListener('DOMContentLoaded', function() {
   syncFilters();
 
-  var autoRefreshCheckbox = document.getElementById('logs-auto-refresh');
-  var autoRefreshSecsInput = document.getElementById('logs-auto-refresh-secs');
-  var autoRefreshTimer = null;
-  function intervalSeconds() { var seconds = parseInt(autoRefreshSecsInput.value, 10); return (!seconds || seconds < 1) ? 30 : seconds; }
-  function scheduleRefresh() {
-    if (autoRefreshTimer) { clearTimeout(autoRefreshTimer); autoRefreshTimer = null; }
-    if (!autoRefreshCheckbox.checked || document.hidden) { return; }
-    autoRefreshTimer = setTimeout(function() { refreshLogs(); scheduleRefresh(); }, intervalSeconds() * 1000);
-  }
-  var storedSecs = localStorage.getItem('logsAutoRefreshSecs');
-  if (storedSecs) { autoRefreshSecsInput.value = storedSecs; }
-  autoRefreshCheckbox.checked = localStorage.getItem('logsAutoRefresh') === 'true';
-  scheduleRefresh();
-  autoRefreshCheckbox.addEventListener('change',   function() { localStorage.setItem('logsAutoRefresh', this.checked); scheduleRefresh(); });
-  autoRefreshSecsInput.addEventListener('change', function() { localStorage.setItem('logsAutoRefreshSecs', this.value); scheduleRefresh(); });
-  document.addEventListener('visibilitychange', function() { if (!document.hidden && autoRefreshCheckbox.checked) { scheduleRefresh(); } });
-
-  if (document.getElementById('log-results')) { setLogsRefreshStatus(true); }
+  // Auto-refresh (shared module): fetch fresh results every N seconds and swap
+  // #log-results in place. State is kept in localStorage so it persists.
+  LilithAutoRefresh.init({
+    checkboxId:     'logs-auto-refresh',
+    secondsInputId: 'logs-auto-refresh-secs',
+    statusId:       'logs-ar-status',
+    containerId:    'log-results',
+    storagePrefix:  'logsAutoRefresh'
+  });
 });
 </script>

@@ -2,6 +2,8 @@ package Lilith::Web::Controller::Search;
 
 use Mojo::Base 'Mojolicious::Controller';
 
+use Lilith;
+
 =head1 NAME
 
 Lilith::Web::Controller::Search - Search controller for Lilith::Web.
@@ -23,9 +25,10 @@ sub index {
 	my $order_by        = $self->param('order_by')        // '';
 
 	# Sanitize
-	$table     = 'suricata'                                  unless $table     =~ /^(?:suricata|sagan|cape|baphomet)$/;
-	$order_dir = 'DESC'                                      unless $order_dir =~ /^(?:ASC|DESC)$/;
-	$order_by  = ( $table eq 'cape' ? 'stop' : 'timestamp' ) unless $order_by;
+	$table     = 'suricata' unless $table     =~ /^(?:suricata|sagan|cape|baphomet)$/;
+	$order_dir = 'DESC'     unless $order_dir =~ /^(?:ASC|DESC)$/;
+	$order_by  = ( $table eq 'cape' ? 'stop' : 'timestamp' )
+		unless grep { $_ eq $order_by } ( @{ $Lilith::alert_columns{$table} }, qw(id escalations auto_escalated) );
 
 	my $results;
 	my $error;

@@ -18,7 +18,7 @@ Starts the Lilith EVE receiver using Mojolicious. Remote sensors push already
 parsed alert rows (the output of L<Lilith/parse_eve>, one key per ingestable
 column) as JSON to C<< /eve/:table >> and they are inserted into the Lilith
 PostgreSQL database. This is the network counterpart to the local EVE-file
-tailer driven by C<lilith monitor>.
+tailer driven by C<lilith run>.
 
 Each alert may be pushed either as its own HTTP C<POST> or streamed as a JSON
 frame over a kept-open WebSocket to the same C</eve/:table> endpoint; both use

@@ -177,10 +177,12 @@ my $reader = Lilith::Allani->new( dsn => 'dbi:Pg:dbname=bogus' );
     is_deeply( $reader->measures('syslog'), [ { name => 'count', label => 'Count' } ], 'syslog offers count only' );
     is_deeply( $reader->measures('http_all'), [], 'http_all has no measures' );
 
-    # bytes measure sums the column instead of counting rows
+    # bytes measure sums the column instead of counting rows; the shared
+    # measure_expr helper coalesces the sum to 0 so an all-null/empty group
+    # reads as 0 rather than NULL.
     @MockDbh::SQL = ();
     $reader->top( source => 'http', column => 'vhost', measure => 'bytes' );
-    like( $MockDbh::SQL[0], qr/sum\(bytes\) AS count/, 'bytes measure sums the column' );
+    like( $MockDbh::SQL[0], qr/coalesce\(sum\(bytes\), 0\) AS count/, 'bytes measure sums the column' );
     like( $MockDbh::SQL[0], qr/FROM http_access/,      'http source reads http_access' );
 
     eval { $reader->top( source => 'http', column => 'vhost', measure => 'nope' ) };

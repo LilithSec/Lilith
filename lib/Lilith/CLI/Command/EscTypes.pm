@@ -11,10 +11,8 @@ sub abstract { 'list the available escalation types and their config fields' }
 sub usage_desc { '%c esc_types %o' }
 
 sub opt_spec {
-	return (
-		[ 'output=s', 'output type: table or json', { default => 'table' } ],
-		[ 'pretty',   'pretty print the JSON' ],
-	);
+	my ($class) = @_;
+	return $class->output_opt_spec;
 }
 
 sub execute {
@@ -23,35 +21,39 @@ sub execute {
 	my $lilith = $self->lilith;
 	my $types  = $lilith->escalation_types;
 
-	if ( $opt->{output} eq 'json' ) {
-		my @infos = map { $lilith->escalation_type_info($_) } @{$types};
-		$self->print_json( \@infos, $opt->{pretty} );
-		return;
-	}
+	return $self->output_dispatch(
+		$opt,
+		json => sub {
+			my @infos = map { $lilith->escalation_type_info($_) } @{$types};
+			$self->print_json( \@infos, $opt->{pretty} );
+			return;
+		},
+		table => sub {
+			foreach my $type ( @{$types} ) {
+				my $info = $lilith->escalation_type_info($type);
+				print $type . ' :: ' . $info->{description} . "\n";
 
-	foreach my $type ( @{$types} ) {
-		my $info = $lilith->escalation_type_info($type);
-		print $type . ' :: ' . $info->{description} . "\n";
+				my $tb = $self->table( 'Field', 'Label', 'Type', 'Req', 'Default' );
+				my @td;
+				foreach my $field ( @{ $info->{fields} } ) {
+					push(
+						@td,
+						[
+							$field->{name},
+							defined( $field->{label} )   ? $field->{label}   : '',
+							defined( $field->{type} )    ? $field->{type}    : '',
+							$field->{required}           ? '1'               : '0',
+							defined( $field->{default} ) ? $field->{default} : '',
+						]
+					);
+				} ## end foreach my $field ( @{ $info->{fields} } )
+				$tb->add_rows( \@td );
+				print $tb->draw . "\n";
+			} ## end foreach my $type ( @{$types} )
 
-		my $tb = $self->table( 'Field', 'Label', 'Type', 'Req', 'Default' );
-		my @td;
-		foreach my $field ( @{ $info->{fields} } ) {
-			push(
-				@td,
-				[
-					$field->{name},
-					defined( $field->{label} )   ? $field->{label}   : '',
-					defined( $field->{type} )    ? $field->{type}    : '',
-					$field->{required}           ? '1'               : '0',
-					defined( $field->{default} ) ? $field->{default} : '',
-				]
-			);
-		} ## end foreach my $field ( @{ $info->{fields} } )
-		$tb->add_rows( \@td );
-		print $tb->draw . "\n";
-	} ## end foreach my $type ( @{$types} )
-
-	return;
+			return;
+		},
+	);
 } ## end sub execute
 
 1;

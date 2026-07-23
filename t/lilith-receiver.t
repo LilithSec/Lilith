@@ -206,7 +206,7 @@ ok( !$lilith->receiver_apikey_instance_ok( { allowed_instances => ['foo.pie'] },
 			->json_is( '/status', 'ok', "$table push reports ok" )
 			->json_is( '/id',     99,   "$table push returns the new id" );
 		is( $got{type}, $type, "$table routed to the '$type' type" );
-	}
+	} ## end for my $case ( [ 'suricata_alerts', 'suricata'...])
 
 	# the three database/escalation-managed columns are rejected, not stripped
 	for my $col (qw( id escalations auto_escalated )) {
@@ -430,6 +430,14 @@ ok( !$lilith->receiver_apikey_instance_ok( { allowed_instances => ['foo.pie'] },
 	$t->send_ok('this is not json')
 		->message_ok('a non-JSON frame is answered')
 		->json_message_is( '/error', 'frame must be JSON', 'a non-JSON frame is reported' );
+
+	# regression: a text frame with a non-ASCII character used to be rejected
+	# as "frame must be JSON", as the already-decoded text was fed to
+	# decode_json, which expects UTF-8 bytes
+	$t->send_ok( { json => { instance => 'foo-pie', signature => "ET T\x{00c9}ST unicode" } } )
+		->message_ok('a non-ASCII alert is answered')
+		->json_message_is( '/status', 'ok', 'a frame with non-ASCII characters inserts fine' );
+	is( $seen[-1]{row}{signature}, "ET T\x{00c9}ST unicode", 'the non-ASCII signature survived the round trip' );
 
 	$t->finish_ok;
 

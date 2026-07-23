@@ -13,12 +13,13 @@ sub usage_desc { '%c ae_update %o' }
 
 sub opt_spec {
 	return (
-		[ 'id=s@',      'the auto escalation rule ID' ],
+		[ 'id=s',       'the auto escalation rule ID' ],
 		[ 'name=s',     'the rule name' ],
 		[ 'rule=s',     'the rule as a JSON object, or @file' ],
 		[ 'tables=s',   'comma separated alert tables the rule applies to' ],
 		[ 'priority=s', 'evaluation order, lower first' ],
 		[ 'stop',       'set stop_on_match' ],
+		[ 'no-stop',    'clear stop_on_match' ],
 		[ 'desc=s',     'a optional description' ],
 		[ 'enable',     'enable the rule' ],
 		[ 'disable',    'disable the rule' ],
@@ -28,9 +29,16 @@ sub opt_spec {
 sub validate_args {
 	my ( $self, $opt, $args ) = @_;
 
-	my @id = @{ $opt->{id} // [] };
-	if ( !defined( $id[0] ) ) {
+	if ( !defined( $opt->{id} ) ) {
 		$self->usage_error('--id is required for updating a auto escalation rule');
+	}
+
+	if ( $opt->{enable} && $opt->{disable} ) {
+		$self->usage_error('--enable and --disable are mutually exclusive');
+	}
+
+	if ( $opt->{stop} && $opt->{no_stop} ) {
+		$self->usage_error('--stop and --no-stop are mutually exclusive');
 	}
 
 	return;
@@ -39,9 +47,7 @@ sub validate_args {
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 
-	my @id = @{ $opt->{id} // [] };
-
-	my %update = ( id => $id[0] );
+	my %update = ( id => $opt->{id} );
 
 	if ( defined( $opt->{name} ) && $opt->{name} ne '' ) {
 		$update{name} = $opt->{name};
@@ -59,6 +65,9 @@ sub execute {
 	if ( $opt->{stop} ) {
 		$update{stop_on_match} = 1;
 	}
+	if ( $opt->{no_stop} ) {
+		$update{stop_on_match} = 0;
+	}
 	if ( defined( $opt->{desc} ) ) {
 		$update{description} = $opt->{desc};
 	}
@@ -71,7 +80,7 @@ sub execute {
 
 	$self->lilith->auto_escalation_update(%update);
 
-	print 'updated auto escalation ' . $id[0] . "\n";
+	print 'updated auto escalation ' . $opt->{id} . "\n";
 
 	return;
 } ## end sub execute

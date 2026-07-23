@@ -2,7 +2,8 @@ package Lilith::Allani;
 
 use strict;
 use warnings;
-use DBI;
+use Lilith::DBUtil
+	qw( clamped_int connect_cached_dbh host_or_text_expr measure_expr time_window_clause validate_bucket );
 
 =head1 NAME
 
@@ -65,9 +66,6 @@ my %MULTI = map { $_ => 1 } qw( host program vhost );
 # the rest -- mirroring build_where's single-value behavior per column.
 my %LIKEABLE = map { $_ => 1 } qw( host program );
 
-# date_trunc units a timeseries may be bucketed on.
-my %BUCKET = map { $_ => 1 } qw( minute hour day week month );
-
 # What a top/timeseries panel may aggregate beyond counting rows, per underlying
 # source table. 'count' is always available; a measure names a numeric column to
 # sum. The column is server-defined here (never from the request), so only a
@@ -86,11 +84,6 @@ my %IP_COL = (
 	http       => 'client_ip',
 	http_error => 'client_ip',
 );
-
-# inet columns, whose value we want as the bare host address ('1.2.3.4') via
-# host() rather than the '1.2.3.4/32' that ::text yields (which would also break
-# GeoIP lookups). Everything else is cast to text.
-my %INET = map { $_ => 1 } qw( sourceip client_ip );
 
 =head2 new
 
@@ -199,8 +192,8 @@ sub search {
 	die( '"' . $key . "\" is not a known log source\n" ) unless $self->valid_source($key);
 
 	my $dir   = ( defined $opts{order_dir} && uc $opts{order_dir} eq 'ASC' ) ? 'ASC' : 'DESC';
-	my $limit = _int( $opts{limit},  100, 1, 10000 );
-	my $off   = _int( $opts{offset}, 0,   0 );
+	my $limit = clamped_int( $opts{limit},  100, 1, 10000 );
+	my $off   = clamped_int( $opts{offset}, 0,   0 );
 	my $filt  = ( ref $opts{filters} eq 'HASH' ) ? $opts{filters} : {};
 
 	return $self->_search_http_all( \%opts, $dir, $limit, $off, $filt )
@@ -380,18 +373,9 @@ sub top_ips {
 	my ( $meta, $tscol ) = $self->_agg_meta( $opts{source} );
 	my $col = $IP_COL{ $opts{source} // '' }
 		or die( '"' . ( $opts{source} // '' ) . "\" has no source IP column\n" );
-	my $limit = _int( $opts{limit}, 500, 1, 5000 );
-	my $vexpr = $self->_val_expr($col);
-	my @binds;
-	my $tc = $self->_time_clause( $tscol, \%opts, \@binds );
-	push( @binds, $limit );
-	my $sth = $self->_dbh->prepare( "SELECT $vexpr AS value, count(*) AS count FROM $meta->{table}"
-			. " WHERE $tc AND $col IS NOT NULL GROUP BY $col ORDER BY count DESC, value ASC LIMIT ?" );
-	$sth->execute(@binds);
-	my $rows = $sth->fetchall_arrayref( {} );
-	$sth->finish;
-	return $rows || [];
-} ## end sub top_ips
+	my $limit = clamped_int( $opts{limit}, 500, 1, 5000 );
+	return $self->_top_values( $meta, $tscol, \%opts, $col, 'count(*)', $limit );
+}
 
 =head2 total
 
@@ -453,19 +437,10 @@ sub top {
 	my ( $self, %opts ) = @_;
 	my ( $meta, $tscol, $src ) = $self->_agg_meta( $opts{source} );
 	my $col   = $self->_dim( $meta, $opts{column} );
-	my $limit = _int( $opts{limit}, 10, 1, 1000 );
+	my $limit = clamped_int( $opts{limit}, 10, 1, 1000 );
 	my $magg  = $self->_measure_expr( $src, $opts{measure} );
-	my $vexpr = $self->_val_expr($col);
-	my @binds;
-	my $tc = $self->_time_clause( $tscol, \%opts, \@binds );
-	push( @binds, $limit );
-	my $sth = $self->_dbh->prepare( "SELECT $vexpr AS value, $magg AS count FROM $meta->{table}"
-			. " WHERE $tc AND $col IS NOT NULL GROUP BY $col ORDER BY count DESC, value ASC LIMIT ?" );
-	$sth->execute(@binds);
-	my $rows = $sth->fetchall_arrayref( {} );
-	$sth->finish;
-	return $rows || [];
-} ## end sub top
+	return $self->_top_values( $meta, $tscol, \%opts, $col, $magg, $limit );
+}
 
 =head2 timeseries
 
@@ -495,8 +470,8 @@ sub timeseries {
 
 	if ( defined $opts{group_by} && $opts{group_by} ne '' ) {
 		my $g     = $self->_dim( $meta, $opts{group_by} );
-		my $gexpr = $self->_val_expr($g);
-		my $k     = _int( $opts{top_groups}, 5, 1, 20 );
+		my $gexpr = host_or_text_expr($g);
+		my $k     = clamped_int( $opts{top_groups}, 5, 1, 20 );
 
 		# Restrict the split to the top-k group values in the window (its own copy
 		# of the window clause, so its binds repeat), then bucket per group.
@@ -537,15 +512,14 @@ unit.
 sub bucket {
 	my ( $self, $b, $mins ) = @_;
 	if ( !defined $b || $b eq '' || $b eq 'auto' ) {
-		$mins = _minutes($mins);
+		$mins = clamped_int( $mins, 1440 );
 		return 'minute' if $mins <= 180;          # <= 3h
 		return 'hour'   if $mins <= 2880;         # <= 2d
 		return 'day'    if $mins <= 129_600;      # <= 90d
 		return 'week'   if $mins <= 1_051_200;    # <= ~2y
 		return 'month';
 	}
-	die( '"' . $b . "\" is not a valid bucket\n" ) unless $BUCKET{$b};
-	return $b;
+	return validate_bucket($b);
 } ## end sub bucket
 
 #
@@ -571,14 +545,8 @@ sub _run {
 
 sub _dbh {
 	my ($self) = @_;
-
-	my $dbh;
-	eval { $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } ); };
-	if ( $@ || !$dbh ) {
-		die( 'Lilith::Allani: DBI->connect_cached failure... ' . $@ );
-	}
-	return $dbh;
-} ## end sub _dbh
+	return connect_cached_dbh( ref($self), $self->{dsn}, $self->{user}, $self->{pass} );
+}
 
 # The time-window WHERE fragment for column $tscol, appending any binds to
 # @$binds in WHERE order. Timestamps are bound as text and cast to timestamptz
@@ -590,24 +558,34 @@ sub _dbh {
 sub _time_clause {
 	my ( $self, $tscol, $opts, $binds ) = @_;
 
-	my $has_start = defined $opts->{start} && $opts->{start} ne '';
-	my $has_end   = defined $opts->{end}   && $opts->{end} ne '';
-	if ( $has_start || $has_end ) {
-		my @conds;
-		if ($has_start) { push( @conds, "$tscol >= ?::timestamptz" ); push( @$binds, $opts->{start} ); }
-		if ($has_end)   { push( @conds, "$tscol <= ?::timestamptz" ); push( @$binds, $opts->{end} ); }
-		return join( ' AND ', @conds );
-	}
-
-	if ( defined $opts->{around} && $opts->{around} ne '' ) {
-		my $w = _int( $opts->{window_minutes}, 60, 1, 44_640 );
-		push( @$binds, $opts->{around}, $opts->{around} );
-		return "$tscol BETWEEN ?::timestamptz - interval '$w minutes'" . " AND ?::timestamptz + interval '$w minutes'";
-	}
-
-	my $mins = _minutes( $opts->{go_back_minutes} );
-	return "$tscol >= now() - interval '$mins minutes'";
+	return time_window_clause(
+		time_column    => $tscol,
+		opts           => $opts,
+		binds          => $binds,
+		minutes        => clamped_int( $opts->{go_back_minutes}, 1440 ),
+		window_minutes => clamped_int( $opts->{window_minutes},  60, 1, 44_640 ),
+	);
 } ## end sub _time_clause
+
+# One "top values of $col" query over the window: the column's text value and
+# the aggregate, non-null values only, grouped by the column and ordered by the
+# aggregate descending (ties broken by value), with the limit bound last. Backs
+# both top() (a validated dimension, any measure) and top_ips() (the source's
+# IP column, count(*)).
+sub _top_values {
+	my ( $self, $meta, $tscol, $opts, $col, $measure_aggregate, $limit ) = @_;
+
+	my $vexpr = host_or_text_expr($col);
+	my @binds;
+	my $tc = $self->_time_clause( $tscol, $opts, \@binds );
+	push( @binds, $limit );
+	my $sth = $self->_dbh->prepare( "SELECT $vexpr AS value, $measure_aggregate AS count FROM $meta->{table}"
+			. " WHERE $tc AND $col IS NOT NULL GROUP BY $col ORDER BY count DESC, value ASC LIMIT ?" );
+	$sth->execute(@binds);
+	my $rows = $sth->fetchall_arrayref( {} );
+	$sth->finish;
+	return $rows || [];
+} ## end sub _top_values
 
 # Resolve an aggregate source to ( $meta, $timestamp_column, $source_name ).
 # Aggregation is over a single real table, so http_all (a view) and unknown
@@ -637,19 +615,11 @@ sub _ts_col {
 # server-defined per-source catalog. Never takes a column from the request.
 sub _measure_expr {
 	my ( $self, $src, $name ) = @_;
-	$name = 'count' unless defined $name && $name ne '';
-	my $list = $MEASURE{$src} || \@DEFAULT_MEASURE;
-	my ($m) = grep { $_->{name} eq $name } @$list;
-	die( '"' . $name . "\" is not a known measure\n" ) unless $m;
-	return 'count(*)' if !$m->{agg} || $m->{agg} eq 'count';
-	return $m->{agg} . '(' . $m->{col} . ')';
-}
-
-# The text value expression for a grouped/listed column: host() for inet columns
-# (bare address), a text cast otherwise.
-sub _val_expr {
-	my ( $self, $col ) = @_;
-	return $INET{$col} ? "host($col)" : "($col)::text";
+	return measure_expr(
+		list    => $MEASURE{$src} || \@DEFAULT_MEASURE,
+		name    => $name,
+		context => $src,
+	);
 }
 
 # A WHERE fragment matching $col against one or more whitespace-separated values
@@ -678,23 +648,6 @@ sub _dim {
 	die("a column is required\n")                            unless defined $col && $col ne '';
 	die( '"' . $col . "\" is not an aggregatable column\n" ) unless $meta->{dims}{$col};
 	return $col;
-}
-
-# minutes-back window, integer, defaulting to a day.
-sub _minutes {
-	my ($v) = @_;
-	return 1440 unless defined $v && $v =~ /^[0-9]+$/;
-	return $v + 0;
-}
-
-# a clamped integer with a default.
-sub _int {
-	my ( $v, $default, $min, $max ) = @_;
-	return $default unless defined $v && $v =~ /^[0-9]+$/;
-	$v += 0;
-	$v = $min if defined $min && $v < $min;
-	$v = $max if defined $max && $v > $max;
-	return $v;
 }
 
 #

@@ -10,7 +10,7 @@ Lilith::Schema::Result::Escalation
 One escalation attempt of an alert to an escalation target. Every
 attempt is recorded, including ones refused before a send (unknown or
 disabled target). C<table_name> is the short table type
-(suricata/sagan/cape) as used by L<Lilith>'s search(), C<raw> is the
+(suricata/sagan/cape/baphomet) as used by L<Lilith>'s search(), C<raw> is the
 payload the escalation type actually sent, C<status> is
 pending/sent/failed, and C<target_name> snapshots the target's name at
 attempt time so history stays readable after a target is deleted

@@ -101,6 +101,17 @@ sub column_exists {
 	ok( table_exists( $dbh, 'suricata_alerts' ), 'deploy created suricata_alerts' );
 	ok( table_exists( $dbh, 'sagan_alerts' ),    'deploy created sagan_alerts' );
 	ok( table_exists( $dbh, 'cape_alerts' ),     'deploy created cape_alerts' );
+
+	# version 11: malscore is double precision, so CAPE's fractional scores
+	# insert instead of aborting with "invalid input syntax for type bigint".
+	my $frac_malscore = eval {
+		$dbh->do( 'insert into cape_alerts (instance,target,instance_host,task,malscore,raw) values (?,?,?,?,?,?)',
+			undef, 'lilith', 't.msi', 'host', 96, 0.2, '{}' );
+		my ($got) = $dbh->selectrow_array("select malscore from cape_alerts where target = 't.msi'");
+		$got;
+	};
+	is( $@,             '',  'a fractional cape malscore inserts without error' );
+	is( $frac_malscore, 0.2, 'the fractional malscore round-trips' );
 	ok( index_exists( $dbh, 'escalations_event_idx' ), 'deploy created the pre-existing escalations index' );
 
 	my @missing = grep { !index_exists( $dbh, $_ ) } @V5_INDEXES;

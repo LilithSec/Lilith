@@ -33,32 +33,22 @@ safe in the read tier.
 =cut
 
 # read tier gate; returns 1 when the caller may proceed, else renders the
-# 404 and returns 0
+# 404 and returns 0. The shared logic lives in the require_escalation_view
+# helper in Lilith::Web.
 sub _require_view {
-	my $self = shift;
-
-	if ( !$self->escalation_enable ) {
-		$self->reply->not_found;
-		return 0;
-	}
-
-	return 1;
-} ## end sub _require_view
+	return $_[0]->require_escalation_view;
+}
 
 # write tier gate; view must be allowed and management explicitly enabled.
-# Renders a 404 (view off) or 403 (management off) and returns 0 on refusal
+# Renders a 404 (view off) or 403 (management off) and returns 0 on refusal.
+# The shared logic lives in the require_escalation_manage helper in
+# Lilith::Web.
 sub _require_manage {
 	my $self = shift;
 
-	return 0 unless $self->_require_view;
-
-	if ( !$self->auto_escalation_manage_enable ) {
-		$self->render( json => { error => 'auto escalation management is disabled' }, status => 403 );
-		return 0;
-	}
-
-	return 1;
-} ## end sub _require_manage
+	return $self->require_escalation_manage( $self->auto_escalation_manage_enable,
+		'auto escalation management is disabled' );
+}
 
 =head2 index
 

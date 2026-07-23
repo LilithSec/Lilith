@@ -13,8 +13,8 @@
  *
  * Only the active mode's params submit (the others are disabled): a preset
  * sends go_back_minutes; Custom composes 'YYYY-MM-DD HH:MM' into start/end on
- * submit. Self-initializes every .time-range on the page; also exposes
- * window.LilithTimeRange.{init,initAll} for dynamically added ones.
+ * submit. Self-initializes every .time-range on the page and exposes
+ * window.LilithTimeRange.{read,set} for the dashboard's live controls.
  */
 (function () {
   function pad(num) { return (num < 10 ? '0' : '') + num; }
@@ -137,8 +137,6 @@
   }
 
   window.LilithTimeRange = {
-    init: initOne,
-    initAll: initAll,
     read: function (root) { return root && root._trApi ? root._trApi.read() : null; },
     set:  function (root, windowSpec) { if (root && root._trApi) { root._trApi.set(windowSpec); } }
   };

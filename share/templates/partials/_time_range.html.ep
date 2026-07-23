@@ -1,14 +1,12 @@
 % # Reusable time-window control (preset relative window + Custom absolute range).
 % # Pair with /js/time-range.js. Include like:
 % #   %= include 'partials/_time_range', tr_minutes => $go_back_minutes, tr_start => param('start'), tr_end => param('end')
-% # Optional: tr_minutes_name / tr_start_name / tr_end_name to change the emitted
-% # param names (default go_back_minutes / start / end).
 % my $minutes = stash('tr_minutes') // 1440;
 % my $start   = stash('tr_start')   // '';
 % my $end     = stash('tr_end')     // '';
-% my $mname   = stash('tr_minutes_name') // 'go_back_minutes';
-% my $sname   = stash('tr_start_name')   // 'start';
-% my $ename   = stash('tr_end_name')     // 'end';
+% my $mname   = 'go_back_minutes';
+% my $sname   = 'start';
+% my $ename   = 'end';
 % # preset options (minutes => label), in order; select the one matching $minutes,
 % # else fall back to a day.
 % my @presets = ( [ 60, 'Last hour' ], [ 360, 'Last 6 hours' ], [ 1440, 'Last 24 hours' ],

@@ -30,8 +30,11 @@ my %WriteMakefileArgs = (
 		'DBD::Pg'                => '0',
 		'File::ShareDir'         => '0',
 		'Data::Dumper'           => '0',
+		'Digest::MD5'            => '0',
 		'Digest::SHA'            => '0',
+		'HTTP::Request::Common'  => '0',
 		'IO::Socket::SSL'        => '0',
+		'LWP::UserAgent'         => '0',
 		'Mozilla::CA'            => '0',
 		'Mail::SPF'              => '0',
 		'Mail::DMARC'            => '0',
@@ -65,6 +68,7 @@ my %WriteMakefileArgs = (
 					'IP::Geolocation::MMDB' => '0',    # web: GeoIP country/subdivision in the IP columns and modal
 					'Mozilla::PublicSuffix' => '0',    # web: accurate registrable-domain reduction for whois
 					'Net::IP'               => '0',    # web: IPv6 reverse-DNS lookups in the IP info modal
+					'File::LibMagic'        => '0',    # cape_submit: full fileinfo.magic (falls back to file(1))
 				},
 			},
 		},

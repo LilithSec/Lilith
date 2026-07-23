@@ -11,10 +11,8 @@ sub abstract { 'list the configured escalation targets' }
 sub usage_desc { '%c esc_targets %o' }
 
 sub opt_spec {
-	return (
-		[ 'output=s', 'output type: table or json', { default => 'table' } ],
-		[ 'pretty',   'pretty print the JSON' ],
-	);
+	my ($class) = @_;
+	return $class->output_opt_spec;
 }
 
 sub execute {
@@ -22,28 +20,29 @@ sub execute {
 
 	my $targets = $self->lilith->escalation_targets;
 
-	if ( $opt->{output} eq 'json' ) {
-		$self->print_json( $targets, $opt->{pretty} );
-		return;
-	}
+	return $self->output_dispatch(
+		$opt,
+		json  => sub { $self->print_json( $targets, $opt->{pretty} ) },
+		table => sub {
+			my $tb = $self->table( 'ID', 'Name', 'Type', 'Enabled', 'Description', 'Updated' );
+			my @td;
+			foreach my $item ( @{$targets} ) {
+				push(
+					@td,
+					[
+						$item->{id}, $item->{name}, $item->{type},
+						( $item->{enabled} ? '1' : '0' ),
+						defined( $item->{description} ) ? $item->{description} : '',
+						defined( $item->{updated} )     ? $item->{updated}     : '',
+					]
+				);
+			} ## end foreach my $item ( @{$targets} )
+			$tb->add_rows( \@td );
+			print $tb->draw;
 
-	my $tb = $self->table( 'ID', 'Name', 'Type', 'Enabled', 'Description', 'Updated' );
-	my @td;
-	foreach my $item ( @{$targets} ) {
-		push(
-			@td,
-			[
-				$item->{id}, $item->{name}, $item->{type},
-				( $item->{enabled} ? '1' : '0' ),
-				defined( $item->{description} ) ? $item->{description} : '',
-				defined( $item->{updated} )     ? $item->{updated}     : '',
-			]
-		);
-	} ## end foreach my $item ( @{$targets} )
-	$tb->add_rows( \@td );
-	print $tb->draw;
-
-	return;
+			return;
+		},
+	);
 } ## end sub execute
 
 1;

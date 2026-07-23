@@ -12,25 +12,23 @@ sub abstract { 'print a single auto escalation rule as JSON' }
 sub usage_desc { '%c ae_get %o' }
 
 sub opt_spec {
-	return ( [ 'id=s@', 'the auto escalation rule ID' ], [ 'pretty', 'pretty print the JSON' ], );
+	return ( [ 'id=s', 'the auto escalation rule ID' ], [ 'pretty', 'pretty print the JSON' ], );
 }
 
 sub validate_args {
 	my ( $self, $opt, $args ) = @_;
 
-	my @id = @{ $opt->{id} // [] };
-	if ( !defined( $id[0] ) ) {
+	if ( !defined( $opt->{id} ) ) {
 		$self->usage_error('--id is required for fetching a auto escalation rule');
 	}
 
 	return;
-} ## end sub validate_args
+}
 
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 
-	my @id   = @{ $opt->{id} // [] };
-	my $rule = $self->lilith->auto_escalation_get( $id[0] );
+	my $rule = $self->lilith->auto_escalation_get( $opt->{id} );
 
 	# ae_get has always emitted canonical JSON, pretty or not
 	my $json = JSON->new;

@@ -106,11 +106,11 @@ sub set_env_defaults {
 		$ENV{Lilith_IP_local_color} = 'bright_red';
 	}
 
-	if ( !defined( $ENV{Lilith_timesamp_drop_micro} ) ) {
+	if ( !defined( $ENV{Lilith_timestamp_drop_micro} ) ) {
 		$ENV{Lilith_timestamp_drop_micro} = '0';
 	}
 
-	if ( !defined( $ENV{Lilith_timesamp_drop_offset} ) ) {
+	if ( !defined( $ENV{Lilith_timestamp_drop_offset} ) ) {
 		$ENV{Lilith_timestamp_drop_offset} = '0';
 	}
 

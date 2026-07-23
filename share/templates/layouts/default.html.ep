@@ -13,7 +13,6 @@
     .event-link { color: #dc3545; text-decoration: none; }
     .event-link:hover { text-decoration: underline; }
     .form-label { font-size: 0.78rem; color: #adb5bd; margin-bottom: 2px; }
-    .filter-hint { font-size: 0.72rem; color: #6c757d; }
     @keyframes rowNewFlash { from { background-color: rgba(255,193,7,0.35); } to { background-color: transparent; } }
     tr.row-new > td { animation: rowNewFlash 4s ease-out; }
   </style>
@@ -113,6 +112,7 @@
                 <option value="suricata">Suricata</option>
                 <option value="sagan">Sagan</option>
                 <option value="cape">CAPE</option>
+                <option value="baphomet">Baphomet</option>
               </select>
             </div>
             <div class="col">
@@ -144,6 +144,11 @@
       % }
       <!-- Auto escalation rule management -->
       <a class="btn btn-sm btn-outline-secondary" href="/auto_escalation" id="nav-auto-escalation">Auto-Esc</a>
+      % }
+
+      % if ($self->cape_submit_enabled) {
+      <!-- CAPE submission -->
+      <a class="btn btn-sm btn-outline-secondary" href="/cape_submit" id="nav-cape-submit">CAPE</a>
       % }
 
       % if ($self->virani_enabled) {
@@ -198,7 +203,7 @@
   </div>
 </div>
 
-<!-- Global Domain Info Modal -->
+<!-- Global Domain Info Modal — shared by the navbar and the event view -->
 <div class="modal fade" id="nav-domaininfo-modal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content bg-dark text-light border-secondary">
@@ -504,9 +509,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (event.key === 'Enter') { document.getElementById('nav-ip-go-btn').click(); }
   });
 
-  // Domain Info
+  // Domain Info — one modal and one lookup used everywhere (navbar, event).
+  // Exposed globally so page templates can trigger it from their own buttons.
   var navDomainModal = new bootstrap.Modal(document.getElementById('nav-domaininfo-modal'));
-  function doNavDomainLookup(domain) {
+  window.showDomainInfo = function(domain) {
     document.getElementById('nav-domaininfo-modal-title').textContent = domain;
     document.getElementById('nav-domaininfo-loading').style.display = '';
     document.getElementById('nav-domaininfo-content').style.display = 'none';
@@ -522,9 +528,16 @@ document.addEventListener('DOMContentLoaded', function() {
             if (rankA === -1) rankA = 999; if (rankB === -1) rankB = 999;
             return rankA - rankB;
           });
+          // record values are DNS data of an arbitrary looked-up domain (TXT
+          // especially can carry anything), so they must be escaped
+          var escapeHtml = function(text) {
+            return String(text).replace(/[&<>"']/g, function(ch) {
+              return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];
+            });
+          };
           dnsEl.innerHTML = recordTypes.map(function(type) {
             return data.dns[type].map(function(recordValue) {
-              return '<strong>' + type + '</strong> ' + recordValue;
+              return '<strong>' + escapeHtml(type) + '</strong> ' + escapeHtml(recordValue);
             }).join('<br>');
           }).join('<br>');
         } else {
@@ -556,13 +569,13 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('nav-domaininfo-loading').style.display = 'none';
         document.getElementById('nav-domaininfo-content').style.display = '';
       });
-  }
+  };
   document.getElementById('nav-domain-go-btn').addEventListener('click', function() {
     var domain = document.getElementById('nav-domain-input').value.trim();
     var errEl  = document.getElementById('nav-domain-error');
     if (!domain || !/^[A-Za-z0-9._-]+$/.test(domain)) { errEl.style.display = ''; return; }
     errEl.style.display = 'none';
-    doNavDomainLookup(domain);
+    window.showDomainInfo(domain);
   });
   document.getElementById('nav-domain-input').addEventListener('keydown', function(event) {
     if (event.key === 'Enter') { document.getElementById('nav-domain-go-btn').click(); }

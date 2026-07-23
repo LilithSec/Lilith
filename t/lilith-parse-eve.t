@@ -267,6 +267,60 @@ is( $lilith->parse_eve( type => 'bogus',    json => { event_type => 'alert' } ),
 	is( $row->{url},              undef,        'no http => url is undef' );
 }
 
+# -- a Lilith upload (lilith_cape_submit) is read like a suricata extract --
+{
+	my $eve = {
+		event_type         => 'alert',
+		row                => { id => 9, target => '/var/spool/up.bin' },
+		lilith_cape_submit => {
+			filename => 'huntslug-1753208651-putty.exe',
+			host     => 'lilith01',
+			slug     => 'huntslug',
+			md5      => 'lcs-md5',
+			sha1     => 'lcs-sha1',
+			sha256   => 'lcs-sha256',
+		},
+		fileinfo => { size => 4096 },
+	};
+
+	my $row = $lilith->parse_eve( type => 'cape', json => $eve, instance => 'cape1', host => 'sensor1' );
+
+	is( $row->{target},           'huntslug-1753208651-putty.exe', 'target from lilith_cape_submit.filename' );
+	is( $row->{md5},              'lcs-md5',    'md5 from lilith_cape_submit' );
+	is( $row->{sha1},             'lcs-sha1',   'sha1 from lilith_cape_submit' );
+	is( $row->{sha256},           'lcs-sha256', 'sha256 from lilith_cape_submit' );
+	is( $row->{slug},             'huntslug',   'slug from lilith_cape_submit' );
+	is( $row->{subbed_from_host}, 'lilith01',   'subbed_from_host from lilith_cape_submit.host' );
+	is( $row->{size},             4096,         'size falls back to fileinfo.size' );
+}
+
+# -- realistic return trip: mojo_cape_submit layers cape_submit on top, but the
+#    slug and submitting host still come from the lilith_cape_submit origin --
+{
+	my $eve = {
+		event_type  => 'alert',
+		row         => { id => 10 },
+		cape_submit => {
+			name      => '/up.bin',
+			remote_ip => '203.0.113.9',
+			md5       => 'ces-md5',
+			sha1      => 'ces-sha1',
+			sha256    => 'ces-sha256',
+			size      => 555,
+		},
+		lilith_cape_submit => { filename => 'slug-1-up.bin', host => 'lil2', slug => 'lil-slug' },
+	};
+
+	my $row = $lilith->parse_eve( type => 'cape', json => $eve, instance => 'i', host => 'h' );
+
+	is( $row->{md5},              'ces-md5',     'hashes still prefer cape_submit when present' );
+	is( $row->{slug},             'lil-slug',    'slug comes from lilith_cape_submit, not cape_submit' );
+	is( $row->{subbed_from_ip},   '203.0.113.9', 'subbed_from_ip from cape_submit.remote_ip' );
+	is( $row->{subbed_from_host}, 'lil2',        'subbed_from_host from lilith_cape_submit.host' );
+	is( $row->{target},           'up.bin',      'target prefers cape_submit.name (basename)' );
+	is( $row->{size},             555,           'size prefers cape_submit.size' );
+}
+
 # -- neither submit source: target comes from row.target --
 {
 	my $eve = { event_type => 'alert', row => { id => 1, target => '/a/b/c.doc' } };

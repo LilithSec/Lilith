@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Test::More;
 
-use_ok('Lilith') or BAIL_OUT('Lilith failed to load');
+use_ok('Lilith')         or BAIL_OUT('Lilith failed to load');
 use_ok('Lilith::Schema') or BAIL_OUT('Lilith::Schema failed to load');
 
 # ---------------------------------------------------------------------------
@@ -53,18 +53,11 @@ sub class_search {
 # ---------------------------------------------------------------------------
 
 my $search = class_search('Misc Attack');
-is_deeply(
-	$search->{'-and'},
-	[ { classification => { '=' => 'Misc Attack' } } ],
-	'scalar class becomes an equality'
-);
+is_deeply( $search->{'-and'}, [ { classification => { '=' => 'Misc Attack' } } ], 'scalar class becomes an equality' );
 
 $search = class_search('!Misc Attack');
-is_deeply(
-	$search->{'-and'},
-	[ { classification => { '!=' => 'Misc Attack' } } ],
-	'negated scalar class becomes a !='
-);
+is_deeply( $search->{'-and'}, [ { classification => { '!=' => 'Misc Attack' } } ],
+	'negated scalar class becomes a !=' );
 
 $search = class_search('Misc%');
 is_deeply( $search->{'-and'}, [ { classification => { 'like' => 'Misc%' } } ], 'scalar class with % becomes a like' );
@@ -230,8 +223,10 @@ is_deeply(
 	[
 		{
 			'-or' => [
-				{ src_port => { '=' => '22' } }, { dest_port => { '=' => '22' } },
-				{ src_port => { '=' => '80' } }, { dest_port => { '=' => '80' } },
+				{ src_port  => { '=' => '22' } },
+				{ dest_port => { '=' => '22' } },
+				{ src_port  => { '=' => '80' } },
+				{ dest_port => { '=' => '80' } },
 			]
 		}
 	],
@@ -242,7 +237,7 @@ is_deeply(
 is_deeply(
 	complex_port_search('80,!22'),
 	[
-		{ '-or'  => [ { src_port => { '=' => '80' } }, { dest_port => { '=' => '80' } } ] },
+		{ '-or'  => [ { src_port => { '='  => '80' } }, { dest_port => { '='  => '80' } } ] },
 		{ '-and' => [ { src_port => { '!=' => '22' } }, { dest_port => { '!=' => '22' } } ] },
 	],
 	'a mix of positive and negated ports ORs the positives and ANDs the negation'
@@ -288,8 +283,10 @@ is_deeply(
 	[
 		{
 			'-or' => [
-				{ src_ip => { '=' => '10.0.0.1' } }, { dest_ip => { '=' => '10.0.0.1' } },
-				{ src_ip => { '=' => '10.0.0.2' } }, { dest_ip => { '=' => '10.0.0.2' } },
+				{ src_ip  => { '=' => '10.0.0.1' } },
+				{ dest_ip => { '=' => '10.0.0.1' } },
+				{ src_ip  => { '=' => '10.0.0.2' } },
+				{ dest_ip => { '=' => '10.0.0.2' } },
 			]
 		}
 	],
@@ -303,8 +300,7 @@ is_deeply(
 # default is the now-relative window as literal SQL on the timestamp column
 $captured_search = undef;
 $lilith->search( table => 'suricata' );
-is( ref $captured_search->{timestamp}{'>='},
-	'SCALAR', 'default window is a now-relative literal on timestamp' );
+is( ref $captured_search->{timestamp}{'>='}, 'SCALAR', 'default window is a now-relative literal on timestamp' );
 like( ${ $captured_search->{timestamp}{'>='} }, qr/CURRENT_TIMESTAMP - interval/, 'and uses go_back_minutes' );
 
 # an explicit start+end becomes a bound range (values, not literal SQL),
@@ -331,5 +327,71 @@ ok( !exists $captured_search->{timestamp}, 'cape does not window on timestamp' )
 # an unparseable bound is rejected with a clear error
 eval { $lilith->search( table => 'suricata', start => 'not-a-time' ); };
 like( $@, qr/is not a parseable time/, 'an unparseable start is rejected' );
+
+# ---------------------------------------------------------------------------
+# order_by is concatenated into the ORDER BY clause, so anything that is not a
+# real column of the table must be rejected (SQL injection guard)
+# ---------------------------------------------------------------------------
+
+eval { $lilith->search( table => 'suricata', order_by => 'timestamp; select pg_sleep(10)' ); };
+like( $@, qr/is not a column of the suricata table/, 'a non-column order_by is rejected' );
+
+eval { $lilith->search( table => 'suricata', order_by => 'malscore' ); };
+like( $@, qr/is not a column of the suricata table/, "another table's column is rejected too" );
+
+eval { $lilith->search( table => 'suricata', order_by => 'src_ip' ); };
+is( $@, '', 'a real column is accepted as order_by' );
+
+eval { $lilith->search( table => 'cape', order_by => 'id' ); };
+is( $@, '', 'the id column is accepted as order_by' );
+
+# ---------------------------------------------------------------------------
+# regression: the >N numeric operator used to strip with s/^\>\=// (which never
+# matches a bare >N), leaving the > on the bound value and breaking the cast
+# ---------------------------------------------------------------------------
+
+$search = port_search( ['>1024'] );
+is_deeply( $search->{dest_port}, { '>' => '1024' }, 'a >N numeric item strips the > from the bound value' );
+
+$search = port_search( ['<1024'] );
+is_deeply( $search->{dest_port}, { '<' => '1024' }, 'a <N numeric item strips the < from the bound value' );
+
+# ---------------------------------------------------------------------------
+# no_time skips the window entirely (used for lookups by id, where the row may
+# be arbitrarily old or, for cape, have a NULL stop)
+# ---------------------------------------------------------------------------
+
+$captured_search = undef;
+$lilith->search( table => 'cape', no_time => 1, id => ['42'] );
+ok( !exists( $captured_search->{stop} ) && !exists( $captured_search->{timestamp} ), 'no_time applies no time window' );
+is_deeply( $captured_search->{id}, { '=' => '42' }, 'and the id filter still applies' );
+
+# ---------------------------------------------------------------------------
+# filters on columns the table lacks are skipped rather than generating SQL
+# that errors on a nonexistent column
+# ---------------------------------------------------------------------------
+
+$captured_search = undef;
+$lilith->search( table => 'baphomet', sid => ['123'], port => '22', src_port => ['22'] );
+ok( !exists( $captured_search->{sid} ),      'sid filter is skipped for a table without a sid column' );
+ok( !exists( $captured_search->{src_port} ), 'src_port filter is skipped for a table without ports' );
+ok( !exists( $captured_search->{'-and'} ),   'the complex port filter is skipped too' );
+
+$captured_search = undef;
+$lilith->search( table => 'cape', target => 'somehost' );
+is_deeply( $captured_search->{target}, { '=' => 'somehost' }, 'the target filter applies to cape' );
+
+$captured_search = undef;
+$lilith->search( table => 'suricata', target => 'somehost' );
+ok( !exists( $captured_search->{target} ), 'the target filter is skipped for tables without the column' );
+
+# table may be omitted entirely (defaults to suricata) without warnings
+{
+	my @warnings;
+	local $SIG{__WARN__} = sub { push( @warnings, $_[0] ) };
+	eval { $lilith->search( order_by => 'timestamp' ); };
+	is( $@,                '', 'search without a table defaults to suricata' );
+	is( scalar(@warnings), 0,  'and emits no warnings' ) or diag( join( '', @warnings ) );
+}
 
 done_testing();

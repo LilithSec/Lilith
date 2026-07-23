@@ -3,8 +3,7 @@ package Lilith::CLI::Command::Deploy;
 use strict;
 use warnings;
 use parent 'Lilith::CLI::Command';
-use Lilith::Schema         ();
-use DBIx::Class::Migration ();
+use Lilith::Schema ();
 
 sub command_names { 'deploy' }
 
@@ -23,12 +22,7 @@ sub description {
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 
-	my $toml = $self->config;
-
-	my $migration = DBIx::Class::Migration->new(
-		schema_class => 'Lilith::Schema',
-		schema_args  => [ $toml->{dsn}, $toml->{user}, $toml->{pass} ],
-	);
+	my $migration = $self->migration;
 
 	eval { $migration->install; };
 	if ($@) {

@@ -24,15 +24,39 @@ lilith [B<--config> <config>] extend [B<-Z>] [B<-m> <minutes>]
 
 lilith [B<--config> <config>] get_short_class_snmp_list
 
-lilith [B<--config> <config>] search [B<--output> <return>] [B<-t> <table>]
+lilith [B<--config> <config>] search [B<--output> <return>] [B<--pretty>] [B<-t> <table>]
 [B<-m> <minutes>] [B<--order> <clm>] [B<--limit> <int>] [B<--offset> <int>]
-[B<--orderdir> <dir>] [B<--si> <src_ip>] [B<--di> <dst_ip>] [B<--ip> <ip>]
+[B<--orderdir> <dir>] [B<--columns> <columns>] [B<--columnset> <set>]
+[B<--si> <src_ip>] [B<--di> <dst_ip>] [B<--ip> <ip>]
 [B<--sp> <src_port>] [B<--dp> <dst_port>] [B<-p> <port>] [B<--host> <host>]
-[B<--ih> <host>] [B<-i> <instance>] [B<-c> <class>] [B<-s> <sig>] [B<--if> <if>]
+[B<--ih> <host>] [B<-i> <instance>] [B<-c> <class>] [B<--cN> <class>]
+[B<--cl> <class>] [B<-s> <sig>] [B<--if> <if>]
 [B<--ap> <proto>] [B<--gid> <gid>] [B<--sid> <sid>] [B<--rev> <rev>]
 [B<--subip> <subip>] [B<--subhost> <subhost>] [B<--slug> <slug>] [B<--pkg> <pkg>]
 [B<--malscore> <malscore>] [B<--size> <size>] [B<--target> <target>]
 [B<--task> <task>]
+
+lilith [B<--config> <config>] cape_submit [B<--server> <server>] [B<--slug> <slug>]
+<file> [<file> ...]
+
+lilith [B<--config> <config>] deploy
+
+lilith [B<--config> <config>] migrate
+
+lilith [B<--config> <config>] schema_version
+
+lilith [B<--config> <config>] receiver_key_create B<--name> <name> [B<--ip> <ip>]
+[B<--instance> <instance>] [B<--desc> <desc>] [B<--disable>]
+
+lilith [B<--config> <config>] receiver_key_list [B<--output> <return>] [B<--pretty>]
+
+lilith [B<--config> <config>] receiver_key_get <B<--id> <id>|B<--name> <name>> [B<--pretty>]
+
+lilith [B<--config> <config>] receiver_key_update <B<--id> <id>|B<--name> <name>>
+[B<--rename> <name>] [B<--ip> <ip>] [B<--clear-ips>] [B<--instance> <instance>]
+[B<--clear-instances>] [B<--desc> <desc>] [B<--enable>] [B<--disable>]
+
+lilith [B<--config> <config>] receiver_key_delete <B<--id> <id>|B<--name> <name>>
 
 lilith [B<--config> <config>] esc [B<-t> <table>] B<--id> <row_id> B<--to> <targets>
 [B<--note> <note>] [B<--by> <who>] [B<--output> <return>] [B<--pretty>]
@@ -122,7 +146,7 @@ Fetch event via row ID.
 
 Fetch the event via the event ID.
 
-=head2 --raw
+=head3 --raw
 
 Do not decode the EVE JSON.
 
@@ -158,10 +182,6 @@ Enable Gzip+Base64 LibreNMS style extend compression.
 How far back to search. For the extend action, 5 minutes
 is the default.
 
-=head3 -d <dir>
-
-The directory to write it out too.
-
 =head2 get_short_class_snmp_list
 
 Print a list of shorted class names for use with SNMP.
@@ -188,6 +208,25 @@ The output type.
     - Values :: table,json
     - Default :: table
 
+=head4 --pretty
+
+Pretty print the JSON output when B<--output> is json.
+
+=head4 --columns <columns>
+
+Comma separated list of columns to display in the table output.
+
+    - Default :: per --columnset
+
+=head4 --columnset <set>
+
+Named set of columns to use for the table output when B<--columns> is
+not given. Which sets exist depends on the table; all tables have
+C<default>.
+
+    - Values :: default,default_timestamp,default_event,default_timestamp_event
+    - Default :: default
+
 =head4 -m <minute>
 
 How far back to to in minutes.
@@ -208,7 +247,7 @@ Column to use for sorting by.
 
 Direction to order in.
 
-    - Values :: ASC,DSC
+    - Values :: ASC,DESC
     - Default :: ASC
 
 =head3 IP Options
@@ -307,6 +346,25 @@ ORed together while items negated via a leading '!' are ANDed.
 
     # class != 'Misc activity' and class not like 'Generic%'
     -c '!Misc activity' -c '!Generic%'
+
+    - Default :: undef
+    - Type :: string
+
+=head4 --cN <class>
+
+Classification to exclude. May be specified multiple times. Each value
+is appended to the class list with a leading '!', so C<--cN 'Misc
+activity'> behaves like C<-c '!Misc activity'>.
+
+    - Default :: undef
+    - Type :: string
+
+=head4 --cl <class>
+
+Classification to match using like. May be specified multiple times.
+Each value is wrapped in '%' (unless it already contains one) and
+appended to the class list, so C<--cl Generic> behaves like
+C<-c '%Generic%'>.
 
     - Default :: undef
     - Type :: string
@@ -419,6 +477,106 @@ The host the sample was submitted from.
 
     - Default :: undef
     - Type :: string
+
+=head2 cape_submit
+
+Submits one or more local files to a configured CAPEv2 box (C<mojo_cape_submit>)
+for detonation. Each file's hashes, size, and libmagic description are computed
+and sent alongside the file as a C<lilith_cape_submit> submission. Requires
+C<cape_enable> to be set and at least one server under C<cape_servers>. Exits
+non-zero if any file failed to submit.
+
+=head3 <file> ...
+
+The files to submit, given as arguments (or via B<--file>).
+
+=head3 --server <server>
+
+The C<cape_servers> entry to submit to. Optional when exactly one server is
+configured, in which case that one is used.
+
+    - Default :: the only configured server
+
+=head3 --slug <slug>
+
+The slug to submit with, used both in the upload name
+(C<< $slug-$unixtime-$filename >>) and the payload.
+
+    - Default :: cape_slug (which itself defaults to lilith)
+
+=head3 --file <file>
+
+A file to submit. May be given multiple times, and combines with any files
+given as arguments.
+
+=head3 --output <return>
+
+The output format, either table or json.
+
+    - Default :: table
+
+=head2 deploy
+
+Installs the current schema into an empty database, reading dsn/user/pass
+from the config file. Run this once, after the database and role exist.
+For an already-deployed database use migrate instead.
+
+=head2 migrate
+
+Upgrades an already-deployed database to the schema version this release
+expects. A no-op when the database is already current. For a fresh, empty
+database use deploy instead.
+
+=head2 schema_version
+
+Prints the schema version recorded in the database alongside the version
+this release expects, and whether a deploy or upgrade is pending. Changes
+nothing.
+
+=head2 receiver_key_create
+
+Creates a new receiver API key and prints it. Takes --name, and
+optionally --ip, --instance, --desc, and --disable.
+
+=head3 --name <name>
+
+The name for the new key. Required.
+
+=head3 --ip <ip>
+
+An allowed IP or CIDR subnet. May be given multiple times. Any IP is
+allowed when not given.
+
+=head3 --instance <instance>
+
+An allowed instance name or glob, e.g. foo-*. May be given multiple
+times. Any instance is allowed when not given.
+
+=head3 --desc <desc>
+
+A optional description.
+
+=head3 --disable
+
+Create the key disabled.
+
+=head2 receiver_key_list
+
+Lists the receiver API keys. --output json includes the details of each.
+
+=head2 receiver_key_get
+
+Prints a single receiver API key as JSON, picked via --id or --name.
+
+=head2 receiver_key_update
+
+Updates a receiver API key, picked via --id or --name. Only the items
+specified change. Any of --rename, --enable, --disable, --ip,
+--clear-ips, --instance, --clear-instances, or --desc may be given.
+
+=head2 receiver_key_delete
+
+Deletes a receiver API key, picked via --id or --name.
 
 =head2 esc
 
@@ -542,8 +700,8 @@ JSON with C<--output json>.
 
 =head3 --tables <list>
 
-Comma separated list of alert tables to scan (suricata/sagan/cape). All
-three are scanned when not given.
+Comma separated list of alert tables to scan
+(suricata/sagan/cape/baphomet). All four are scanned when not given.
 
 =head3 -m <minutes>
 
@@ -651,11 +809,17 @@ ANSI color to use for local IPs.
 
     - Default :: bright_red
 
-=head2 Lilith_timesamp_drop_micro
+=head2 Lilith_timestamp_drop_micro
 
 Perl boolean for if microseconds should be dropped or not.
 
-    - Default :: 1
+    - Default :: 0
+
+=head2 Lilith_timestamp_drop_offset
+
+Perl boolean for if the UTC offset should be dropped or not.
+
+    - Default :: 0
 
 =head2 Lilith_instance_color
 
@@ -693,6 +857,26 @@ The default config file is `/usr/local/etc/lilith.toml`.
 
     - class_ignore :: Array of classes to ignore.
 
+    - cape_enable :: Boolean turning on the C<cape_submit> command. When not
+                     set, C<cape_submit> refuses to submit.
+
+    - cape_slug :: The default slug C<cape_submit> uses when B<--slug> is not
+                   given.
+      Default :: lilith
+
+CAPEv2 submission targets are defined as sub tables under the C<cape_servers>
+table, i.e. C<[cape_servers.NAME]>. Each is a server C<cape_submit> can submit
+to, with the following values.
+
+    - url :: Where to POST the submission. Required.
+
+    - apikey_needed :: Boolean for whether the server requires an API key. When
+                       true, the key is sent as the bearer token and C<apikey>
+                       form field (never in the JSON body); submission fails if
+                       no key is set.
+
+    - apikey :: The API key to send when C<apikey_needed> is true.
+
 EVE instances to follow are defined as sub tables under the C<eves> table, i.e.
 C<[eves.NAME]>. Each such sub hash is an instance with the following values.
 
@@ -709,6 +893,16 @@ Example...
     user="lilith"
     # a handy one to ignore for the extend as it is spammy
     class_ignore=["Generic Protocol Command Decode"]
+
+    # enable the cape_submit command and set the default slug
+    cape_enable=true
+    cape_slug="lilith"
+
+    # a CAPEv2 box to submit samples to
+    [cape_servers.main]
+    url="http://192.168.14.15:8080/"
+    apikey_needed=true
+    apikey="deadbeefdeadbeefdeadbeef"
 
     # add a suricata instance to monitor
     [eves.suricata-eve]

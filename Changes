@@ -1,6 +1,11 @@
 Revision history for Lilith
 
 4.0.0	unreleased
+		 - Widen cape_alerts.malscore from bigint to double precision
+		   (schema version 11). CAPEv2's malscore is a fractional score
+		   (e.g. 0.2, 7.5), so a non-integer value aborted the INSERT with
+		   "invalid input syntax for type bigint"; the column now matches
+		   what CAPE emits (and the sibling baphomet_alerts.score).
 		 - Ingest Baphomet's own judgment EVE (eve_type "baphomet"; event
 		   types found/banish/noted/alert/sighting/sighted) into a new
 		   baphomet_alerts table (schema version 10). A type=baphomet EVE

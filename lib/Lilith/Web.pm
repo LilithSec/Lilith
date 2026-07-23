@@ -88,6 +88,56 @@ sub startup {
 	# escalation_enable; only the mutating endpoints additionally require this.
 	$self->helper( auto_escalation_manage_enable => sub { $toml->{auto_escalation_manage_enable} ? 1 : 0 } );
 
+	# Read tier gate shared by the escalation and auto escalation controllers;
+	# returns 1 when the caller may proceed, else renders the 404 and returns 0.
+	$self->helper(
+		require_escalation_view => sub {
+			my $controller = shift;
+
+			if ( !$controller->escalation_enable ) {
+				$controller->reply->not_found;
+				return 0;
+			}
+
+			return 1;
+		}
+	);
+
+	# Write tier gate shared by the escalation and auto escalation controllers;
+	# view must be allowed and the passed management flag explicitly enabled.
+	# Renders a 404 (view off) or a 403 with the passed message (management off)
+	# and returns 0 on refusal.
+	$self->helper(
+		require_escalation_manage => sub {
+			my ( $controller, $manage_enabled, $disabled_message ) = @_;
+
+			return 0 unless $controller->require_escalation_view;
+
+			if ( !$manage_enabled ) {
+				$controller->render( json => { error => $disabled_message }, status => 403 );
+				return 0;
+			}
+
+			return 1;
+		}
+	);
+
+	# Render whatever $code->(@code_args) returns as JSON, turning a die (bad
+	# column/source, unreachable database, ...) into a 400 with the message.
+	# Shared by the dashboard and logs JSON APIs.
+	$self->helper(
+		render_json_or_400 => sub {
+			my ( $controller, $code, @code_args ) = @_;
+
+			my $data = eval { $code->(@code_args) };
+			if ($@) {
+				( my $why = $@ ) =~ s/\s+\z//;
+				return $controller->render( json => { error => $why }, status => 400 );
+			}
+			return $controller->render( json => $data );
+		}
+	);
+
 	my $dnstracer_flags = [];
 	if ( ref $toml->{dnstracer_flags} eq 'ARRAY' ) {
 		$dnstracer_flags = $toml->{dnstracer_flags};
@@ -240,7 +290,8 @@ sub startup {
 	my $allani_cfg = ( ref $toml->{allani} eq 'HASH' ) ? $toml->{allani} : undef;
 	my $allani_reader;
 	$self->helper(
-		allani_enabled => sub { ( $allani_cfg && defined $allani_cfg->{dsn} && $allani_cfg->{dsn} ne '' ) ? 1 : 0 } );
+		allani_enabled => sub { ( $allani_cfg && defined $allani_cfg->{dsn} && $allani_cfg->{dsn} ne '' ) ? 1 : 0 }
+	);
 	$self->helper(
 		allani => sub {
 			return $allani_reader if $allani_reader;
@@ -351,6 +402,60 @@ sub startup {
 		);
 	} ## end if (@allowed_referers)
 
+	# CAPE submission. cape_enable turns the feature on; the [cape_servers.NAME]
+	# tables are the CAPE boxes samples may be submitted to and cape_slug is the
+	# default slug. Off by default, since a submission pushes a file to an outside
+	# service; the feature is available only when enabled and at least one server
+	# with a url is configured (mirrors the virani gate).
+	require Lilith::CapeSubmit;
+	my %cape_servers;
+	if ( ref $toml->{cape_servers} eq 'HASH' ) {
+		foreach my $name ( keys %{ $toml->{cape_servers} } ) {
+			my $cfg = $toml->{cape_servers}{$name};
+			next unless ref $cfg eq 'HASH' && defined $cfg->{url} && $cfg->{url} ne '';
+			$cape_servers{$name} = $cfg;
+		}
+	}
+	my $cape_slug = ( defined $toml->{cape_slug} && $toml->{cape_slug} ne '' ) ? $toml->{cape_slug} : 'lilith';
+
+	# cape_enable comes from TOML, whose parser yields the bare strings
+	# 'true'/'false' -- both truthy in Perl -- so coerce it properly rather than
+	# with a bare truth test (a plain ? : would leave 'false' enabled).
+	my $cape_enabled = Lilith::CapeSubmit::to_bool( $toml->{cape_enable} );
+	$self->helper( cape_servers        => sub { \%cape_servers } );
+	$self->helper( cape_slug           => sub { $cape_slug } );
+	$self->helper( cape_submit_enabled => sub { ( $cape_enabled && scalar keys %cape_servers ) ? 1 : 0 } );
+
+	# A sample can exceed Mojolicious's default 16 MiB request cap, which would
+	# drop the upload connection (a fetch NetworkError in the browser). Raise it
+	# when submission is on; cape_max_upload_size (bytes) overrides the 1 GiB
+	# default, matching the mojo_cape_submit receiver's generous limit.
+	if ( $cape_enabled && keys %cape_servers ) {
+		my $max_upload
+			= ( defined $toml->{cape_max_upload_size} && $toml->{cape_max_upload_size} =~ /^[0-9]+$/ )
+			? $toml->{cape_max_upload_size} + 0
+			: 1073741824;
+		$self->max_request_size($max_upload);
+	}
+
+	# A ready Lilith::CapeSubmit built from the config, or undef when the feature
+	# is off. Cached; it holds only config data so it forks cleanly into the
+	# submission subprocess.
+	my $cape_submitter;
+	$self->helper(
+		cape_submitter => sub {
+			return undef unless $_[0]->cape_submit_enabled;
+			return $cape_submitter if $cape_submitter;
+			require Lilith::CapeSubmit;
+			$cape_submitter = Lilith::CapeSubmit->new(
+				enabled => 1,
+				slug    => $cape_slug,
+				servers => \%cape_servers,
+			);
+			return $cape_submitter;
+		}
+	);
+
 	# Point Mojolicious at share/templates and share/public so the app works
 	# both when installed (File::ShareDir path) and when run from the repo.
 	unshift @{ $self->renderer->paths }, "$SHARE_DIR/templates";
@@ -402,6 +507,8 @@ sub startup {
 	$r->post('/api/escalation/targets/:id/test')->to('escalation#target_test');
 	$r->post('/api/escalation/escalate')->to('escalation#escalate');
 	$r->get('/api/escalation/history/:table/:id')->to('escalation#history');
+	$r->get('/cape_submit')->to('cape_submit#index');
+	$r->post('/api/cape_submit/submit')->to('cape_submit#submit');
 	$r->get('/auto_escalation')->to('auto_escalation#index');
 	$r->get('/api/auto_escalation/rules')->to('auto_escalation#rules');
 	$r->post('/api/auto_escalation/rules')->to('auto_escalation#save');

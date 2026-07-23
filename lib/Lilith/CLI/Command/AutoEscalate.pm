@@ -11,13 +11,13 @@ sub abstract { 'evaluate the auto escalation rules against recent alerts' }
 sub usage_desc { '%c auto_escalate %o' }
 
 sub opt_spec {
+	my ($class) = @_;
 	return (
 		[ 'tables=s', 'comma separated alert tables to scan' ],
 		[ 'm=s',      'how far back to look, in minutes', { default => 5 } ],
 		[ 'dry-run',  'report what would be escalated without sending' ],
 		[ 'by=s',     'who requested each escalation', { default => 'auto' } ],
-		[ 'output=s', 'output type: table or json',    { default => 'table' } ],
-		[ 'pretty',   'pretty print the JSON' ],
+		$class->output_opt_spec,
 	);
 } ## end sub opt_spec
 
@@ -50,36 +50,37 @@ sub execute {
 		push( @summaries, @{$result} );
 	}
 
-	if ( $opt->{output} eq 'json' ) {
-		$self->print_json( \@summaries, $opt->{pretty} );
-		return;
-	}
+	return $self->output_dispatch(
+		$opt,
+		json  => sub { $self->print_json( \@summaries, $opt->{pretty} ) },
+		table => sub {
+			my $tb = $self->table( 'Table', 'Scanned', 'Rules', 'Matched', 'Alert', 'Rule', 'Targets', 'Status' );
+			my @td;
+			foreach my $summary (@summaries) {
+				if ( !@{ $summary->{escalations} } ) {
+					push( @td,
+						[ $summary->{table}, $summary->{scanned}, $summary->{rules}, $summary->{matched}, '', '', '', '' ]
+					);
+					next;
+				}
+				foreach my $entry ( @{ $summary->{escalations} } ) {
+					my @targets = @{ $entry->{target_ids} };
+					push( @targets, map { $_ . '?' } @{ $entry->{unknown_targets} } );
+					push(
+						@td,
+						[
+							$summary->{table},  $summary->{scanned}, $summary->{rules},     $summary->{matched},
+							$entry->{alert_id}, $entry->{rule_name}, join( ',', @targets ), $entry->{status},
+						]
+					);
+				} ## end foreach my $entry ( @{ $summary->{escalations} ...})
+			} ## end foreach my $summary (@summaries)
+			$tb->add_rows( \@td );
+			print $tb->draw;
 
-	my $tb = $self->table( 'Table', 'Scanned', 'Rules', 'Matched', 'Alert', 'Rule', 'Targets', 'Status' );
-	my @td;
-	foreach my $summary (@summaries) {
-		if ( !@{ $summary->{escalations} } ) {
-			push( @td,
-				[ $summary->{table}, $summary->{scanned}, $summary->{rules}, $summary->{matched}, '', '', '', '' ]
-			);
-			next;
-		}
-		foreach my $entry ( @{ $summary->{escalations} } ) {
-			my @targets = @{ $entry->{target_ids} };
-			push( @targets, map { $_ . '?' } @{ $entry->{unknown_targets} } );
-			push(
-				@td,
-				[
-					$summary->{table},  $summary->{scanned}, $summary->{rules},     $summary->{matched},
-					$entry->{alert_id}, $entry->{rule_name}, join( ',', @targets ), $entry->{status},
-				]
-			);
-		} ## end foreach my $entry ( @{ $summary->{escalations} ...})
-	} ## end foreach my $summary (@summaries)
-	$tb->add_rows( \@td );
-	print $tb->draw;
-
-	return;
+			return;
+		},
+	);
 } ## end sub execute
 
 1;

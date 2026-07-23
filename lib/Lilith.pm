@@ -69,6 +69,9 @@ our %alert_columns = (
 # narrows this further.
 my %BAPHOMET_EVENT_TYPES = map { $_ => 1 } qw( found banish noted alert sighting sighted );
 
+# The known alert table types; anything naming a table must be one of these.
+my %KNOWN_TABLE_TYPES = map { $_ => 1 } qw( suricata sagan cape baphomet );
+
 =head1 SYNOPSIS
 
     my $toml_raw = read_file($config_file) or die 'Failed to read "' . $config_file . '"';
@@ -99,7 +102,7 @@ my %BAPHOMET_EVENT_TYPES = map { $_ => 1 } qw( found banish noted alert sighting
         }
     }
 
-    $ilith->run(
+    $lilith->run(
                 files=>\%files,
                );
 
@@ -109,7 +112,7 @@ my %BAPHOMET_EVENT_TYPES = map { $_ => 1 } qw( found banish noted alert sighting
 
 Initiates it.
 
-    my $lilith=Lilith->run(
+    my $lilith=Lilith->new(
                            dsn=>$toml->{dsn},
                            user=>$toml->{user},
                            pass=>$toml->{pass},
@@ -160,7 +163,7 @@ The args taken by this are as below.
 =cut
 
 sub new {
-	my ( $blank, %opts ) = @_;
+	my ( $class, %opts ) = @_;
 
 	if ( !defined( $opts{dsn} ) ) {
 		die('"dsn" is not defined');
@@ -170,44 +173,18 @@ sub new {
 		$opts{user} = 'lilith';
 	}
 
-	if ( !defined( $opts{sid_ignore} ) ) {
-		my @empty_array;
-		$opts{sid_ignore} = \@empty_array;
+	foreach my $ignore_option (
+		qw(sid_ignore class_ignore suricata_sid_ignore suricata_class_ignore sagan_sid_ignore sagan_class_ignore))
+	{
+		if ( !defined( $opts{$ignore_option} ) ) {
+			$opts{$ignore_option} = [];
+		}
 	}
 
-	if ( !defined( $opts{class_ignore} ) ) {
-		my @empty_array;
-		$opts{class_ignore} = \@empty_array;
-	}
-
-	if ( !defined( $opts{suricata_sid_ignore} ) ) {
-		my @empty_array;
-		$opts{suricata_sid_ignore} = \@empty_array;
-	}
-
-	if ( !defined( $opts{suricata_class_ignore} ) ) {
-		my @empty_array;
-		$opts{suricata_class_ignore} = \@empty_array;
-	}
-
-	if ( !defined( $opts{sagan_sid_ignore} ) ) {
-		my @empty_array;
-		$opts{sagan_sid_ignore} = \@empty_array;
-	}
-
-	if ( !defined( $opts{sagan_class_ignore} ) ) {
-		my @empty_array;
-		$opts{sagan_class_ignore} = \@empty_array;
-	}
-
-	if ( ref( $opts{baphomet_event_ignore} ) ne 'ARRAY' ) {
-		my @empty_array;
-		$opts{baphomet_event_ignore} = \@empty_array;
-	}
-
-	if ( ref( $opts{escalation_type_namespaces} ) ne 'ARRAY' ) {
-		my @empty_array;
-		$opts{escalation_type_namespaces} = \@empty_array;
+	foreach my $array_option (qw(baphomet_event_ignore escalation_type_namespaces)) {
+		if ( ref( $opts{$array_option} ) ne 'ARRAY' ) {
+			$opts{$array_option} = [];
+		}
 	}
 
 	my $self = {
@@ -267,7 +244,7 @@ sub new {
 			'Crypto Currency Mining Activity Detected'                    => 'Mining',
 			'Malware Command and Control Activity Detected'               => 'MalC2act',
 			'Potentially Bad Traffic'                                     => 'PotBadTraf',
-			'Unsuccessful Admin Privilege'                                => 'SucAdmPG',
+			'Unsuccessful Admin Privilege'                                => '!SucAdmPG',
 			'Exploit Attempt'                                             => 'ExpAtmp',
 			'Program Error'                                               => 'ProgErr',
 			'Suspicious Command Execution'                                => 'SusProgExec',
@@ -281,24 +258,19 @@ sub new {
 			'Hardware Event'                                              => 'HWevent',
 			''                                                            => 'blankC',
 		},
-		lc_class_map     => {},
-		rev_class_map    => {},
-		lc_rev_class_map => {},
-		snmp_class_map   => {},
+		lc_class_map   => {},
+		snmp_class_map => {},
 	};
-	bless $self;
+	bless $self, $class;
 
 	my @keys = keys( %{ $self->{class_map} } );
 	foreach my $key (@keys) {
 		my $lc_key = lc($key);
-		$self->{lc_class_map}{$lc_key}                              = $self->{class_map}{$key};
-		$self->{rev_class_map}{ $self->{class_map}{$key} }          = $key;
-		$self->{lc_rev_class_map}{ lc( $self->{class_map}{$key} ) } = $key;
-		$self->{snmp_class_map}{$lc_key}                            = $self->{class_map}{$key};
-		$self->{snmp_class_map}{$lc_key}                            = $self->{class_map}{$key};
+		$self->{lc_class_map}{$lc_key}   = $self->{class_map}{$key};
+		$self->{snmp_class_map}{$lc_key} = $self->{class_map}{$key};
 		$self->{snmp_class_map}{$lc_key} =~ s/^\!/not\_/;
-		$self->{snmp_class_map}{$lc_key} =~ s/\ /\_/;
-	} ## end foreach my $key (@keys)
+		$self->{snmp_class_map}{$lc_key} =~ s/\ /\_/g;
+	}
 
 	# O(1) lookup of the baphomet event types to skip on ingest
 	$self->{baphomet_event_ignore_map} = { map { $_ => 1 } @{ $self->{baphomet_event_ignore} } };
@@ -440,20 +412,30 @@ sub parse_eve {
 } ## end sub parse_eve
 
 # Pull a CAPEv2 detonation record apart into its cape_alerts row. Kept out of
-# parse_eve only because the field-by-field fallbacks (cape_submit vs
-# suricata_extract_submit vs row) are long. Faithful to the original run() body.
+# parse_eve only because the field-by-field fallbacks (cape_submit vs the
+# sample-origin block vs row) are long. Faithful to the original run() body.
+#
+# A sample reaches CAPE either as a Suricata extract (suricata_extract_submit)
+# or as a Lilith upload (lilith_cape_submit); the two are peers, only one is
+# present, and cape_submit is always added on top by mojo_cape_submit. Both
+# origin blocks are read the same way, so lilith_cape_submit is folded into the
+# same fallbacks suricata_extract_submit already had.
 sub _parse_cape {
 	my ( $self, $json, $instance, $host, $raw ) = @_;
 
 	my $ces = ref( $json->{cape_submit} ) eq 'HASH'             ? $json->{cape_submit}             : {};
 	my $ses = ref( $json->{suricata_extract_submit} ) eq 'HASH' ? $json->{suricata_extract_submit} : {};
+	my $lcs = ref( $json->{lilith_cape_submit} ) eq 'HASH'      ? $json->{lilith_cape_submit}      : {};
 
-	# the submitted sample's name: most specific source first, then basename
+	# the submitted sample's name: most specific source first, then basename. A
+	# Lilith upload carries the upload name as lilith_cape_submit.filename.
 	my $target;
 	if ( defined( $ces->{name} ) ) {
 		$target = $ces->{name};
 	} elsif ( defined( $ses->{name} ) ) {
 		$target = $ses->{name};
+	} elsif ( defined( $lcs->{filename} ) ) {
+		$target = $lcs->{filename};
 	} else {
 		$target = $json->{row}{target};
 	}
@@ -461,13 +443,14 @@ sub _parse_cape {
 		$target =~ s/^.*\///;
 	}
 
-	# hashes: cape_submit first, else suricata_extract_submit
-	my $md5    = defined( $ces->{md5} )    ? $ces->{md5}    : $ses->{md5};
-	my $sha1   = defined( $ces->{sha1} )   ? $ces->{sha1}   : $ses->{sha1};
-	my $sha256 = defined( $ces->{sha256} ) ? $ces->{sha256} : $ses->{sha256};
+	# hashes: cape_submit first, else whichever origin block is present
+	my $md5    = $ces->{md5}    // $ses->{md5}    // $lcs->{md5};
+	my $sha1   = $ces->{sha1}   // $ses->{sha1}   // $lcs->{sha1};
+	my $sha256 = $ces->{sha256} // $ses->{sha256} // $lcs->{sha256};
 
-	# slug preference is the other way round: suricata_extract_submit first
-	my $slug = defined( $ses->{slug} ) ? $ses->{slug} : $ces->{slug};
+	# slug preference is the other way round: the origin block first, as
+	# cape_submit does not carry one
+	my $slug = $ses->{slug} // $lcs->{slug} // $ces->{slug};
 
 	my $size;
 	if ( defined( $ces->{size} ) ) {
@@ -485,7 +468,7 @@ sub _parse_cape {
 		stop             => $json->{row}{completed_on},
 		malscore         => $json->{malscore},
 		subbed_from_ip   => $ces->{remote_ip},
-		subbed_from_host => $ses->{host},
+		subbed_from_host => $ses->{host} // $lcs->{host},
 		pkg              => $json->{row}{package},
 		md5              => $md5,
 		sha1             => $sha1,
@@ -540,10 +523,10 @@ sub _parse_baphomet {
 	# offender is the ip when present, else the subject; it keeps the derived
 	# event_id stable for a subject-only verdict
 	my $rule_name = ref( $json->{rule} ) eq 'HASH' ? $json->{rule}{name} : undef;
-	my $offender  = defined( $json->{ip} ) ? $json->{ip} : $json->{subject};
+	my $offender  = defined( $json->{ip} )         ? $json->{ip}         : $json->{subject};
 
 	my $event_id
-		= sha256_base64( ( defined($host)                ? $host              : '' )
+		= sha256_base64( ( defined($host) ? $host : '' )
 			. ( defined( $json->{kur} )       ? $json->{kur}       : '' )
 			. ( defined( $json->{timestamp} ) ? $json->{timestamp} : '' )
 			. ( defined($event_type)          ? $event_type        : '' )
@@ -620,7 +603,9 @@ sub insert_alert {
 		:                       'baphomet_alerts';
 	my @cols = @{ $alert_columns{$type} };
 
-	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} );
+	# RaiseError so a failed connect or INSERT actually dies; both run() and
+	# the receiver depend on this sub dying rather than quietly returning undef
+	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } );
 	my $sql
 		= 'insert into '
 		. $table . ' ( '
@@ -930,8 +915,9 @@ hashes. The keys are below.
 sub run {
 	my ( $self, %opts ) = @_;
 
-	my $dbh;
-	eval { $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} ); };
+	# verify the DB is reachable before starting the tailers; RaiseError so a
+	# failed connect actually reaches the eval instead of returning undef
+	eval { DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } ); };
 	if ($@) {
 		warn($@);
 		openlog( 'lilith', undef, 'daemon' );
@@ -953,11 +939,7 @@ sub run {
 		if ( !defined( $item->{type} ) ) {
 			warn( 'No type specified for ' . $item->{instance} . '; skipping this instance' );
 			next;
-		} elsif ($item->{type} ne 'suricata'
-			&& $item->{type} ne 'sagan'
-			&& $item->{type} ne 'cape'
-			&& $item->{type} ne 'baphomet' )
-		{
+		} elsif ( !$KNOWN_TABLE_TYPES{ $item->{type} } ) {
 			warn(     'Type, '
 					. $item->{type}
 					. ', for instance '
@@ -1036,6 +1018,10 @@ sub extend {
 
 	if ( !defined( $opts{go_back_minutes} ) ) {
 		$opts{go_back_minutes} = 5;
+	} elsif ( $opts{go_back_minutes} !~ /^[0-9]+$/ ) {
+
+		# interpolated into the interval below, so it must really be a number
+		die( '"' . $opts{go_back_minutes} . '" for go_back_minutes is not numeric' );
 	}
 
 	#
@@ -1121,55 +1107,40 @@ sub extend {
 		$to_return->{errorString} = $@;
 	}
 
-	foreach my $row ( @{$suricata_found} ) {
-		$to_return->{data}{totals}{total}++;
-		$to_return->{data}{suricata_totals}{total}++;
-		my $snmp_class = $self->get_short_class_snmp( $row->{classification} );
-		if ( !defined( $to_return->{data}{totals}{$snmp_class} ) ) {
-			$to_return->{data}{totals}{$snmp_class} = 1;
-		} else {
-			$to_return->{data}{totals}{$snmp_class}++;
-		}
-		if ( !defined( $to_return->{data}{suricata_totals}{$snmp_class} ) ) {
-			$to_return->{data}{suricata_totals}{$snmp_class} = 1;
-		} else {
-			$to_return->{data}{suricata_totals}{$snmp_class}++;
-		}
-		if ( !defined( $to_return->{data}{suricata_instances}{ $row->{instance} } ) ) {
-			$to_return->{data}{suricata_instances}{ $row->{instance} } = { total => 0 };
-		}
-		$to_return->{data}{suricata_instances}{ $row->{instance} }{total}++;
-		if ( !defined( $to_return->{data}{suricata_instances}{ $row->{instance} }{$snmp_class} ) ) {
-			$to_return->{data}{suricata_instances}{ $row->{instance} }{$snmp_class} = 1;
-		} else {
-			$to_return->{data}{suricata_instances}{ $row->{instance} }{$snmp_class}++;
-		}
-	} ## end foreach my $row ( @{$suricata_found} )
-
-	foreach my $row ( @{$sagan_found} ) {
-		$to_return->{data}{totals}{total}++;
-		$to_return->{data}{sagan_totals}{total}++;
-		my $snmp_class = $self->get_short_class_snmp( $row->{classification} );
-		if ( !defined( $to_return->{data}{totals}{$snmp_class} ) ) {
-			$to_return->{data}{totals}{$snmp_class} = 1;
-		} else {
-			$to_return->{data}{totals}{$snmp_class}++;
-		}
-		if ( !defined( $to_return->{data}{sagan_totals}{$snmp_class} ) ) {
-			$to_return->{data}{sagan_totals}{$snmp_class} = 1;
-		} else {
-			$to_return->{data}{sagan_totals}{$snmp_class}++;
-		}
-		if ( !defined( $to_return->{data}{sagan_instances}{ $row->{instance} } ) ) {
-			$to_return->{data}{sagan_instances}{ $row->{instance} } = { total => 0 };
-		}
-		$to_return->{data}{sagan_instances}{ $row->{instance} }{total}++;
-		if ( !defined( $to_return->{data}{sagan_instances}{ $row->{instance} }{$snmp_class} ) ) {
-			$to_return->{data}{sagan_instances}{ $row->{instance} }{$snmp_class} = 1;
-		} else {
-			$to_return->{data}{sagan_instances}{ $row->{instance} }{$snmp_class}++;
-		}
-	} ## end foreach my $row ( @{$sagan_found} )
+	# The suricata and sagan aggregation only differs by the key prefix used
+	# for the per-daemon totals/instances, so both run through the same loop.
+	my %found_rows_by_daemon = (
+		suricata => $suricata_found,
+		sagan    => $sagan_found,
+	);
+	foreach my $daemon ( 'suricata', 'sagan' ) {
+		my $totals_key    = $daemon . '_totals';
+		my $instances_key = $daemon . '_instances';
+		foreach my $row ( @{ $found_rows_by_daemon{$daemon} } ) {
+			$to_return->{data}{totals}{total}++;
+			$to_return->{data}{$totals_key}{total}++;
+			my $snmp_class = $self->get_short_class_snmp( $row->{classification} );
+			if ( !defined( $to_return->{data}{totals}{$snmp_class} ) ) {
+				$to_return->{data}{totals}{$snmp_class} = 1;
+			} else {
+				$to_return->{data}{totals}{$snmp_class}++;
+			}
+			if ( !defined( $to_return->{data}{$totals_key}{$snmp_class} ) ) {
+				$to_return->{data}{$totals_key}{$snmp_class} = 1;
+			} else {
+				$to_return->{data}{$totals_key}{$snmp_class}++;
+			}
+			if ( !defined( $to_return->{data}{$instances_key}{ $row->{instance} } ) ) {
+				$to_return->{data}{$instances_key}{ $row->{instance} } = { total => 0 };
+			}
+			$to_return->{data}{$instances_key}{ $row->{instance} }{total}++;
+			if ( !defined( $to_return->{data}{$instances_key}{ $row->{instance} }{$snmp_class} ) ) {
+				$to_return->{data}{$instances_key}{ $row->{instance} }{$snmp_class} = 1;
+			} else {
+				$to_return->{data}{$instances_key}{ $row->{instance} }{$snmp_class}++;
+			}
+		} ## end foreach my $row ( @{ $found_rows_by_daemon{$daemon...}})
+	} ## end foreach my $daemon ( 'suricata', 'sagan' )
 
 	return $to_return;
 } ## end sub extend
@@ -1258,15 +1229,26 @@ L<SQL::Abstract::Classic>, and L<Lilith::Schema>.
     - go_back_minutes :: How far back to search in minutes.
       Default :: 1440
 
+    - no_time :: If true, apply no time window at all, ignoring both
+                 go_back_minutes and start/end. Meant for lookups by id,
+                 where the row may be arbitrarily old or (for cape) have
+                 a NULL stop.
+      Default :: undef
+
     - limit :: Limit on how many to return.
       Default :: undef
 
     - offset :: Offset for when using limit.
       Default :: undef
 
-    - order_by :: Column to order by.
-      Default :: timetamp
+    - order_by :: Column to order by. Must be a column of the table being
+                  searched or it will die.
+      Default :: timestamp
       Cape Default :: id
+
+Search items for columns the table being searched does not have are silently
+ignored, so suricata-shaped filters like sid or port do not error a cape or
+baphomet search.
 
     - order_dir :: Direction to order.
       Default :: ASC
@@ -1379,17 +1361,24 @@ sub _parse_search_time {
 	return $t->strftime('%Y-%m-%d %H:%M:%S');
 }
 
+# Dies if the passed table name is not one of the known alert table types.
+sub _validate_table {
+	my ( $self, $table ) = @_;
+
+	if ( !defined($table) || !$KNOWN_TABLE_TYPES{$table} ) {
+		die( '"' . ( defined($table) ? $table : 'undef' ) . '" is not a known table type' );
+	}
+
+	return $table;
+}
+
 sub search {
 	my ( $self, %opts ) = @_;
 
 	if ( defined( $opts{table} ) ) {
-		if (   $opts{table} ne 'suricata'
-			&& $opts{table} ne 'sagan'
-			&& $opts{table} ne 'cape'
-			&& $opts{table} ne 'baphomet' )
-		{
-			die( '"' . $opts{table} . '" is not a known table type' );
-		}
+		$self->_validate_table( $opts{table} );
+	} else {
+		$opts{table} = 'suricata';
 	}
 	my $table            = 'SuricataAlert';
 	my $default_order_by = 'timestamp';
@@ -1404,6 +1393,18 @@ sub search {
 
 	if ( !defined( $opts{order_by} ) ) {
 		$opts{order_by} = $default_order_by;
+	}
+
+	# the columns the selected table really has; used to vet order_by and to
+	# skip filters on columns the table lacks, such as the web UI's
+	# suricata-shaped filters reaching a cape or baphomet search, which would
+	# otherwise die with a "column does not exist" error
+	my %table_has_column = map { $_ => 1 } ( @{ $alert_columns{ $opts{table} } }, qw(id escalations auto_escalated) );
+
+	# order_by is concatenated into the ORDER BY clause below, so it must be
+	# checked against the table's real column names rather than passed through
+	if ( !$table_has_column{ $opts{order_by} } ) {
+		die( '"' . $opts{order_by} . '" for order_by is not a column of the ' . $opts{table} . ' table' );
 	}
 
 	if ( !defined( $opts{go_back_minutes} ) ) {
@@ -1440,7 +1441,12 @@ sub search {
 	}
 
 	my $search;
-	if (%time_cond) {
+	if ( $opts{no_time} ) {
+
+		# no time window at all; used for lookups by id, where the row wanted
+		# may be arbitrarily old or (for cape) have a NULL stop
+		$search = {};
+	} elsif (%time_cond) {
 		$search = { $go_back_column => \%time_cond };
 	} else {
 		my $go_back_time = 'CURRENT_TIMESTAMP - interval \'' . $opts{go_back_minutes} . ' minutes\'';
@@ -1454,7 +1460,7 @@ sub search {
 	my @simple = ( 'src_ip', 'dest_ip', 'proto', 'event_id', 'md5', 'sha1', 'sha256', 'subbed_from_ip' );
 
 	foreach my $item (@simple) {
-		if ( defined( $opts{$item} ) ) {
+		if ( defined( $opts{$item} ) && $table_has_column{$item} ) {
 			$search->{$item} = $opts{$item};
 		}
 	}
@@ -1466,7 +1472,7 @@ sub search {
 	my @numeric = ( 'src_port', 'dest_port', 'gid', 'sid', 'rev', 'id', 'size', 'malscore', 'task' );
 
 	foreach my $item (@numeric) {
-		if ( defined( $opts{$item} ) ) {
+		if ( defined( $opts{$item} ) && $table_has_column{$item} ) {
 			# process each item
 			my @found;
 			foreach my $arg ( @{ $opts{$item} } ) {
@@ -1491,7 +1497,7 @@ sub search {
 					$equality = '>=';
 					$number   = $arg;
 				} elsif ( $arg =~ /^\>[0-9]+$/ ) {
-					$arg =~ s/^\>\=//;
+					$arg =~ s/^\>//;
 					$equality = '>';
 					$number   = $arg;
 				} elsif ( $arg =~ /^\![0-9]+$/ ) {
@@ -1519,14 +1525,14 @@ sub search {
 				# which is true for every row and filtered nothing.
 				$search->{$item} = [ '-and' => @found ];
 			}
-		} ## end if ( defined( $opts{$item} ) )
+		} ## end if ( defined( $opts{$item} ) && $table_has_column...)
 	} ## end foreach my $item (@numeric)
 
 	#
 	# more complex items
 	#
 
-	if ( defined( $opts{ip} ) && $opts{ip} ne '' ) {
+	if ( defined( $opts{ip} ) && $opts{ip} ne '' && $table_has_column{src_ip} && $table_has_column{dest_ip} ) {
 		my @tokens = ref $opts{ip} eq 'ARRAY' ? @{ $opts{ip} } : split( /\s*,\s*/, $opts{ip} );
 
 		# Positive addresses are ORed across src/dest and across items; a
@@ -1553,7 +1559,7 @@ sub search {
 		}
 	} ## end if ( defined( $opts{ip} ) && $opts{ip} ne ...)
 
-	if ( defined( $opts{port} ) && $opts{port} ne '' ) {
+	if ( defined( $opts{port} ) && $opts{port} ne '' && $table_has_column{src_port} && $table_has_column{dest_port} ) {
 		my @tokens = ref $opts{port} eq 'ARRAY' ? @{ $opts{port} } : split( /\s*,\s*/, $opts{port} );
 
 		# Positive ports are ORed across src/dest and across items; a negated
@@ -1615,10 +1621,10 @@ sub search {
 	# handle string items
 	#
 
-	# CapeAlert has no classification column, so any class filter -- including the
+	# cape has no classification column, so any class filter -- including the
 	# web UI's default "Generic Protocol Command Decode" exclusion -- does not
 	# apply to it and would otherwise produce a "column does not exist" error.
-	if ( defined( $opts{class} ) && $table ne 'CapeAlert' ) {
+	if ( defined( $opts{class} ) && $table_has_column{classification} ) {
 		my @class_args = ref $opts{class} eq 'ARRAY' ? @{ $opts{class} } : ( $opts{class} );
 
 		# positive items are ORed together, negated items are ANDed
@@ -1660,16 +1666,16 @@ sub search {
 			}
 			push( @{ $search->{'-and'} }, @clauses );
 		}
-	} ## end if ( defined( $opts{class} ) && $table ne ...)
+	} ## end if ( defined( $opts{class} ) && $table_has_column...)
 
 	my @strings = (
-		'host',       'instance_host', 'instance', 'signature',
-		'app_proto',  'in_iface',      'url',      'url_hostname',
-		'slug',       'pkg',           'subbed_from_host',
-		'event_type', 'subject'
+		'host',      'instance_host', 'instance',         'signature',
+		'app_proto', 'in_iface',      'url',              'url_hostname',
+		'slug',      'pkg',           'subbed_from_host', 'event_type',
+		'subject',   'target'
 	);
 	foreach my $item (@strings) {
-		if ( defined( $opts{$item} ) ) {
+		if ( defined( $opts{$item} ) && $table_has_column{$item} ) {
 			if ( $opts{$item} =~ /\%/ ) {
 				if ( $opts{$item} =~ /^\!/ ) {
 					$opts{$item} =~ s/^\!//;
@@ -1685,7 +1691,7 @@ sub search {
 					$search->{$item} = { '=', $opts{$item} };
 				}
 			}
-		} ## end if ( defined( $opts{$item} ) )
+		} ## end if ( defined( $opts{$item} ) && $table_has_column...)
 	} ## end foreach my $item (@strings)
 
 	my %result_attrs = (
@@ -1927,13 +1933,7 @@ sub escalate {
 	if ( !defined( $opts{table} ) ) {
 		$opts{table} = 'suricata';
 	}
-	if (   $opts{table} ne 'suricata'
-		&& $opts{table} ne 'sagan'
-		&& $opts{table} ne 'cape'
-		&& $opts{table} ne 'baphomet' )
-	{
-		die( '"' . $opts{table} . '" is not a known table type' );
-	}
+	$self->_validate_table( $opts{table} );
 
 	if ( !defined( $opts{id} ) || $opts{id} !~ /^[0-9]+$/ ) {
 		die('"id" is required and must be numeric');
@@ -1948,13 +1948,13 @@ sub escalate {
 		}
 	}
 
-	# use a large go_back_minutes to bypass the time window when fetching
-	# a specific event by ID
+	# skip the time window entirely when fetching a specific event by ID; the
+	# row may be arbitrarily old or (for cape) have a NULL stop
 	my $found = $self->search(
-		table           => $opts{table},
-		id              => [ $opts{id} ],
-		go_back_minutes => 525600,
-		limit           => 1,
+		table   => $opts{table},
+		id      => [ $opts{id} ],
+		no_time => 1,
+		limit   => 1,
 	);
 	my $event = $found->[0];
 	if ( !$event ) {
@@ -2136,13 +2136,7 @@ sub escalations_for {
 	if ( !defined( $opts{table} ) ) {
 		$opts{table} = 'suricata';
 	}
-	if (   $opts{table} ne 'suricata'
-		&& $opts{table} ne 'sagan'
-		&& $opts{table} ne 'cape'
-		&& $opts{table} ne 'baphomet' )
-	{
-		die( '"' . $opts{table} . '" is not a known table type' );
-	}
+	$self->_validate_table( $opts{table} );
 
 	if ( !defined( $opts{id} ) || $opts{id} !~ /^[0-9]+$/ ) {
 		die('"id" is required and must be numeric');
@@ -2392,9 +2386,7 @@ sub auto_escalation_preview {
 	Lilith::AutoEscalate->check_rule( $opts{rule} );
 
 	my $table = defined( $opts{table} ) ? $opts{table} : 'suricata';
-	if ( $table ne 'suricata' && $table ne 'sagan' && $table ne 'cape' && $table ne 'baphomet' ) {
-		die( '"' . $table . '" is not a known table type' );
-	}
+	$self->_validate_table($table);
 
 	my $minutes = defined( $opts{go_back_minutes} ) ? $opts{go_back_minutes} : 60;
 	if ( $minutes !~ /^[0-9]+$/ ) {
@@ -2511,9 +2503,7 @@ sub auto_escalate {
 	# tables (defaulting to suricata/sagan/cape) never escalates baphomet.
 	my @tables = defined( $opts{table} ) ? ( $opts{table} ) : ( 'suricata', 'sagan', 'cape', 'baphomet' );
 	foreach my $table (@tables) {
-		if ( $table ne 'suricata' && $table ne 'sagan' && $table ne 'cape' && $table ne 'baphomet' ) {
-			die( '"' . $table . '" is not a known table type' );
-		}
+		$self->_validate_table($table);
 	}
 
 	my $minutes = defined( $opts{go_back_minutes} ) ? $opts{go_back_minutes} : 5;
@@ -2742,8 +2732,6 @@ sub _auto_decode_tables {
 sub _auto_check_tables {
 	my ( $self, $tables ) = @_;
 
-	my %valid = ( suricata => 1, sagan => 1, cape => 1, baphomet => 1 );
-
 	if ( ref($tables) ne 'ARRAY' || !@{$tables} ) {
 		return [ 'suricata', 'sagan', 'cape' ];
 	}
@@ -2751,7 +2739,7 @@ sub _auto_check_tables {
 	my %seen;
 	my @out;
 	foreach my $table ( @{$tables} ) {
-		if ( !defined($table) || !$valid{$table} ) {
+		if ( !defined($table) || !$KNOWN_TABLE_TYPES{$table} ) {
 			die(      '"'
 					. ( defined($table) ? $table : 'undef' )
 					. '" is not a known table type; valid: suricata, sagan, cape, baphomet' );
@@ -2837,7 +2825,7 @@ sub dashboard_get {
 
 	my $name = defined $opts{name} && $opts{name} ne '' ? $opts{name} : undef;
 
-	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } );
+	my $dbh = $self->_escalation_dbh;
 	my $sth;
 	if ( defined $name ) {
 		$sth = $dbh->prepare('select name, layout, settings, is_default from dashboards where name = ?');
@@ -2881,7 +2869,7 @@ sub dashboard_save {
 	my $layout_json   = encode_json($layout);
 	my $settings_json = encode_json($settings);
 
-	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } );
+	my $dbh = $self->_escalation_dbh;
 	my $sth
 		= $dbh->prepare(
 			  'insert into dashboards (name, layout, settings, updated) values (?, ?::jsonb, ?::jsonb, now())'
@@ -2905,7 +2893,7 @@ list that drives the dashboard picker.
 sub dashboard_list {
 	my ($self) = @_;
 
-	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } );
+	my $dbh = $self->_escalation_dbh;
 	my $rows
 		= $dbh->selectall_arrayref(
 			'select name, is_default, updated from dashboards order by is_default desc, name asc',
@@ -2931,7 +2919,7 @@ sub dashboard_delete {
 	my $name = defined $opts{name} ? $opts{name} : '';
 	return 0 unless $name ne '';
 
-	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } );
+	my $dbh = $self->_escalation_dbh;
 	return $dbh->do( 'delete from dashboards where name = ?', undef, $name ) + 0;
 }
 
@@ -2952,7 +2940,7 @@ sub dashboard_rename {
 	my $to   = defined $opts{to}   ? $opts{to}   : '';
 	return 0 unless $name ne '' && $to ne '';
 
-	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } );
+	my $dbh = $self->_escalation_dbh;
 	return $dbh->do( 'update dashboards set name = ?, updated = now() where name = ?', undef, $to, $name ) + 0;
 } ## end sub dashboard_rename
 
@@ -2973,7 +2961,7 @@ sub dashboard_set_default {
 	my $name = defined $opts{name} ? $opts{name} : '';
 	return 0 unless $name ne '';
 
-	my $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass}, { RaiseError => 1 } );
+	my $dbh = $self->_escalation_dbh;
 
 	my $set = 0;
 	$dbh->begin_work;

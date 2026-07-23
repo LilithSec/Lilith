@@ -306,6 +306,21 @@ SKIP: {
 		'baphomet top offenders by max score'
 	);
 
+	# an offender whose judgments all carry a NULL score: max(score) is NULL in
+	# SQL, which must surface as 0 rather than an uninitialized-value warning
+	$dbh->do( "insert into baphomet_alerts (instance,host,timestamp,event_id,event_type,src_ip,subject,score,raw)"
+			. " values ('k','h', now(), 'e', 'banish', '3.3.3.3', NULL, NULL, '{}')" );
+	{
+		my @warnings;
+		local $SIG{__WARN__} = sub { push @warnings, $_[0] };
+		is_deeply(
+			$s->top( table => 'baphomet', column => 'src_ip', measure => 'max_score' ),
+			[ { value => '1.1.1.1', count => 9 }, { value => '2.2.2.2', count => 3 }, { value => '3.3.3.3', count => 0 } ],
+			'a null-score offender surfaces as max_score 0'
+		);
+		is( scalar(@warnings), 0, 'no uninitialized-value warning from a null aggregate' );
+	}
+
 	# escalated() reads the baphomet_alerts escalations array like the others
 	is( $s->escalated( table => 'baphomet' ), 0, 'no baphomet rows escalated yet' );
 	$dbh->do("update baphomet_alerts set escalations = '{1}' where event_type = 'found'");
