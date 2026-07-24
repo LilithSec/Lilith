@@ -24,8 +24,12 @@
 <div class="card border-secondary mb-3">
   <div class="card-header d-flex justify-content-between align-items-center">
     <span>
-      Event <span class="text-danger fw-bold">#<%= $id %></span>
+      Event <span class="text-danger fw-bold">#<%= $id %></span><% if (defined $event->{event_id} && $event->{event_id} ne '') { %> <span class="text-muted">/ <%= $event->{event_id} %></span><% } %>
       <span class="badge bg-secondary ms-2"><%= $cap_table %></span>
+      % if ($event->{auto_escalated}) {
+      <span class="badge bg-warning text-dark ms-1"
+            title="Auto-escalated at <%= $event->{auto_escalated} %>">Auto-escalated</span>
+      % }
     </span>
     <div class="d-flex align-items-center gap-2">
       % if ($pcap_available) {
@@ -88,28 +92,114 @@
     </div>
   </div>
   % }
-  <div class="p-0">
-    <table class="table table-dark table-sm table-bordered mb-0">
-      <tbody>
-        % for my $key (sort grep { $_ ne 'raw' } keys %$event) {
-        <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $key %></th>
-          <td class="font-monospace">
-            <%= ref $event->{$key} eq 'ARRAY' ? join(', ', @{$event->{$key}}) : $event->{$key} // '' %>
-            % if (($key eq 'src_ip' || $key eq 'dest_ip') && $event->{$key}) {
-            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn ms-1"
-                    data-ip="<%= $event->{$key} %>" style="font-size:0.65rem;line-height:1.2">?</button>
-            % if (my $cc = $self->ip_country($event->{$key})) {
-            <span class="text-muted small" title="<%= $cc %>"><%= $self->country_flag($cc) %> <%= $cc %><% if (my $sub = $self->ip_subdivision($event->{$key})) { %>/<%= $sub %><% } %><% if (my $city = $self->ip_city($event->{$key})) { %> <%= $city %><% } %></span>
-            % }
-            % }
-          </td>
-        </tr>
-        % }
-      </tbody>
-    </table>
+  % # The endpoints go on a single flow line at the very top, with the flow
+  % # packet/byte counts on the line below it in src->dest order; both share the
+  % # divider above the field grid. The src/dest IPs keep their lookup button and
+  % # geo annotation. Blank fields are skipped so the lines only carry what the
+  % # event actually has.
+  <div class="px-2 pt-2 pb-2 border-bottom border-secondary border-opacity-25">
+    <div class="event-info-flow font-monospace d-flex flex-wrap align-items-baseline gap-3">
+      % for my $flow_key (qw(src_ip src_port dest_ip dest_port proto app_proto)) {
+      %   next unless defined $event->{$flow_key} && $event->{$flow_key} ne '';
+      <span class="d-inline-flex align-items-baseline gap-1">
+        <span class="text-muted"><%= $flow_key %></span>
+        <span><%= $event->{$flow_key} %>
+          % if ($flow_key eq 'src_ip' || $flow_key eq 'dest_ip') {
+          <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn ms-1"
+                  data-ip="<%= $event->{$flow_key} %>" style="font-size:0.65rem;line-height:1.2">?</button>
+          % if (my $cc = $self->ip_country($event->{$flow_key})) {
+          <span class="text-muted small" title="<%= $cc %>"><%= $self->country_flag($cc) %> <%= $cc %><% if (my $sub = $self->ip_subdivision($event->{$flow_key})) { %>/<%= $sub %><% } %><% if (my $city = $self->ip_city($event->{$flow_key})) { %> <%= $city %><% } %></span>
+          % }
+          % }
+        </span>
+      </span>
+      % }
+    </div>
+    % my @flow_dirs = (
+    %   { label => 'src->dest', pkts => 'flow_pkts_toserver', bytes => 'flow_bytes_toserver' },
+    %   { label => 'dest->src', pkts => 'flow_pkts_toclient', bytes => 'flow_bytes_toclient' },
+    % );
+    % my $have_in_iface = defined $event->{in_iface} && $event->{in_iface} ne '';
+    % if ((grep { defined $event->{$_->{pkts}} || defined $event->{$_->{bytes}} } @flow_dirs) || $have_in_iface) {
+    <div class="event-info-flow font-monospace d-flex flex-wrap align-items-baseline gap-3 mt-1">
+      % for my $dir (@flow_dirs) {
+      %   next unless defined $event->{$dir->{pkts}} || defined $event->{$dir->{bytes}};
+      <span class="d-inline-flex align-items-baseline gap-1">
+        <span class="text-muted"><%= $dir->{label} %></span>
+        <span><%= $event->{$dir->{pkts}} // '?' %> pkts / <%= $event->{$dir->{bytes}} // '?' %> bytes</span>
+      </span>
+      % }
+      % if ($have_in_iface) {
+      <span class="d-inline-flex align-items-baseline gap-1">
+        <span class="text-muted">in_iface</span>
+        <span><%= $event->{in_iface} %></span>
+      </span>
+      % }
+    </div>
+    % }
+    % if (grep { defined $event->{$_} && $event->{$_} ne '' } qw(flow_start flow_id timestamp)) {
+    <div class="event-info-flow font-monospace d-flex flex-wrap align-items-baseline gap-3 mt-1">
+      % for my $flow_key (qw(flow_start flow_id timestamp)) {
+      %   next unless defined $event->{$flow_key} && $event->{$flow_key} ne '';
+      <span class="d-inline-flex align-items-baseline gap-1">
+        <span class="text-muted"><%= $flow_key %></span>
+        <span><%= $event->{$flow_key} %></span>
+      </span>
+      % }
+    </div>
+    % }
+    % if (grep { defined $event->{$_} && $event->{$_} ne '' } qw(instance host)) {
+    <div class="event-info-flow font-monospace d-flex flex-wrap align-items-baseline gap-3 mt-1">
+      % for my $flow_key (qw(instance host)) {
+      %   next unless defined $event->{$flow_key} && $event->{$flow_key} ne '';
+      <span class="d-inline-flex align-items-baseline gap-1">
+        <span class="text-muted"><%= $flow_key %></span>
+        <span><%= $event->{$flow_key} %></span>
+      </span>
+      % }
+    </div>
+    % }
+  </div>
+  <div class="p-2 event-info-grid">
+    % # gid/sid/rev identify the signature together, so collapse them into a
+    % # single "rule" field of gid:sid:rev. The synthetic key sorts in with the
+    % # rest; it only appears when at least one of the three is set. The endpoints
+    % # are skipped here since they render on the flow line above.
+    % my %skip_key = map { $_ => 1 } qw(raw gid sid rev src_ip src_port dest_ip dest_port proto app_proto flow_pkts_toserver flow_bytes_toserver flow_pkts_toclient flow_bytes_toclient flow_start flow_id timestamp instance host event_id id in_iface);
+    % my $rule_id;
+    % if (grep { defined $event->{$_} } qw(gid sid rev)) {
+    %   $rule_id = join(':', map { $event->{$_} // '' } qw(gid sid rev));
+    % }
+    % my @info_keys = sort( (grep { !$skip_key{$_} } keys %$event), (defined $rule_id ? 'rule' : ()) );
+    % for my $key (@info_keys) {
+    %   my $value = $key eq 'rule'                ? $rule_id
+    %             : ref $event->{$key} eq 'ARRAY'  ? join(', ', @{$event->{$key}})
+    %             :                                  $event->{$key} // '';
+    %   next unless length $value;
+    %   my $wide = length($value) > 60;
+    <div class="event-info-item font-monospace<%= $wide ? ' event-info-wide' : '' %>">
+      <span class="event-info-key text-muted"><%= $key %></span>
+      <span class="event-info-val"><%= $value %></span>
+    </div>
+    % }
   </div>
 </div>
+
+% # CAPE detonation results: a screenshot gallery and a lite.json info card
+% # (malscore + signatures), loaded asynchronously from the matching nergal
+% # results endpoint. Only rendered when the instance has one configured.
+% if (stash('cape_results_available')) {
+<div class="card border-secondary mb-3" id="cape-results" data-id="<%= $id %>">
+  <div class="card-header py-1 small text-muted d-flex justify-content-between align-items-center">
+    <span>CAPE Detonation Results</span>
+    <span id="cape-results-status" class="text-muted"></span>
+  </div>
+  <div class="p-2">
+    <div id="cape-results-info"></div>
+    <div id="cape-shots" class="d-flex flex-wrap gap-2 mt-2"></div>
+  </div>
+</div>
+% }
 
 % # The protocol cards below read a proto selector ($proto_app) and a root hash
 % # whose keys are the protocol sub-objects ($proto_root). Suricata/Sagan/CAPE
@@ -709,6 +799,136 @@ document.addEventListener('DOMContentLoaded', function() {
   })();
 });
 </script>
+
+% if (stash('cape_results_available')) {
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var box = document.getElementById('cape-results');
+  if (!box) { return; }
+  var id       = box.dataset.id;
+  var base     = '/event/cape/' + encodeURIComponent(id);
+  var statusEl = document.getElementById('cape-results-status');
+  var infoEl   = document.getElementById('cape-results-info');
+  var shotsEl  = document.getElementById('cape-shots');
+
+  statusEl.textContent = 'Loading…';
+
+  // Render the malscore + signatures from lite.json as a compact card. The cape
+  // row already carries the hashes/target/malscore, so this focuses on the
+  // signatures, which are not otherwise stored in Lilith.
+  function renderInfo(lite) {
+    if (!lite || typeof lite !== 'object') { return; }
+
+    if (lite.malscore != null) {
+      var score = Number(lite.malscore);
+      var badgeClass = score >= 8 ? 'bg-danger' : score >= 4 ? 'bg-warning text-dark' : 'bg-secondary';
+      var line = document.createElement('div');
+      line.className = 'mb-2';
+      var label = document.createElement('span');
+      label.className = 'text-muted small me-1';
+      label.textContent = 'malscore';
+      var badge = document.createElement('span');
+      badge.className = 'badge ' + badgeClass;
+      badge.textContent = lite.malscore;
+      line.appendChild(label);
+      line.appendChild(badge);
+      infoEl.appendChild(line);
+    }
+
+    var sigs = Array.isArray(lite.signatures) ? lite.signatures.slice() : [];
+    if (sigs.length) {
+      // most severe first; unknown severities sort last
+      sigs.sort(function(a, b) { return (Number(b.severity) || 0) - (Number(a.severity) || 0); });
+      var table = document.createElement('table');
+      table.className = 'table table-dark table-sm table-bordered mb-0';
+      var thead = document.createElement('thead');
+      thead.className = 'table-secondary';
+      thead.innerHTML = '<tr><th style="width:60px">sev</th><th style="width:220px">name</th><th>description</th></tr>';
+      table.appendChild(thead);
+      var tbody = document.createElement('tbody');
+      sigs.forEach(function(sig) {
+        var row = document.createElement('tr');
+        function cell(text, cls) {
+          var td = document.createElement('td');
+          if (cls) { td.className = cls; }
+          td.textContent = (text == null ? '' : text);
+          return td;
+        }
+        row.appendChild(cell(sig.severity, 'font-monospace'));
+        row.appendChild(cell(sig.name, 'font-monospace'));
+        row.appendChild(cell(sig.description));
+        tbody.appendChild(row);
+      });
+      table.appendChild(tbody);
+      var wrap = document.createElement('div');
+      wrap.className = 'table-responsive mb-2';
+      wrap.appendChild(table);
+      infoEl.appendChild(wrap);
+    }
+
+    // Escape hatch to the full CAPE report, in a new tab. Prefer the box's
+    // CAPEv2 web UI (full styled report) when a web_url is configured; otherwise
+    // fall back to the report html streamed through Lilith (unstyled, since
+    // nergal serves only the fixed result files, not the report's assets) so the
+    // results key is not exposed in the browser URL.
+    if (box.dataset.webReportUrl) {
+      var webLink = document.createElement('a');
+      webLink.href = box.dataset.webReportUrl;
+      webLink.target = '_blank';
+      webLink.rel = 'noopener';
+      webLink.className = 'btn btn-sm btn-outline-secondary';
+      webLink.textContent = 'Open full CAPE report ↗';
+      infoEl.appendChild(webLink);
+    } else if (box.dataset.reportAvailable === '1') {
+      var link = document.createElement('a');
+      link.href = base + '/cape_result/reports/report.html';
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.className = 'btn btn-sm btn-outline-secondary';
+      link.textContent = 'Open detonation report ↗';
+      link.title = 'Report html from nergal (unstyled — no CAPEv2 web UI configured)';
+      infoEl.appendChild(link);
+    }
+  }
+
+  fetch(base + '/cape_results')
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+      if (data.error) { statusEl.textContent = data.error; return; }
+
+      box.dataset.reportAvailable = data.report_available ? '1' : '0';
+      if (data.web_report_url) { box.dataset.webReportUrl = data.web_report_url; }
+      renderInfo(data.lite);
+
+      var shots = data.shots || [];
+      statusEl.textContent = shots.length + ' screenshot' + (shots.length === 1 ? '' : 's');
+      shots.forEach(function(shot) {
+        var anchor = document.createElement('a');
+        anchor.href = base + '/cape_result/' + shot;
+        anchor.target = '_blank';
+        anchor.rel = 'noopener';
+        var img = document.createElement('img');
+        img.src = anchor.href;
+        img.loading = 'lazy';
+        img.className = 'rounded border border-secondary';
+        img.style.maxHeight = '160px';
+        img.alt = shot;
+        anchor.appendChild(img);
+        shotsEl.appendChild(anchor);
+      });
+      if (!shots.length) {
+        var none = document.createElement('span');
+        none.className = 'text-muted small';
+        none.textContent = 'No screenshots.';
+        shotsEl.appendChild(none);
+      }
+    })
+    .catch(function(err) {
+      statusEl.textContent = 'Failed to load results: ' + err;
+    });
+});
+</script>
+% }
 
 % if ($self->escalation_enable && $event) {
 <script>

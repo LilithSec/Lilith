@@ -426,6 +426,50 @@ sub startup {
 	$self->helper( cape_slug           => sub { $cape_slug } );
 	$self->helper( cape_submit_enabled => sub { ( $cape_enabled && scalar keys %cape_servers ) ? 1 : 0 } );
 
+	# CAPE detonation results. The same nergal box a sample is submitted to also
+	# serves that task's detonation results (screenshots, lite.json, the report
+	# html) under /results/<task_id>, gated on the nergal side by its own
+	# results_auth/results_apikey. A cape event carries the instance it detonated
+	# on and its task id, so results are fetched from the [cape_servers.NAME]
+	# whose NAME matches the event's instance. results_url defaults to the
+	# submission url and results_apikey to apikey, so a single-endpoint box needs
+	# no extra config. Built independently of cape_enable: fetching results is
+	# read-only (it never pushes a sample out), so it stays available even when
+	# submission is turned off.
+	#
+	# An optional web_url points at that box's CAPEv2 web UI (distinct from the
+	# nergal endpoint); when set, the event page links out to the full styled
+	# report at <web_url>/analysis/<task_id>/. Without it, the page instead offers
+	# the report html streamed back through nergal, which renders unstyled since
+	# nergal serves only the fixed result files, not the report's static assets.
+	my %cape_results;
+	if ( ref $toml->{cape_servers} eq 'HASH' ) {
+		foreach my $name ( keys %{ $toml->{cape_servers} } ) {
+			my $cfg = $toml->{cape_servers}{$name};
+			next unless ref $cfg eq 'HASH';
+			my $results_url
+				= ( defined $cfg->{results_url} && $cfg->{results_url} ne '' ) ? $cfg->{results_url} : $cfg->{url};
+			next unless defined $results_url && $results_url ne '';
+			$results_url =~ s{/+\z}{};                    # normalise; /results/<task_id> is appended to this
+			my $results_apikey = defined $cfg->{results_apikey} ? $cfg->{results_apikey} : $cfg->{apikey};
+			my $web_url        = ( defined $cfg->{web_url} && $cfg->{web_url} ne '' ) ? $cfg->{web_url} : undef;
+			$web_url =~ s{/+\z}{} if defined $web_url;    # /analysis/<task_id>/ is appended to this
+			$cape_results{$name} = {
+				url => $results_url,
+				apikey => ( defined $results_apikey ? $results_apikey : '' ),
+				( defined $web_url ? ( web_url => $web_url ) : () ),
+			};
+		} ## end foreach my $name ( keys %{ $toml->{cape_servers...}})
+	} ## end if ( ref $toml->{cape_servers} eq 'HASH' )
+	$self->helper( cape_results         => sub { \%cape_results } );
+	$self->helper( cape_results_enabled => sub { scalar keys %cape_results ? 1 : 0 } );
+	$self->helper(
+		cape_results_for => sub {
+			my ( $c, $instance ) = @_;
+			return ( defined $instance ) ? $cape_results{$instance} : undef;
+		}
+	);
+
 	# A sample can exceed Mojolicious's default 16 MiB request cap, which would
 	# drop the upload connection (a fetch NetworkError in the browser). Raise it
 	# when submission is on; cape_max_upload_size (bytes) overrides the 1 GiB
@@ -481,6 +525,8 @@ sub startup {
 	$r->get('/event/:table/:id')->to('event#view');
 	$r->get('/event/:table/:id/body/:which/zip')->to('event#body_zip');
 	$r->get('/event/:table/:id/pcap')->to('event#pcap');
+	$r->get('/event/cape/:id/cape_results')->to('event#cape_results');
+	$r->get('/event/cape/:id/cape_result/*subpath')->to('event#cape_result');
 	$r->get('/logs')->to('logs#index');
 	$r->get('/api/logs/stat')->to('logs#stat');
 	$r->get('/api/logs/top')->to('logs#top');

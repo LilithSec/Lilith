@@ -1,0 +1,4 @@
+% # Contents of one results-table ID cell: the event view link plus, when the
+% # row has been escalated, the red "E" badge with its count. Expects $table,
+% # $row_id, and $escalation_count (undef/0 when the row was never escalated).
+<a href="/event/<%= $table %>/<%= $row_id %>" class="event-link"><%= $row_id %></a><% if ($escalation_count) { %> <span class="badge bg-danger esc-badge" title="escalated <%= $escalation_count %> time<%= $escalation_count == 1 ? '' : 's' %>">E</span><% } %>

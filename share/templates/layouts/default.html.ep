@@ -15,6 +15,14 @@
     .form-label { font-size: 0.78rem; color: #adb5bd; margin-bottom: 2px; }
     @keyframes rowNewFlash { from { background-color: rgba(255,193,7,0.35); } to { background-color: transparent; } }
     tr.row-new > td { animation: rowNewFlash 4s ease-out; }
+    /* Compact multi-column layout for the event top info card: pack short
+       key/value pairs into as many columns as the viewport allows, letting
+       long values (and the IP rows with geo/lookup buttons) span the row. */
+    .event-info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 0.1rem 1.5rem; }
+    .event-info-item { display: flex; gap: 0.5rem; align-items: baseline; padding: 0.15rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); min-width: 0; }
+    .event-info-key  { flex: 0 0 auto; min-width: 120px; font-size: 0.82rem; }
+    .event-info-val  { font-size: 0.82rem; overflow-wrap: anywhere; min-width: 0; }
+    .event-info-wide { grid-column: 1 / -1; }
   </style>
 </head>
 <body>

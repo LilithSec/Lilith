@@ -387,4 +387,62 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
     }
 }
 
+# ---------------------------------------------------------------------------
+# cape_results helpers: results endpoints are derived from [cape_servers.NAME]
+# keyed by instance, with results_url/results_apikey falling back to url/apikey,
+# and are available independently of cape_enable (results fetching is read-only).
+# ---------------------------------------------------------------------------
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $app = Test::Mojo->new('Lilith::Web')->app;
+
+    is( $app->cape_results_enabled(), 0, 'cape_results_enabled defaults to 0 with no cape_servers' );
+    is( $app->cape_results_for('anything'), undef, 'cape_results_for returns undef with no cape_servers' );
+    is( $app->cape_results_for(undef),      undef, 'cape_results_for(undef) is undef' );
+}
+
+{
+    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+    # cape_enable intentionally left off: results viewing must not depend on it.
+    print $fh "[cape_servers.main]\n";
+    print $fh "url = \"https://cape.example:8080/\"\n";
+    print $fh "apikey = \"submitkey\"\n";
+    print $fh "[cape_servers.split]\n";
+    print $fh "url = \"https://submit.example:8080\"\n";
+    print $fh "apikey = \"submitkey2\"\n";
+    print $fh "results_url = \"https://results.example:9090/\"\n";
+    print $fh "results_apikey = \"resultkey\"\n";
+    print $fh "web_url = \"https://cape-ui.example/\"\n";
+    close $fh;
+
+    local $ENV{LILITH_CONFIG} = $cf;
+    my $app = Test::Mojo->new('Lilith::Web')->app;
+
+    is( $app->cape_results_enabled(), 1, 'cape_results_enabled is 1 when a cape_server is configured' );
+
+    # main: results fall back to the submission url (trailing slash trimmed) and
+    # apikey; no web_url configured, so the key is absent (not undef)
+    is_deeply(
+        $app->cape_results_for('main'),
+        { url => 'https://cape.example:8080', apikey => 'submitkey' },
+        'results default to url/apikey with the trailing slash normalised off, no web_url'
+    );
+
+    # split: explicit results_url/results_apikey win over the submission ones, and
+    # web_url is carried through with its trailing slash normalised off
+    is_deeply(
+        $app->cape_results_for('split'),
+        { url => 'https://results.example:9090', apikey => 'resultkey', web_url => 'https://cape-ui.example' },
+        'results_url/results_apikey/web_url override and normalise correctly'
+    );
+
+    is( $app->cape_results_for('nope'), undef, 'cape_results_for is undef for an unknown instance' );
+}
+
 done_testing();

@@ -1,0 +1,7 @@
+% # Contents of one results-table IP cell: a clickable filter link for the IP, a
+% # "?" button opening the layout's IP info modal, and the GeoIP country flag
+% # with subdivision and (toggleable) city. Expects $ip; renders nothing when
+% # the IP is unset. Shared by the suricata/sagan/baphomet search result tables.
+% if ($ip) {
+<a href="#" class="ip-filter" data-ip="<%= $ip %>"><%= $ip %></a> <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 ip-info-btn" data-ip="<%= $ip %>" style="font-size:0.65rem;line-height:1.2">?</button><% if (my $country = $self->ip_country($ip)) { %> <span class="text-muted small" title="<%= $country %>"><%= $self->country_flag($country) %> <%= $country %><% if (my $subdivision = $self->ip_subdivision($ip)) { %>/<%= $subdivision %><% } %><% if (my $city = $self->ip_city($ip)) { %><span class="geoip-city"> <%= $city %></span><% } %></span><% } %>
+% }

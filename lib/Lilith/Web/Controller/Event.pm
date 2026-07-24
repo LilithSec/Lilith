@@ -6,6 +6,7 @@ use MIME::Base64       qw(decode_base64);
 use File::Temp         ();
 use Time::Piece::Guess ();
 use Mojo::IOLoop       ();
+use URI::Escape        qw(uri_escape);
 
 =head1 NAME
 
@@ -64,19 +65,27 @@ sub view {
 		}
 	} ## end if ( $self->virani_enabled && $table eq 'suricata'...)
 
+	# CAPE detonation results (screenshots + lite.json signatures) are shown for a
+	# cape event only when its instance has a configured results endpoint. The
+	# section itself loads asynchronously from /event/cape/<id>/cape_results, so
+	# here we only decide whether to render its container at all.
+	my $cape_results_available
+		= ( $table eq 'cape' && $event && $self->cape_results_for( $event->{instance} ) ) ? 1 : 0;
+
 	$self->stash(
-		event          => $event,
-		table          => $table,
-		id             => $id,
-		error          => $error,
-		pretty_raw     => $pretty_raw,
-		log_links      => ( $self->allani_enabled ? $self->_log_links($event) : [] ),
-		pcap_available => $pcap_available,
-		pcap_remotes   => \@remotes,
-		pcap_default   => $pcap_default,
-		pcap_filter    => $pcap_filter,
-		pcap_start     => $pcap_start,
-		pcap_end       => $pcap_end,
+		event                  => $event,
+		table                  => $table,
+		id                     => $id,
+		error                  => $error,
+		pretty_raw             => $pretty_raw,
+		cape_results_available => $cape_results_available,
+		log_links              => ( $self->allani_enabled ? $self->_log_links($event) : [] ),
+		pcap_available         => $pcap_available,
+		pcap_remotes           => \@remotes,
+		pcap_default           => $pcap_default,
+		pcap_filter            => $pcap_filter,
+		pcap_start             => $pcap_start,
+		pcap_end               => $pcap_end,
 	);
 } ## end sub view
 
@@ -315,6 +324,186 @@ sub body_zip {
 	return $self->render( data => $zipdata );
 } ## end sub body_zip
 
+=head2 cape_results
+
+For a cape event, fetches the list of that task's detonation results from the
+matching nergal C<< /results/<task_id> >> endpoint and returns a JSON summary:
+the screenshot paths, whether the report/summary html exist, and the parsed
+C<reports/lite.json> (for the malscore + signatures info card). The upstream
+calls are blocking, so they run in a subprocess to keep the event loop
+responsive, mirroring the Virani lookups in L<Lilith::Web::Controller::Api>.
+
+=cut
+
+sub cape_results {
+	my $self = shift;
+
+	my $id = $self->param('id');
+	unless ( defined $id && $id =~ /^[0-9]+$/ ) {
+		return $self->render( json => { error => 'invalid id' }, status => 400 );
+	}
+
+	my ( $event, $error ) = $self->_load_event( 'cape', $id );
+	if ( $error || !$event ) {
+		return $self->render( json => { error => 'event not found' }, status => 404 );
+	}
+
+	my $endpoint = $self->cape_results_for( $event->{instance} );
+	unless ($endpoint) {
+		return $self->render(
+			json => {
+				error => 'no cape results endpoint configured for instance "' . ( $event->{instance} // '' ) . '"'
+			},
+			status => 400
+		);
+	}
+
+	my $task = $event->{task};
+	unless ( defined $task && $task =~ /^[0-9]+$/ ) {
+		return $self->render( json => { error => 'event has no task id' }, status => 400 );
+	}
+
+	# built here so the subprocess closure captures only plain strings
+	my $query
+		= ( defined $endpoint->{apikey} && $endpoint->{apikey} ne '' )
+		? '?apikey=' . uri_escape( $endpoint->{apikey} )
+		: '';
+	my $list_url = $endpoint->{url} . '/results/' . $task . $query;
+	my $lite_url = $endpoint->{url} . '/results/' . $task . '/reports/lite.json' . $query;
+
+	# link out to the box's CAPEv2 web UI for the full styled report, when one is
+	# configured for this instance; added to the response after the fetch below
+	my $web_report_url
+		= ( defined $endpoint->{web_url} ) ? $endpoint->{web_url} . '/analysis/' . $task . '/' : undef;
+
+	$self->render_later;
+	Mojo::IOLoop->subprocess(
+		sub {
+			require LWP::UserAgent;
+			my $ua = LWP::UserAgent->new(
+				timeout  => 30,
+				ssl_opts => { verify_hostname => 0, SSL_verify_mode => 0 },
+			);
+
+			my $list_res = $ua->get($list_url);
+			die 'results list failed: ' . $list_res->status_line . "\n" unless $list_res->is_success;
+
+			my $files = decode_json( $list_res->decoded_content );
+			die "unparsable results list\n" unless ref $files eq 'ARRAY';
+
+			my %have  = map       { $_ => 1 } @$files;
+			my @shots = sort grep { m{^shots/[A-Za-z0-9_-]+\.jpg$} } @$files;
+
+			# lite.json carries the signatures + malscore the cape row does not, so
+			# pull it too when present; a failure there is non-fatal to the listing.
+			my $lite;
+			if ( $have{'reports/lite.json'} ) {
+				my $lite_res = $ua->get($lite_url);
+				if ( $lite_res->is_success ) {
+					my $decoded = eval { decode_json( $lite_res->decoded_content ) };
+					$lite = $decoded if ref $decoded eq 'HASH';
+				}
+			}
+
+			return {
+				shots             => \@shots,
+				report_available  => ( $have{'reports/report.html'}         ? 1 : 0 ),
+				summary_available => ( $have{'reports/summary-report.html'} ? 1 : 0 ),
+				lite              => $lite,
+			};
+		},
+		sub {
+			my ( $subprocess, $err, $result ) = @_;
+			if ( $err || !$result ) {
+				chomp( my $why = ( defined $err ? $err : 'no data' ) );
+				return $self->render( json => { error => 'cape results fetch failed: ' . $why }, status => 502 );
+			}
+			$result->{web_report_url} = $web_report_url if defined $web_report_url;
+			return $self->render( json => $result );
+		},
+	);
+
+	return;
+} ## end sub cape_results
+
+=head2 cape_result
+
+Proxies a single detonation result file (a screenshot, or a report file) for a
+cape event from the matching nergal C<< /results/<task_id>/<subpath> >> endpoint
+and streams it back with the upstream content type. The subpath is restricted to
+the same allowlist nergal enforces (shot jpgs and the fixed report files), so
+this cannot be turned into an open proxy, and the results API key stays
+server-side rather than being exposed in a browser URL.
+
+=cut
+
+sub cape_result {
+	my $self = shift;
+
+	my $id      = $self->param('id');
+	my $subpath = $self->param('subpath');
+
+	unless ( defined $id && $id =~ /^[0-9]+$/ ) {
+		return $self->render( text => 'invalid id', status => 400 );
+	}
+
+	# mirror nergal's own allowlist: a shot jpg or one of the fixed report files
+	unless (
+		defined $subpath
+		&& (   $subpath =~ m{^shots/[A-Za-z0-9_-]+\.jpg$}
+			|| $subpath =~ m{^reports/(?:lite|report)\.json$}
+			|| $subpath =~ m{^reports/(?:report|summary-report)\.html$} )
+		)
+	{
+		return $self->render( text => 'invalid result path', status => 400 );
+	}
+
+	my ( $event, $error ) = $self->_load_event( 'cape', $id );
+	if ( $error || !$event ) {
+		return $self->render( text => 'event not found', status => 404 );
+	}
+
+	my $endpoint = $self->cape_results_for( $event->{instance} );
+	unless ($endpoint) {
+		return $self->render( text => 'no cape results endpoint configured', status => 400 );
+	}
+
+	my $task = $event->{task};
+	unless ( defined $task && $task =~ /^[0-9]+$/ ) {
+		return $self->render( text => 'event has no task id', status => 400 );
+	}
+
+	my $url = $endpoint->{url} . '/results/' . $task . '/' . $subpath;
+	if ( defined $endpoint->{apikey} && $endpoint->{apikey} ne '' ) {
+		$url .= '?apikey=' . uri_escape( $endpoint->{apikey} );
+	}
+
+	$self->render_later;
+	Mojo::IOLoop->subprocess(
+		sub {
+			require LWP::UserAgent;
+			my $ua = LWP::UserAgent->new(
+				timeout  => 30,
+				ssl_opts => { verify_hostname => 0, SSL_verify_mode => 0 },
+			);
+			my $res = $ua->get($url);
+			die 'upstream ' . $res->status_line . "\n" unless $res->is_success;
+			return { content_type => scalar $res->header('Content-Type'), body => $res->content };
+		},
+		sub {
+			my ( $subprocess, $err, $result ) = @_;
+			if ( $err || !$result ) {
+				chomp( my $why = ( defined $err ? $err : 'no data' ) );
+				return $self->render( text => 'result fetch failed: ' . $why, status => 502 );
+			}
+			$self->res->headers->content_type( $result->{content_type} || 'application/octet-stream' );
+			return $self->render( data => $result->{body} );
+		},
+	);
+
+	return;
+} ## end sub cape_result
+
 =head2 _load_event
 
 Fetches a single event by table and id, decoding its raw JSON into a hashref
@@ -362,7 +551,7 @@ sub _load_event {
 			if ( !$@ && ref $inner eq 'HASH' ) {
 				$event->{raw}{raw} = $inner;
 			}
-		}
+		} ## end if ( $table eq 'baphomet' && $event && ref...)
 	};
 	$error = $@ if $@;
 

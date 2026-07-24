@@ -1,0 +1,126 @@
+% layout 'default';
+% title 'CAPE Submit';
+
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/search" class="text-danger">Search</a></li>
+    <li class="breadcrumb-item active">CAPE Submit</li>
+  </ol>
+</nav>
+
+<div class="card border-secondary mb-3">
+  <div class="card-header">
+    <span>Submit a File for Detonation</span>
+  </div>
+  <div class="p-3">
+    <form id="cape-submit-form">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label for="cape-file" class="form-label small text-muted mb-1">File</label>
+          <input type="file" class="form-control form-control-sm" id="cape-file" name="file" required>
+        </div>
+        % if (@$servers > 1) {
+        <div class="col-md-3">
+          <label for="cape-server" class="form-label small text-muted mb-1">Server</label>
+          <select class="form-select form-select-sm" id="cape-server" name="server">
+            % for my $server (@$servers) {
+            <option value="<%= $server %>"><%= $server %></option>
+            % }
+          </select>
+        </div>
+        % } else {
+        <input type="hidden" id="cape-server" name="server" value="<%= $servers->[0] %>">
+        % }
+        <div class="col-md-3">
+          <label for="cape-slug" class="form-label small text-muted mb-1">Slug</label>
+          <input type="text" class="form-control form-control-sm" id="cape-slug" name="slug"
+                 value="<%= $default_slug %>">
+        </div>
+      </div>
+      <div class="mt-3">
+        <button type="submit" class="btn btn-sm btn-danger" id="cape-submit-btn">Submit to CAPE</button>
+      </div>
+    </form>
+
+    <div id="cape-submit-status" class="small mt-3" style="display:none"></div>
+
+    <div id="cape-submit-result" class="mt-3" style="display:none">
+      <table class="table table-dark table-sm table-bordered mb-0">
+        <tbody>
+          <tr><th class="text-muted" style="width:9rem">Status</th><td id="cape-res-status"></td></tr>
+          <tr><th class="text-muted">Server</th><td id="cape-res-server"></td></tr>
+          <tr><th class="text-muted">Upload Name</th><td id="cape-res-name" class="text-break"></td></tr>
+          <tr><th class="text-muted">HTTP</th><td id="cape-res-http"></td></tr>
+          <tr><th class="text-muted">Magic</th><td id="cape-res-magic" class="text-break"></td></tr>
+          <tr><th class="text-muted">Size</th><td id="cape-res-size"></td></tr>
+          <tr><th class="text-muted">MD5</th><td id="cape-res-md5" class="text-break font-monospace"></td></tr>
+          <tr><th class="text-muted">SHA1</th><td id="cape-res-sha1" class="text-break font-monospace"></td></tr>
+          <tr><th class="text-muted">SHA256</th><td id="cape-res-sha256" class="text-break font-monospace"></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var form   = document.getElementById('cape-submit-form');
+  var btn    = document.getElementById('cape-submit-btn');
+  var status = document.getElementById('cape-submit-status');
+  var result = document.getElementById('cape-submit-result');
+
+  function setStatus(cls, text) {
+    status.style.display = '';
+    status.className = 'small mt-3 text-' + cls;
+    status.textContent = text;
+  }
+
+  function setCell(id, value) {
+    document.getElementById(id).textContent = (value === undefined || value === null) ? '' : value;
+  }
+
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+
+    var fileInput = document.getElementById('cape-file');
+    if (!fileInput.files.length) { setStatus('warning', 'Pick a file to submit.'); return; }
+
+    var data = new FormData();
+    data.append('file', fileInput.files[0]);
+    var server = document.getElementById('cape-server');
+    if (server) { data.append('server', server.value); }
+    data.append('slug', document.getElementById('cape-slug').value);
+
+    btn.disabled = true;
+    result.style.display = 'none';
+    setStatus('muted', 'Submitting ' + fileInput.files[0].name + ' …');
+
+    fetch('/api/cape_submit/submit', { method: 'POST', body: data })
+      .then(function (response) { return response.json().then(function (body) { return { ok: response.ok, body: body }; }); })
+      .then(function (res) {
+        btn.disabled = false;
+        var body = res.body || {};
+        if (res.ok && body.status === 'ok') {
+          setStatus('success', 'Submitted as ' + body.name);
+        } else {
+          setStatus('danger', 'Failed: ' + (body.error || ('HTTP ' + (body.http_status || 'error'))));
+        }
+        // show whatever facts came back, even on a rejected submission
+        setCell('cape-res-status', body.status);
+        setCell('cape-res-server', body.server);
+        setCell('cape-res-name',   body.name);
+        setCell('cape-res-http',   body.http_status);
+        setCell('cape-res-magic',  body.magic);
+        setCell('cape-res-size',   body.size);
+        setCell('cape-res-md5',    body.md5);
+        setCell('cape-res-sha1',   body.sha1);
+        setCell('cape-res-sha256', body.sha256);
+        if (body.name || body.sha256) { result.style.display = ''; }
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        setStatus('danger', 'Request failed: ' + err);
+      });
+  });
+})();
+</script>

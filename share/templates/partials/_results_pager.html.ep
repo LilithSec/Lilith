@@ -1,0 +1,18 @@
+% # Results-count line with Prev/Next pagination, shared by the search and logs
+% # results fragments. Expects $count, $offset, $limit, and $noun (the singular
+% # word for one row, e.g. 'result' or 'row').
+<div class="d-flex align-items-center mb-2 gap-3">
+  <span class="text-muted small"><%= $count %> <%= $noun %><%= $count == 1 ? '' : 's' %></span>
+  % if ($offset > 0 || $count >= $limit) {
+  <div class="d-flex gap-1">
+    % if ($offset > 0) {
+      % my $prev = $offset - $limit;
+      % $prev = 0 if $prev < 0;
+    <a href="<%= url_with->query({offset => $prev, partial => undef}) %>" class="btn btn-sm btn-outline-secondary">&larr; Prev</a>
+    % }
+    % if ($count >= $limit) {
+    <a href="<%= url_with->query({offset => $offset + $limit, partial => undef}) %>" class="btn btn-sm btn-outline-secondary">Next &rarr;</a>
+    % }
+  </div>
+  % }
+</div>
