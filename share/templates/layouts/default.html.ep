@@ -5,25 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Lilith — <%= title %></title>
   <link href="/vendor/bootstrap-5.3.3/css/bootstrap.min.css" rel="stylesheet">
-  <style>
-    body { padding-top: 56px; font-size: 0.9rem; }
-    .navbar-brand { color: #dc3545 !important; font-weight: 700; letter-spacing: 2px; font-size: 1.1rem; }
-    .table-sm td, .table-sm th { white-space: nowrap; font-size: 0.82rem; }
-    pre.raw-json { max-height: 600px; overflow-y: auto; font-size: 0.78em; background: #1a1a2e; border-radius: 4px; padding: 1rem; }
-    .event-link { color: #dc3545; text-decoration: none; }
-    .event-link:hover { text-decoration: underline; }
-    .form-label { font-size: 0.78rem; color: #adb5bd; margin-bottom: 2px; }
-    @keyframes rowNewFlash { from { background-color: rgba(255,193,7,0.35); } to { background-color: transparent; } }
-    tr.row-new > td { animation: rowNewFlash 4s ease-out; }
-    /* Compact multi-column layout for the event top info card: pack short
-       key/value pairs into as many columns as the viewport allows, letting
-       long values (and the IP rows with geo/lookup buttons) span the row. */
-    .event-info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 0.1rem 1.5rem; }
-    .event-info-item { display: flex; gap: 0.5rem; align-items: baseline; padding: 0.15rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); min-width: 0; }
-    .event-info-key  { flex: 0 0 auto; min-width: 120px; font-size: 0.82rem; }
-    .event-info-val  { font-size: 0.82rem; overflow-wrap: anywhere; min-width: 0; }
-    .event-info-wide { grid-column: 1 / -1; }
-  </style>
+  <link href="/css/lilith.css" rel="stylesheet">
 </head>
 <body>
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top border-bottom border-danger border-opacity-25">
@@ -178,781 +160,191 @@
 </nav>
 
 <!-- Global IP Info Modal — shared by the navbar, search results, and event view -->
-<div class="modal fade" id="ipinfo-modal" tabindex="-1">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content bg-dark text-light border-secondary">
-      <div class="modal-header py-2 border-secondary">
-        <h6 class="modal-title" id="ipinfo-modal-title">IP Info</h6>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div id="ipinfo-loading" class="text-center text-muted py-3">Loading…</div>
-        <div id="ipinfo-content" style="display:none">
-          <div class="mb-2">
-            <span class="text-muted small fw-semibold">Reverse DNS</span>
-            <div id="ipinfo-rdns" class="font-monospace small mt-1"></div>
-            <div id="ipinfo-ptr-name" class="text-muted small mt-1"></div>
-            <div id="ipinfo-rdns-error" class="text-warning small mt-1" style="display:none"></div>
-          </div>
-          <div class="mb-2" id="ipinfo-geo-section" style="display:none">
-            <span class="text-muted small fw-semibold">Geolocation</span>
-            <table class="table table-dark table-sm table-borderless mb-0 mt-1">
-              <tbody id="ipinfo-geo"></tbody>
-            </table>
-            <div id="ipinfo-geo-error" class="text-warning small mt-1" style="display:none"></div>
-          </div>
-          <div>
-            <span class="text-muted small fw-semibold">WHOIS</span>
-            <pre id="ipinfo-whois" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
-          </div>
-        </div>
-      </div>
+%= include 'partials/_modal', id => 'ipinfo-modal', title => 'IP Info', title_id => 'ipinfo-modal-title', dialog => 'modal-lg modal-dialog-scrollable', body => begin
+  <div id="ipinfo-loading" class="text-center text-muted py-3">Loading…</div>
+  <div id="ipinfo-content" style="display:none">
+    <div class="mb-2">
+      <span class="text-muted small fw-semibold">Reverse DNS</span>
+      <div id="ipinfo-rdns" class="font-monospace small mt-1"></div>
+      <div id="ipinfo-ptr-name" class="text-muted small mt-1"></div>
+      <div id="ipinfo-rdns-error" class="text-warning small mt-1" style="display:none"></div>
+    </div>
+    <div class="mb-2" id="ipinfo-geo-section" style="display:none">
+      <span class="text-muted small fw-semibold">Geolocation</span>
+      <table class="table table-dark table-sm table-borderless mb-0 mt-1">
+        <tbody id="ipinfo-geo"></tbody>
+      </table>
+      <div id="ipinfo-geo-error" class="text-warning small mt-1" style="display:none"></div>
+    </div>
+    <div>
+      <span class="text-muted small fw-semibold">WHOIS</span>
+      <pre id="ipinfo-whois" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
     </div>
   </div>
-</div>
+% end
 
 <!-- Global Domain Info Modal — shared by the navbar and the event view -->
-<div class="modal fade" id="nav-domaininfo-modal" tabindex="-1">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content bg-dark text-light border-secondary">
-      <div class="modal-header py-2 border-secondary">
-        <h6 class="modal-title" id="nav-domaininfo-modal-title">Domain Info</h6>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div id="nav-domaininfo-loading" class="text-center text-muted py-3">Loading…</div>
-        <div id="nav-domaininfo-content" style="display:none">
-          <div class="mb-2">
-            <span class="text-muted small fw-semibold">DNS Records</span>
-            <div id="nav-domaininfo-dns" class="font-monospace small mt-1"></div>
-            <div id="nav-domaininfo-dns-error" class="text-warning small mt-1" style="display:none"></div>
-          </div>
-          <div class="mb-2">
-            <span class="text-muted small fw-semibold" id="nav-domaininfo-whois-label">WHOIS</span>
-            <pre id="nav-domaininfo-whois" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
-          </div>
-          <div id="nav-domaininfo-dnstracer-section" style="display:none">
-            <span class="text-muted small fw-semibold">dnstracer</span>
-            <div id="nav-domaininfo-dnstracer-error" class="text-warning small mt-1" style="display:none"></div>
-            <pre id="nav-domaininfo-dnstracer" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
-          </div>
-        </div>
-      </div>
+%= include 'partials/_modal', id => 'nav-domaininfo-modal', title => 'Domain Info', title_id => 'nav-domaininfo-modal-title', dialog => 'modal-lg modal-dialog-scrollable', body => begin
+  <div id="nav-domaininfo-loading" class="text-center text-muted py-3">Loading…</div>
+  <div id="nav-domaininfo-content" style="display:none">
+    <div class="mb-2">
+      <span class="text-muted small fw-semibold">DNS Records</span>
+      <div id="nav-domaininfo-dns" class="font-monospace small mt-1"></div>
+      <div id="nav-domaininfo-dns-error" class="text-warning small mt-1" style="display:none"></div>
+    </div>
+    <div class="mb-2">
+      <span class="text-muted small fw-semibold" id="nav-domaininfo-whois-label">WHOIS</span>
+      <pre id="nav-domaininfo-whois" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
+    </div>
+    <div id="nav-domaininfo-dnstracer-section" style="display:none">
+      <span class="text-muted small fw-semibold">dnstracer</span>
+      <div id="nav-domaininfo-dnstracer-error" class="text-warning small mt-1" style="display:none"></div>
+      <pre id="nav-domaininfo-dnstracer" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
     </div>
   </div>
-</div>
+% end
 
 <!-- Global HTTPS Info Modal -->
-<div class="modal fade" id="httpsinfo-modal" tabindex="-1">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content bg-dark text-light border-secondary">
-      <div class="modal-header py-2 border-secondary">
-        <h6 class="modal-title" id="httpsinfo-modal-title">HTTPS Info</h6>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div id="httpsinfo-loading" class="text-center text-muted py-3">Loading…</div>
-        <div id="httpsinfo-content" style="display:none">
-          <div id="httpsinfo-error" class="text-warning small mb-2" style="display:none"></div>
-          <div class="mb-2" id="httpsinfo-summary"></div>
-          <table class="table table-dark table-sm table-borderless mb-2">
-            <tbody id="httpsinfo-http"></tbody>
-          </table>
-          <div id="httpsinfo-cert-wrap">
-            <span class="text-muted small fw-semibold">Certificate</span>
-            <table class="table table-dark table-sm table-borderless mb-0 mt-1">
-              <tbody id="httpsinfo-cert"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+%= include 'partials/_modal', id => 'httpsinfo-modal', title => 'HTTPS Info', title_id => 'httpsinfo-modal-title', dialog => 'modal-lg modal-dialog-scrollable', body => begin
+  <div id="httpsinfo-loading" class="text-center text-muted py-3">Loading…</div>
+  <div id="httpsinfo-content" style="display:none">
+    <div id="httpsinfo-error" class="text-warning small mb-2" style="display:none"></div>
+    <div class="mb-2" id="httpsinfo-summary"></div>
+    <table class="table table-dark table-sm table-borderless mb-2">
+      <tbody id="httpsinfo-http"></tbody>
+    </table>
+    <div id="httpsinfo-cert-wrap">
+      <span class="text-muted small fw-semibold">Certificate</span>
+      <table class="table table-dark table-sm table-borderless mb-0 mt-1">
+        <tbody id="httpsinfo-cert"></tbody>
+      </table>
     </div>
   </div>
-</div>
+% end
 
 <!-- Global Mail Info Modal (SPF / DMARC / DKIM) -->
-<div class="modal fade" id="mailinfo-modal" tabindex="-1">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content bg-dark text-light border-secondary">
-      <div class="modal-header py-2 border-secondary">
-        <h6 class="modal-title" id="mailinfo-modal-title">Mail Info</h6>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div id="mailinfo-loading" class="text-center text-muted py-3">Loading…</div>
-        <div id="mailinfo-content" style="display:none">
-          <div id="mailinfo-error" class="text-warning small mb-2" style="display:none"></div>
-          <div class="mb-3">
-            <div class="d-flex align-items-center gap-2 mb-1"><span class="fw-semibold">MX</span><span id="mailinfo-mx-badge"></span></div>
-            <table class="table table-dark table-sm table-borderless mb-0"><tbody id="mailinfo-mx"></tbody></table>
-          </div>
-          <div class="mb-3">
-            <div class="d-flex align-items-center gap-2 mb-1"><span class="fw-semibold">SPF</span><span id="mailinfo-spf-badge"></span></div>
-            <table class="table table-dark table-sm table-borderless mb-0"><tbody id="mailinfo-spf"></tbody></table>
-          </div>
-          <div class="mb-3">
-            <div class="d-flex align-items-center gap-2 mb-1"><span class="fw-semibold">DMARC</span><span id="mailinfo-dmarc-badge"></span></div>
-            <table class="table table-dark table-sm table-borderless mb-0"><tbody id="mailinfo-dmarc"></tbody></table>
-          </div>
-          <div>
-            <div class="d-flex align-items-center gap-2 mb-1"><span class="fw-semibold">DKIM</span><span id="mailinfo-dkim-badge"></span></div>
-            <div id="mailinfo-dkim"></div>
-          </div>
-        </div>
-      </div>
+%= include 'partials/_modal', id => 'mailinfo-modal', title => 'Mail Info', title_id => 'mailinfo-modal-title', dialog => 'modal-lg modal-dialog-scrollable', body => begin
+  <div id="mailinfo-loading" class="text-center text-muted py-3">Loading…</div>
+  <div id="mailinfo-content" style="display:none">
+    <div id="mailinfo-error" class="text-warning small mb-2" style="display:none"></div>
+    <div class="mb-3">
+      <div class="d-flex align-items-center gap-2 mb-1"><span class="fw-semibold">MX</span><span id="mailinfo-mx-badge"></span></div>
+      <table class="table table-dark table-sm table-borderless mb-0"><tbody id="mailinfo-mx"></tbody></table>
+    </div>
+    <div class="mb-3">
+      <div class="d-flex align-items-center gap-2 mb-1"><span class="fw-semibold">SPF</span><span id="mailinfo-spf-badge"></span></div>
+      <table class="table table-dark table-sm table-borderless mb-0"><tbody id="mailinfo-spf"></tbody></table>
+    </div>
+    <div class="mb-3">
+      <div class="d-flex align-items-center gap-2 mb-1"><span class="fw-semibold">DMARC</span><span id="mailinfo-dmarc-badge"></span></div>
+      <table class="table table-dark table-sm table-borderless mb-0"><tbody id="mailinfo-dmarc"></tbody></table>
+    </div>
+    <div>
+      <div class="d-flex align-items-center gap-2 mb-1"><span class="fw-semibold">DKIM</span><span id="mailinfo-dkim-badge"></span></div>
+      <div id="mailinfo-dkim"></div>
     </div>
   </div>
-</div>
+% end
 
 % if ($self->virani_enabled) {
 <!-- Virani PCAP Search Modal -->
-<div class="modal fade" id="virani-modal" tabindex="-1">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content bg-dark text-light border-secondary">
-      <div class="modal-header py-2 border-secondary">
-        <h6 class="modal-title">Virani PCAP Search</h6>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div class="row g-2 mb-2">
-          <div class="col-md-6">
-            <label class="form-label small text-muted mb-1">Virani instance</label>
-            <select id="virani-remote" class="form-select form-select-sm">
-              % for my $remote (sort keys %{ $self->virani_remotes }) {
-              <option value="<%= $remote %>"><%= $remote %></option>
-              % }
-            </select>
-          </div>
-          <div class="col-md-6">
-            <label class="form-label small text-muted mb-1">Set</label>
-            <select id="virani-set" class="form-select form-select-sm">
-              <option value="">(default set)</option>
-            </select>
-          </div>
-        </div>
-        <div class="mb-2">
-          <label class="form-label small text-muted mb-1">Time range</label>
-          <div class="btn-group btn-group-sm mb-1" role="group">
-            <button type="button" class="btn btn-outline-secondary virani-range" data-mins="5">Last 5m</button>
-            <button type="button" class="btn btn-outline-secondary virani-range" data-mins="15">15m</button>
-            <button type="button" class="btn btn-outline-secondary virani-range" data-mins="60">1h</button>
-            <button type="button" class="btn btn-outline-secondary virani-range" data-mins="1440">24h</button>
-          </div>
-          <div class="row g-2 mb-1 align-items-center">
-            <div class="col-auto text-muted small" style="width:38px">Start</div>
-            <div class="col"><input type="date" id="virani-start-date" class="form-control form-control-sm"></div>
-            <div class="col-auto"><input type="text" id="virani-start-time" class="form-control form-control-sm"
-                 placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" inputmode="numeric" maxlength="5" style="width:78px"></div>
-          </div>
-          <div class="row g-2 align-items-center">
-            <div class="col-auto text-muted small" style="width:38px">End</div>
-            <div class="col"><input type="date" id="virani-end-date" class="form-control form-control-sm"></div>
-            <div class="col-auto"><input type="text" id="virani-end-time" class="form-control form-control-sm"
-                 placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" inputmode="numeric" maxlength="5" style="width:78px"></div>
-          </div>
-        </div>
-        <div class="mb-2">
-          <label class="form-label small text-muted mb-1">BPF filter</label>
-          <input type="text" id="virani-filter" class="form-control form-control-sm"
-                 placeholder="host 1.2.3.4 and port 443">
-        </div>
-        <div id="virani-error" class="text-warning small" style="display:none"></div>
-        <div class="mt-2" id="virani-cmd-wrap" style="display:none">
-          <div class="d-flex justify-content-between align-items-center">
-            <span class="text-muted small">Run on the box holding the PCAPs (adjust the set / output path as needed):</span>
-            <button type="button" class="btn btn-sm btn-outline-secondary py-0" id="virani-copy">Copy</button>
-          </div>
-          <pre class="mb-0 mt-1 small font-monospace" id="virani-cmd" style="white-space:pre-wrap"></pre>
-        </div>
-      </div>
-      <div class="modal-footer py-2 border-secondary">
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="virani-show-cmd">Show local command</button>
-        % if ($self->virani_search_enable) {
-        <button type="button" class="btn btn-sm btn-danger" id="virani-download">Download PCAP</button>
+%= include 'partials/_modal', id => 'virani-modal', title => 'Virani PCAP Search', dialog => 'modal-lg', body => begin
+  <div class="row g-2 mb-2">
+    <div class="col-md-6">
+      <label class="form-label small text-muted mb-1">Virani instance</label>
+      <select id="virani-remote" class="form-select form-select-sm">
+        % for my $remote (sort keys %{ $self->virani_remotes }) {
+        <option value="<%= $remote %>"><%= $remote %></option>
         % }
-      </div>
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label small text-muted mb-1">Set</label>
+      <select id="virani-set" class="form-select form-select-sm">
+        <option value="">(default set)</option>
+      </select>
     </div>
   </div>
-</div>
+  <div class="mb-2">
+    <label class="form-label small text-muted mb-1">Time range</label>
+    <div class="btn-group btn-group-sm mb-1" role="group">
+      <button type="button" class="btn btn-outline-secondary virani-range" data-mins="5">Last 5m</button>
+      <button type="button" class="btn btn-outline-secondary virani-range" data-mins="15">15m</button>
+      <button type="button" class="btn btn-outline-secondary virani-range" data-mins="60">1h</button>
+      <button type="button" class="btn btn-outline-secondary virani-range" data-mins="1440">24h</button>
+    </div>
+    <div class="row g-2 mb-1 align-items-center">
+      <div class="col-auto text-muted small" style="width:38px">Start</div>
+      <div class="col"><input type="date" id="virani-start-date" class="form-control form-control-sm"></div>
+      <div class="col-auto"><input type="text" id="virani-start-time" class="form-control form-control-sm"
+           placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" inputmode="numeric" maxlength="5" style="width:78px"></div>
+    </div>
+    <div class="row g-2 align-items-center">
+      <div class="col-auto text-muted small" style="width:38px">End</div>
+      <div class="col"><input type="date" id="virani-end-date" class="form-control form-control-sm"></div>
+      <div class="col-auto"><input type="text" id="virani-end-time" class="form-control form-control-sm"
+           placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" inputmode="numeric" maxlength="5" style="width:78px"></div>
+    </div>
+  </div>
+  <div class="mb-2">
+    <label class="form-label small text-muted mb-1">BPF filter</label>
+    <input type="text" id="virani-filter" class="form-control form-control-sm"
+           placeholder="host 1.2.3.4 and port 443">
+  </div>
+  <div id="virani-error" class="text-warning small" style="display:none"></div>
+  <div class="mt-2" id="virani-cmd-wrap" style="display:none">
+    <div class="d-flex justify-content-between align-items-center">
+      <span class="text-muted small">Run on the box holding the PCAPs (adjust the set / output path as needed):</span>
+      <button type="button" class="btn btn-sm btn-outline-secondary py-0" id="virani-copy">Copy</button>
+    </div>
+    <pre class="mb-0 mt-1 small font-monospace" id="virani-cmd" style="white-space:pre-wrap"></pre>
+  </div>
+% end, footer => begin
+  <button type="button" class="btn btn-sm btn-outline-secondary" id="virani-show-cmd">Show local command</button>
+  % if ($self->virani_search_enable) {
+  <button type="button" class="btn btn-sm btn-danger" id="virani-download">Download PCAP</button>
+  % }
+% end
 % }
 
 % if ($self->virani_enabled && $self->virani_search_enable) {
 <!-- Virani Cached Searches Modal -->
-<div class="modal fade" id="virani-cache-modal" tabindex="-1">
-  <div class="modal-dialog modal-xl modal-dialog-scrollable">
-    <div class="modal-content bg-dark text-light border-secondary">
-      <div class="modal-header py-2 border-secondary">
-        <h6 class="modal-title">Virani Cached Searches</h6>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div class="d-flex align-items-end gap-2 mb-2">
-          <div>
-            <label class="form-label small text-muted mb-1">Virani instance</label>
-            <select id="virani-cache-remote" class="form-select form-select-sm" style="width:auto">
-              % for my $remote (sort keys %{ $self->virani_remotes }) {
-              <option value="<%= $remote %>"><%= $remote %></option>
-              % }
-            </select>
-          </div>
-          <button type="button" class="btn btn-sm btn-outline-secondary" id="virani-cache-refresh">Refresh</button>
-          <span class="text-muted small ms-1" id="virani-cache-status"></span>
-        </div>
-        <div class="table-responsive">
-          <table class="table table-dark table-sm table-hover table-bordered mb-0">
-            <thead class="table-secondary">
-              <tr><th>Start</th><th>End</th><th>Size</th><th>Set</th><th>Filter</th>
-                  <th>Found</th><th>Success</th><th></th></tr>
-            </thead>
-            <tbody id="virani-cache-rows"></tbody>
-          </table>
-        </div>
-      </div>
+%= include 'partials/_modal', id => 'virani-cache-modal', title => 'Virani Cached Searches', dialog => 'modal-xl modal-dialog-scrollable', body => begin
+  <div class="d-flex align-items-end gap-2 mb-2">
+    <div>
+      <label class="form-label small text-muted mb-1">Virani instance</label>
+      <select id="virani-cache-remote" class="form-select form-select-sm" style="width:auto">
+        % for my $remote (sort keys %{ $self->virani_remotes }) {
+        <option value="<%= $remote %>"><%= $remote %></option>
+        % }
+      </select>
     </div>
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="virani-cache-refresh">Refresh</button>
+    <span class="text-muted small ms-1" id="virani-cache-status"></span>
   </div>
-</div>
+  <div class="table-responsive">
+    <table class="table table-dark table-sm table-hover table-bordered mb-0">
+      <thead class="table-secondary">
+        <tr><th>Start</th><th>End</th><th>Size</th><th>Set</th><th>Filter</th>
+            <th>Found</th><th>Success</th><th></th></tr>
+      </thead>
+      <tbody id="virani-cache-rows"></tbody>
+    </table>
+  </div>
+% end
 % }
+
+% # These load before the page content: a page's inline <script> runs at parse
+% # time and reaches for window.LilithUtil (and bootstrap) straight away, so the
+% # shared modules have to already be there. Both lookup and virani defer their
+% # own DOM work to DOMContentLoaded, so nothing here needs the content first.
+<script src="/vendor/bootstrap-5.3.3/js/bootstrap.bundle.min.js"></script>
+<script src="/js/lilith-util.js"></script>
+<script src="/js/lilith-lookup.js"></script>
+<script src="/js/lilith-virani.js"></script>
 
 <div class="container-fluid mt-3">
   %= content
 </div>
-<script src="/vendor/bootstrap-5.3.3/js/bootstrap.bundle.min.js"></script>
-<script>
-// Populate a <select> with the PCAP sets available on a Virani remote. Shared by
-// the event view and the Virani search modal. Keeps the first option (default).
-window.loadViraniSets = function(selectEl, remote) {
-  while (selectEl.options.length > 1) { selectEl.remove(1); }
-  if (!remote) { return; }
-  fetch('/api/virani/sets/' + encodeURIComponent(remote))
-    .then(function(response) { return response.json(); })
-    .then(function(data) {
-      (data.sets || []).forEach(function(setName) {
-        var option = document.createElement('option');
-        option.value = setName;
-        option.textContent = (setName === data.default_set) ? setName + ' (default)' : setName;
-        selectEl.appendChild(option);
-      });
-    })
-    .catch(function() { /* leave just the default option */ });
-};
-document.addEventListener('DOMContentLoaded', function() {
-
-  // Go to Event
-  document.getElementById('lookup-go-btn').addEventListener('click', function() {
-    var lookupValue = document.getElementById('lookup-id').value.trim();
-    var table = document.getElementById('lookup-table').value;
-    var errEl = document.getElementById('lookup-error');
-    if (!lookupValue) { errEl.style.display = ''; return; }
-    errEl.style.display = 'none';
-    if (/^\d+$/.test(lookupValue)) {
-      window.location.href = '/event/' + encodeURIComponent(table) + '/' + encodeURIComponent(lookupValue);
-    } else {
-      window.location.href = '/search?search=1&table=' + encodeURIComponent(table)
-                           + '&event_id=' + encodeURIComponent(lookupValue);
-    }
-  });
-  document.getElementById('lookup-id').addEventListener('keydown', function(event) {
-    if (event.key === 'Enter') { document.getElementById('lookup-go-btn').click(); }
-  });
-
-  // IP Info — one modal and one lookup used everywhere (navbar, search, event).
-  // Exposed globally so page templates can trigger it from their own buttons.
-  var ipInfoModal = new bootstrap.Modal(document.getElementById('ipinfo-modal'));
-  window.showIpInfo = function(ip) {
-    document.getElementById('ipinfo-modal-title').textContent = ip;
-    document.getElementById('ipinfo-loading').style.display = '';
-    document.getElementById('ipinfo-content').style.display = 'none';
-    ipInfoModal.show();
-    fetch('/api/ipinfo/' + encodeURIComponent(ip))
-      .then(function(response) { return response.json(); })
-      .then(function(data) {
-        document.getElementById('ipinfo-rdns').textContent     = data.rdns || '(none)';
-        document.getElementById('ipinfo-ptr-name').textContent = data.ptr_name ? 'queried: ' + data.ptr_name : '';
-        var errEl = document.getElementById('ipinfo-rdns-error');
-        if (data.rdns_error) { errEl.textContent = data.rdns_error; errEl.style.display = ''; }
-        else { errEl.style.display = 'none'; }
-
-        var geoSection = document.getElementById('ipinfo-geo-section');
-        var geoBody    = document.getElementById('ipinfo-geo');
-        var geoErr     = document.getElementById('ipinfo-geo-error');
-        var geoKeys    = data.geo ? Object.keys(data.geo).sort() : [];
-        geoBody.innerHTML = '';
-        if (geoKeys.length) {
-          geoKeys.forEach(function(key) {
-            var row = document.createElement('tr');
-            var headerCell = document.createElement('th');
-            headerCell.className = 'text-muted fw-normal ps-0';
-            headerCell.style.width = '45%';
-            headerCell.textContent = key;
-            var cell = document.createElement('td');
-            cell.className = 'font-monospace';
-            cell.textContent = data.geo[key];
-            row.appendChild(headerCell); row.appendChild(cell);
-            geoBody.appendChild(row);
-          });
-        }
-        if (data.geo_error) { geoErr.textContent = data.geo_error; geoErr.style.display = ''; }
-        else { geoErr.style.display = 'none'; }
-        geoSection.style.display = (geoKeys.length || data.geo_error) ? '' : 'none';
-
-        document.getElementById('ipinfo-whois').textContent = data.whois || '(none)';
-        document.getElementById('ipinfo-loading').style.display = 'none';
-        document.getElementById('ipinfo-content').style.display = '';
-      })
-      .catch(function() {
-        document.getElementById('ipinfo-rdns').textContent = 'Error fetching data';
-        document.getElementById('ipinfo-whois').textContent = '';
-        document.getElementById('ipinfo-loading').style.display = 'none';
-        document.getElementById('ipinfo-content').style.display = '';
-      });
-  };
-  document.getElementById('nav-ip-go-btn').addEventListener('click', function() {
-    var ip    = document.getElementById('nav-ip-input').value.trim();
-    var errEl = document.getElementById('nav-ip-error');
-    if (!ip || !/^[0-9a-fA-F:.]+$/.test(ip)) { errEl.style.display = ''; return; }
-    errEl.style.display = 'none';
-    window.showIpInfo(ip);
-  });
-  document.getElementById('nav-ip-input').addEventListener('keydown', function(event) {
-    if (event.key === 'Enter') { document.getElementById('nav-ip-go-btn').click(); }
-  });
-
-  // Domain Info — one modal and one lookup used everywhere (navbar, event).
-  // Exposed globally so page templates can trigger it from their own buttons.
-  var navDomainModal = new bootstrap.Modal(document.getElementById('nav-domaininfo-modal'));
-  window.showDomainInfo = function(domain) {
-    document.getElementById('nav-domaininfo-modal-title').textContent = domain;
-    document.getElementById('nav-domaininfo-loading').style.display = '';
-    document.getElementById('nav-domaininfo-content').style.display = 'none';
-    navDomainModal.show();
-    fetch('/api/domaininfo/' + encodeURIComponent(domain))
-      .then(function(response) { return response.json(); })
-      .then(function(data) {
-        var dnsEl = document.getElementById('nav-domaininfo-dns');
-        if (data.dns && Object.keys(data.dns).length) {
-          var typeOrder = ['A','AAAA','CNAME','MX','NS','TXT','SOA','CAA','SRV','PTR'];
-          var recordTypes = Object.keys(data.dns).sort(function(typeA, typeB) {
-            var rankA = typeOrder.indexOf(typeA), rankB = typeOrder.indexOf(typeB);
-            if (rankA === -1) rankA = 999; if (rankB === -1) rankB = 999;
-            return rankA - rankB;
-          });
-          // record values are DNS data of an arbitrary looked-up domain (TXT
-          // especially can carry anything), so they must be escaped
-          var escapeHtml = function(text) {
-            return String(text).replace(/[&<>"']/g, function(ch) {
-              return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];
-            });
-          };
-          dnsEl.innerHTML = recordTypes.map(function(type) {
-            return data.dns[type].map(function(recordValue) {
-              return '<strong>' + escapeHtml(type) + '</strong> ' + escapeHtml(recordValue);
-            }).join('<br>');
-          }).join('<br>');
-        } else {
-          dnsEl.textContent = '(none)';
-        }
-        var dnsErrEl = document.getElementById('nav-domaininfo-dns-error');
-        if (data.dns_error) { dnsErrEl.textContent = data.dns_error; dnsErrEl.style.display = ''; }
-        else { dnsErrEl.style.display = 'none'; }
-        document.getElementById('nav-domaininfo-whois-label').textContent =
-          (data.whois_domain && data.whois_domain !== domain)
-            ? 'WHOIS (' + data.whois_domain + ')' : 'WHOIS';
-        document.getElementById('nav-domaininfo-whois').textContent = data.whois || '(none)';
-        var dnstracerSection = document.getElementById('nav-domaininfo-dnstracer-section');
-        var dnstracerErrEl   = document.getElementById('nav-domaininfo-dnstracer-error');
-        if (data.dnstracer || data.dnstracer_error) {
-          dnstracerSection.style.display = '';
-          document.getElementById('nav-domaininfo-dnstracer').textContent = data.dnstracer || '';
-          if (data.dnstracer_error) { dnstracerErrEl.textContent = data.dnstracer_error; dnstracerErrEl.style.display = ''; }
-          else { dnstracerErrEl.style.display = 'none'; }
-        } else {
-          dnstracerSection.style.display = 'none';
-        }
-        document.getElementById('nav-domaininfo-loading').style.display = 'none';
-        document.getElementById('nav-domaininfo-content').style.display = '';
-      })
-      .catch(function() {
-        document.getElementById('nav-domaininfo-dns').textContent = 'Error fetching data';
-        document.getElementById('nav-domaininfo-whois').textContent = '';
-        document.getElementById('nav-domaininfo-loading').style.display = 'none';
-        document.getElementById('nav-domaininfo-content').style.display = '';
-      });
-  };
-  document.getElementById('nav-domain-go-btn').addEventListener('click', function() {
-    var domain = document.getElementById('nav-domain-input').value.trim();
-    var errEl  = document.getElementById('nav-domain-error');
-    if (!domain || !/^[A-Za-z0-9._-]+$/.test(domain)) { errEl.style.display = ''; return; }
-    errEl.style.display = 'none';
-    window.showDomainInfo(domain);
-  });
-  document.getElementById('nav-domain-input').addEventListener('keydown', function(event) {
-    if (event.key === 'Enter') { document.getElementById('nav-domain-go-btn').click(); }
-  });
-
-  // HTTPS Info
-  var httpsModal = new bootstrap.Modal(document.getElementById('httpsinfo-modal'));
-  function httpsRow(tbody, label, value, cssClass) {
-    if (value === undefined || value === null || value === '') { return; }
-    var row = document.createElement('tr');
-    var headerCell = document.createElement('th');
-    headerCell.className = 'text-muted fw-normal ps-0'; headerCell.style.width = '170px'; headerCell.style.whiteSpace = 'nowrap';
-    headerCell.textContent = label;
-    var cell = document.createElement('td');
-    cell.className = 'font-monospace small' + (cssClass ? (' ' + cssClass) : '');
-    cell.style.wordBreak = 'break-all';
-    cell.textContent = Array.isArray(value) ? value.join(', ') : value;   // textContent escapes
-    row.appendChild(headerCell); row.appendChild(cell); tbody.appendChild(row);
-  }
-  function httpsBadge(container, text, ok) {
-    var badgeEl = document.createElement('span');
-    badgeEl.className = 'badge me-2 ' + (ok ? 'bg-success' : 'bg-danger');
-    badgeEl.textContent = text;
-    container.appendChild(badgeEl);
-  }
-  function showHttpsInfo(domain, port) {
-    document.getElementById('httpsinfo-modal-title').textContent = 'HTTPS — ' + domain + ':' + port;
-    document.getElementById('httpsinfo-loading').style.display = '';
-    document.getElementById('httpsinfo-content').style.display = 'none';
-    httpsModal.show();
-    fetch('/api/httpsinfo/' + encodeURIComponent(domain) + '?port=' + encodeURIComponent(port))
-      .then(function(response) { return response.json(); })
-      .then(function(data) {
-        var errEl = document.getElementById('httpsinfo-error');
-        var summaryEl = document.getElementById('httpsinfo-summary');
-        var httpEl  = document.getElementById('httpsinfo-http');
-        var certEl  = document.getElementById('httpsinfo-cert');
-        var certWrap = document.getElementById('httpsinfo-cert-wrap');
-        summaryEl.innerHTML = ''; httpEl.innerHTML = ''; certEl.innerHTML = '';
-        if (data.error) { errEl.textContent = data.error; errEl.style.display = ''; } else { errEl.style.display = 'none'; }
-
-        if (data.valid !== undefined)   { httpsBadge(summaryEl, data.valid ? 'Certificate valid' : 'Certificate INVALID', !!data.valid); }
-        if (data.expired !== undefined) { httpsBadge(summaryEl, data.expired ? 'EXPIRED' : 'Not expired', !data.expired); }
-
-        httpsRow(httpEl, 'HTTP status', (data.http_status !== undefined ? data.http_status : '(no response)')
-          + (data.http_reason ? ' ' + data.http_reason : ''));
-        httpsRow(httpEl, 'Redirects to', data.redirect_to);
-        httpsRow(httpEl, 'TCP connect',  data.tcp_connect_ms   !== undefined ? data.tcp_connect_ms + ' ms'   : undefined);
-        httpsRow(httpEl, 'TLS handshake', data.tls_handshake_ms !== undefined ? data.tls_handshake_ms + ' ms' : undefined);
-        httpsRow(httpEl, 'Response',     data.response_ms      !== undefined ? data.response_ms + ' ms'      : undefined);
-        httpsRow(httpEl, 'Total',        data.total_ms         !== undefined ? data.total_ms + ' ms'         : undefined);
-        if (data.timed_out)   { httpsRow(httpEl, 'Note', 'timed out (5s limit)', 'text-warning'); }
-        if (data.read_capped) { httpsRow(httpEl, 'Note', 'response truncated at 512 KB', 'text-warning'); }
-
-        var cert = data.cert || {};
-        certWrap.style.display = Object.keys(cert).length ? '' : 'none';
-        httpsRow(certEl, 'Common name', cert.cn);
-        httpsRow(certEl, 'Subject', cert.subject);
-        httpsRow(certEl, 'Issuer', cert.issuer);
-        httpsRow(certEl, 'SANs', cert.sans);
-        httpsRow(certEl, 'Not before', cert.not_before);
-        httpsRow(certEl, 'Not after', cert.not_after);
-        httpsRow(certEl, 'Serial', cert.serial);
-        httpsRow(certEl, 'Version', cert.version ? ('v' + cert.version) : undefined);
-        httpsRow(certEl, 'Signature alg', cert.sig_alg);
-        httpsRow(certEl, 'SHA-1 fingerprint', cert.fp_sha1);
-        httpsRow(certEl, 'SHA-256 fingerprint', cert.fp_sha256);
-        if (data.valid === 0 && data.valid_error) { httpsRow(certEl, 'Validation error', data.valid_error, 'text-warning'); }
-
-        document.getElementById('httpsinfo-loading').style.display = 'none';
-        document.getElementById('httpsinfo-content').style.display = '';
-      })
-      .catch(function() {
-        var errEl = document.getElementById('httpsinfo-error');
-        errEl.textContent = 'Error fetching HTTPS info.'; errEl.style.display = '';
-        document.getElementById('httpsinfo-loading').style.display = 'none';
-        document.getElementById('httpsinfo-content').style.display = '';
-      });
-  }
-  document.getElementById('nav-https-btn').addEventListener('click', function() {
-    var domain = document.getElementById('nav-domain-input').value.trim();
-    var port   = document.getElementById('nav-https-port').value.trim() || '443';
-    var errEl  = document.getElementById('nav-domain-error');
-    if (!/^[A-Za-z0-9._-]+$/.test(domain)) { errEl.textContent = 'Please enter a valid domain.'; errEl.style.display = ''; return; }
-    if (!/^\d+$/.test(port) || +port < 1 || +port > 65535) { errEl.textContent = 'Please enter a valid port.'; errEl.style.display = ''; return; }
-    errEl.style.display = 'none';
-    showHttpsInfo(domain, port);
-  });
-
-  // Mail Info (SPF / DMARC / DKIM). Reuses httpsRow for the detail rows.
-  var mailModal = new bootstrap.Modal(document.getElementById('mailinfo-modal'));
-  function badge(badgeContainer, text, cssClass) {
-    badgeContainer.innerHTML = '';
-    if (text === undefined || text === null || text === '') { return; }
-    var badgeEl = document.createElement('span'); badgeEl.className = 'badge ' + cssClass; badgeEl.textContent = text; badgeContainer.appendChild(badgeEl);
-  }
-  function spfBadgeClass(code) {
-    return ({ pass: 'bg-success', fail: 'bg-danger', softfail: 'bg-warning text-dark',
-              neutral: 'bg-secondary', none: 'bg-secondary',
-              permerror: 'bg-danger', temperror: 'bg-warning text-dark' })[code] || 'bg-secondary';
-  }
-  function dmarcBadgeClass(policy) {
-    return ({ reject: 'bg-success', quarantine: 'bg-warning text-dark', none: 'bg-secondary' })[policy] || 'bg-secondary';
-  }
-  function showMailInfo(domain, ip, selector) {
-    document.getElementById('mailinfo-modal-title').textContent = 'Mail Info — ' + domain;
-    document.getElementById('mailinfo-loading').style.display = '';
-    document.getElementById('mailinfo-content').style.display = 'none';
-    mailModal.show();
-    var url = '/api/mailinfo/' + encodeURIComponent(domain)
-      + (ip ? '&ip=' + encodeURIComponent(ip) : '')
-      + (selector ? '&selector=' + encodeURIComponent(selector) : '');
-    url = url.replace('&', '?');
-    fetch(url)
-      .then(function(response) { return response.json(); })
-      .then(function(data) {
-        var errEl = document.getElementById('mailinfo-error');
-        if (data.error) { errEl.textContent = data.error; errEl.style.display = ''; } else { errEl.style.display = 'none'; }
-
-        // --- MX ---
-        var mx = data.mx || [];
-        badge(document.getElementById('mailinfo-mx-badge'),
-          mx.length ? (mx.length + ' record' + (mx.length === 1 ? '' : 's')) : 'none', 'bg-secondary');
-        var mxBody = document.getElementById('mailinfo-mx'); mxBody.innerHTML = '';
-        if (mx.length) { mx.forEach(function(mxRecord) { httpsRow(mxBody, mxRecord.preference, mxRecord.exchange); }); }
-        else { httpsRow(mxBody, 'MX', '(none)'); }
-
-        // --- SPF ---
-        var spf = data.spf || {}, spfSummary = spf.summary || {};
-        badge(document.getElementById('mailinfo-spf-badge'),
-          spf.result ? String(spf.result).toUpperCase() : (spfSummary.all ? spfSummary.all : null),
-          spf.result ? spfBadgeClass(spf.result) : 'bg-secondary');
-        var spfBody = document.getElementById('mailinfo-spf'); spfBody.innerHTML = '';
-        httpsRow(spfBody, 'Record', spf.record || '(none)');
-        httpsRow(spfBody, 'Default policy', spfSummary.all);
-        httpsRow(spfBody, 'DNS lookups', spfSummary.dns_lookups);
-        httpsRow(spfBody, 'Mechanisms', spfSummary.mechanisms);
-        httpsRow(spfBody, 'Modifiers', spfSummary.modifiers);
-        httpsRow(spfBody, 'Evaluated IP', spf.ip);
-        httpsRow(spfBody, 'Identity', spf.identity);
-        httpsRow(spfBody, 'Result', spf.result);
-        httpsRow(spfBody, 'Explanation', spf.explanation);
-
-        // --- DMARC ---
-        var dmarc = data.dmarc || {};
-        badge(document.getElementById('mailinfo-dmarc-badge'),
-          dmarc.p ? ('p=' + dmarc.p) : (dmarc.record ? null : 'no DMARC'),
-          dmarc.p ? dmarcBadgeClass(dmarc.p) : 'bg-danger');
-        var dmarcBody = document.getElementById('mailinfo-dmarc'); dmarcBody.innerHTML = '';
-        httpsRow(dmarcBody, 'Record', dmarc.record || dmarc.note || '(none)');
-        httpsRow(dmarcBody, 'Found at', dmarc.found_at);
-        httpsRow(dmarcBody, 'Policy (p)', dmarc.p);
-        httpsRow(dmarcBody, 'Subdomain policy (sp)', dmarc.sp);
-        httpsRow(dmarcBody, 'Percent (pct)', dmarc.pct);
-        httpsRow(dmarcBody, 'Aggregate reports (rua)', dmarc.rua);
-        httpsRow(dmarcBody, 'Forensic reports (ruf)', dmarc.ruf);
-        httpsRow(dmarcBody, 'DKIM alignment (adkim)', dmarc.adkim);
-        httpsRow(dmarcBody, 'SPF alignment (aspf)', dmarc.aspf);
-        httpsRow(dmarcBody, 'Failure options (fo)', dmarc.fo);
-
-        // --- DKIM ---
-        var dkim = data.dkim || {}, keys = dkim.keys || [];
-        badge(document.getElementById('mailinfo-dkim-badge'),
-          keys.length ? (keys.length + ' key' + (keys.length === 1 ? '' : 's')) : 'none found',
-          keys.length ? 'bg-success' : 'bg-secondary');
-        var dkimBody = document.getElementById('mailinfo-dkim'); dkimBody.innerHTML = '';
-        if (dkim.probed) {
-          var noteEl = document.createElement('div'); noteEl.className = 'text-muted small mb-1';
-          noteEl.textContent = 'probed common selectors' + (keys.length ? '' : ' — none found; supply a selector if known');
-          dkimBody.appendChild(noteEl);
-        }
-        keys.forEach(function(dkimKey) {
-          var table = document.createElement('table'); table.className = 'table table-dark table-sm table-borderless mb-2';
-          var tbody = document.createElement('tbody'); table.appendChild(tbody);
-          httpsRow(tbody, 'Selector', dkimKey.selector);
-          httpsRow(tbody, 'Key type', dkimKey.key_type);
-          httpsRow(tbody, 'Key size', dkimKey.key_bits ? (dkimKey.key_bits + ' bits') : undefined);
-          httpsRow(tbody, 'Revoked', dkimKey.revoked ? 'yes' : undefined, dkimKey.revoked ? 'text-warning' : '');
-          httpsRow(tbody, 'Testing', dkimKey.testing ? 'yes' : undefined);
-          httpsRow(tbody, 'Hash algorithms', dkimKey.hash_algorithms);
-          httpsRow(tbody, 'Service types', dkimKey.service_types);
-          httpsRow(tbody, 'Granularity', dkimKey.granularity);
-          httpsRow(tbody, 'Notes', dkimKey.notes);
-          httpsRow(tbody, 'Record', dkimKey.record);
-          dkimBody.appendChild(table);
-        });
-        if (!keys.length && dkim.note && !dkim.probed) {
-          var noteEl2 = document.createElement('div'); noteEl2.className = 'text-muted small'; noteEl2.textContent = dkim.note; dkimBody.appendChild(noteEl2);
-        }
-
-        document.getElementById('mailinfo-loading').style.display = 'none';
-        document.getElementById('mailinfo-content').style.display = '';
-      })
-      .catch(function() {
-        var errEl = document.getElementById('mailinfo-error');
-        errEl.textContent = 'Error fetching mail info.'; errEl.style.display = '';
-        document.getElementById('mailinfo-loading').style.display = 'none';
-        document.getElementById('mailinfo-content').style.display = '';
-      });
-  }
-  document.getElementById('nav-mail-btn').addEventListener('click', function() {
-    var domain   = document.getElementById('nav-domain-input').value.trim();
-    var ip       = document.getElementById('nav-mail-ip').value.trim();
-    var selector = document.getElementById('nav-mail-selector').value.trim();
-    var errEl    = document.getElementById('nav-domain-error');
-    if (!/^[A-Za-z0-9._-]+$/.test(domain)) { errEl.textContent = 'Please enter a valid domain.'; errEl.style.display = ''; return; }
-    if (ip !== '' && !/^[0-9a-fA-F:.]+$/.test(ip)) {
-      errEl.textContent = 'Please enter a valid IP for the SPF eval, or leave it blank.'; errEl.style.display = ''; return;
-    }
-    if (selector !== '' && !/^[A-Za-z0-9._-]+$/.test(selector)) {
-      errEl.textContent = 'Please enter a valid DKIM selector, or leave it blank to probe.'; errEl.style.display = ''; return;
-    }
-    errEl.style.display = 'none';
-    showMailInfo(domain, ip, selector);
-  });
-
-  // Virani PCAP search modal
-  (function() {
-    var modal = document.getElementById('virani-modal');
-    if (!modal) { return; }
-    var remoteEl   = document.getElementById('virani-remote');
-    var setEl      = document.getElementById('virani-set');
-    var startDate  = document.getElementById('virani-start-date');
-    var startTime  = document.getElementById('virani-start-time');
-    var endDate    = document.getElementById('virani-end-date');
-    var endTime    = document.getElementById('virani-end-time');
-    var filterEl   = document.getElementById('virani-filter');
-    var errEl      = document.getElementById('virani-error');
-    var cmdWrap    = document.getElementById('virani-cmd-wrap');
-    var cmdEl      = document.getElementById('virani-cmd');
-
-    function pad(num) { return (num < 10 ? '0' : '') + num; }
-    // Combine a date field (YYYY-MM-DD) and a 24-hour HH:MM time field into an
-    // epoch, interpreting them in the browser's local timezone. null if invalid.
-    function epochOf(dateEl, timeEl) {
-      if (!dateEl.value || !/^\d{1,2}:\d{2}$/.test(timeEl.value)) { return null; }
-      var date = new Date(dateEl.value + 'T' + timeEl.value);
-      return isNaN(date.getTime()) ? null : Math.floor(date.getTime() / 1000);
-    }
-    function setRange(minutes) {
-      var now = new Date(), start = new Date(now.getTime() - minutes * 60000);
-      startDate.value = start.getFullYear() + '-' + pad(start.getMonth() + 1) + '-' + pad(start.getDate());
-      startTime.value = pad(start.getHours()) + ':' + pad(start.getMinutes());
-      endDate.value   = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
-      endTime.value   = pad(now.getHours()) + ':' + pad(now.getMinutes());
-    }
-    document.querySelectorAll('.virani-range').forEach(function(rangeBtn) {
-      rangeBtn.addEventListener('click', function() { setRange(parseInt(this.dataset.mins, 10)); });
-    });
-
-    modal.addEventListener('show.bs.modal', function() {
-      if (!startDate.value || !endDate.value) { setRange(15); }
-      window.loadViraniSets(setEl, remoteEl.value);
-    });
-    remoteEl.addEventListener('change', function() { window.loadViraniSets(setEl, this.value); });
-
-    function query() {
-      errEl.style.display = 'none';
-      var startEpoch = epochOf(startDate, startTime), endEpoch = epochOf(endDate, endTime);
-      if (!filterEl.value.trim()) { errEl.textContent = 'A BPF filter is required.'; errEl.style.display = ''; return null; }
-      if (startEpoch === null || endEpoch === null) { errEl.textContent = 'Valid start and end times (HH:MM, 24h) are required.'; errEl.style.display = ''; return null; }
-      if (startEpoch >= endEpoch) { errEl.textContent = 'Start must be before end.'; errEl.style.display = ''; return null; }
-      return { remote: remoteEl.value, set: setEl.value, start: startEpoch, end: endEpoch, filter: filterEl.value.trim() };
-    }
-
-    document.getElementById('virani-show-cmd').addEventListener('click', function() {
-      var params = query(); if (!params) { return; }
-      cmdEl.textContent = 'virani -s ' + params.start + ' -e ' + params.end + (params.set ? ' --set ' + params.set : '')
-        + " -w search.pcap -f '" + params.filter + "'";
-      cmdWrap.style.display = '';
-    });
-    var downloadBtn = document.getElementById('virani-download');
-    if (downloadBtn) {
-      downloadBtn.addEventListener('click', function() {
-        var params = query(); if (!params) { return; }
-        window.location.href = '/api/virani/pcap?remote=' + encodeURIComponent(params.remote)
-          + '&set=' + encodeURIComponent(params.set) + '&start=' + params.start + '&end=' + params.end
-          + '&filter=' + encodeURIComponent(params.filter);
-      });
-    }
-    document.getElementById('virani-copy').addEventListener('click', function() {
-      if (navigator.clipboard) { navigator.clipboard.writeText(cmdEl.textContent); }
-    });
-  })();
-
-  // Virani cached searches modal
-  (function() {
-    var modal = document.getElementById('virani-cache-modal');
-    if (!modal) { return; }
-    var remoteEl = document.getElementById('virani-cache-remote');
-    var rowsEl   = document.getElementById('virani-cache-rows');
-    var statusEl = document.getElementById('virani-cache-status');
-
-    function pad(num) { return (num < 10 ? '0' : '') + num; }
-    function fmtTime(epoch) {
-      if (!epoch) { return ''; }
-      var date = new Date(epoch * 1000);
-      return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
-        + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
-    }
-    function fmtSize(bytes) {
-      if (bytes == null || bytes === '') { return ''; }
-      var units = ['B', 'KB', 'MB', 'GB', 'TB'], unitIndex = 0;
-      bytes = Number(bytes);
-      while (bytes >= 1024 && unitIndex < units.length - 1) { bytes /= 1024; unitIndex++; }
-      return (unitIndex === 0 ? bytes : bytes.toFixed(1)) + ' ' + units[unitIndex];
-    }
-    function cell(text, cssClass) {
-      var cellEl = document.createElement('td');
-      cellEl.textContent = (text == null ? '' : text);
-      if (cssClass) { cellEl.className = cssClass; }
-      return cellEl;
-    }
-
-    function load() {
-      var remote = remoteEl.value;
-      rowsEl.innerHTML = '';
-      statusEl.textContent = 'Loading…';
-      fetch('/api/virani/cached/' + encodeURIComponent(remote))
-        .then(function(response) {
-          return response.text().then(function(body) {
-            var data = null;
-            try { data = JSON.parse(body); } catch (err) { /* non-JSON error body */ }
-            return { ok: response.ok, status: response.status, data: data };
-          });
-        })
-        .then(function(result) {
-          if (!result.ok) {
-            statusEl.textContent = (result.data && result.data.error) ? result.data.error : ('request failed: HTTP ' + result.status);
-            return;
-          }
-          var items = (result.data && result.data.cached) || [];
-          statusEl.textContent = items.length + ' cached search' + (items.length === 1 ? '' : 'es')
-            + (items.length >= 50 ? ' (newest 50)' : '');
-          items.forEach(function(item) {
-            var row = document.createElement('tr');
-            row.appendChild(cell(fmtTime(item.start_s)));
-            row.appendChild(cell(fmtTime(item.end_s)));
-            row.appendChild(cell(fmtSize(item.final_size)));
-            row.appendChild(cell(item.set));
-            row.appendChild(cell(item.filter, 'font-monospace small'));
-            row.appendChild(cell(item.found));
-            row.appendChild(cell(item.success));
-            var downloadCell = document.createElement('td');
-            downloadCell.className = 'text-nowrap';
-            if (item.has_pcap) {
-              var pcapLink = document.createElement('a');
-              pcapLink.className = 'btn btn-sm btn-outline-secondary py-0 me-1';
-              pcapLink.textContent = 'PCAP';
-              pcapLink.href = '/api/virani/cached/' + encodeURIComponent(remote) + '/pcap/' + encodeURIComponent(item.id);
-              downloadCell.appendChild(pcapLink);
-            }
-            var jsonLink = document.createElement('a');
-            jsonLink.className = 'btn btn-sm btn-outline-secondary py-0';
-            jsonLink.textContent = 'JSON';
-            jsonLink.href = '/api/virani/cached/' + encodeURIComponent(remote) + '/meta/' + encodeURIComponent(item.id);
-            downloadCell.appendChild(jsonLink);
-            row.appendChild(downloadCell);
-            rowsEl.appendChild(row);
-          });
-        })
-        .catch(function(err) { statusEl.textContent = 'Failed to load cached searches: ' + err; });
-    }
-    modal.addEventListener('show.bs.modal', load);
-    remoteEl.addEventListener('change', load);
-    document.getElementById('virani-cache-refresh').addEventListener('click', load);
-  })();
-
-});
-</script>
 </body>
 </html>

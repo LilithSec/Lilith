@@ -1,0 +1,5 @@
+% # The muted "nothing here" banner shown in place of an empty table. Include as:
+% #   %= include 'partials/_empty_alert', message => 'No results found.'
+% # extra_class picks up the mb-0 the in-card variants use.
+% my $extra_class = stash('extra_class') // '';
+<div class="alert alert-secondary py-2<%= $extra_class ne '' ? " $extra_class" : '' %>"><%= $message %></div>

@@ -113,6 +113,12 @@ share/templates/partials/_time_range.html.ep
 share/templates/partials/_results_pager.html.ep
 share/templates/partials/_event_id_cell.html.ep
 share/templates/partials/_ip_cell.html.ep
+share/templates/partials/_modal.html.ep
+share/templates/partials/_card.html.ep
+share/templates/partials/_breadcrumb.html.ep
+share/templates/partials/_error_alert.html.ep
+share/templates/partials/_empty_alert.html.ep
+share/templates/partials/_info_btn.html.ep
 share/templates/search/_results.html.ep
 share/templates/dashboard/index.html.ep
 share/templates/event/view.html.ep
@@ -179,5 +185,11 @@ share/fixtures/11/conf/keep
 share/public/vendor/Chart.js
 share/public/js/time-range.js
 share/public/js/auto-refresh.js
+share/public/js/lilith-util.js
+share/public/js/lilith-lookup.js
+share/public/js/lilith-virani.js
+share/public/js/lilith-table.js
+share/public/css/lilith.css
+share/public/css/dashboard.css
 share/public/vendor/gridstack/gridstack-all.js
 share/public/vendor/gridstack/gridstack.min.css

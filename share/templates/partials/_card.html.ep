@@ -1,0 +1,57 @@
+% # Titled card shell, shared by the detail cards across the UI. Include it with
+% # a body block:
+% #   %= include 'partials/_card', title => 'DNS Details', body_class => 'p-0', body => begin
+% #   ...markup...
+% #   % end
+% #
+% # title        - header text
+% # body         - required content block
+% # header_extra - optional block rendered to the right of the title, which also
+% #                turns the header into a spaced flex row (for action buttons
+% #                and status spans)
+% # footer       - optional content block, rendered in a .card-footer; a block
+% #                that renders blank leaves the card without a footer at all
+% # title_span   - wrap the title in a <span>; on by default when header_extra
+% #                is given, since the flex row needs it as a child
+% # card_id      - optional id for the outer card element
+% # body_id      - optional id for the body wrapper, for bodies filled by JS
+% # card_class   - classes after .card        (default 'border-secondary mb-3')
+% # header_class - extra .card-header classes (default 'py-1 small text-muted')
+% # body_class   - wrapper around the body    (default 'card-body py-2')
+% #
+% # Parameters are named so they cannot collide with a page's own stash keys —
+% # an unpassed 'id' would otherwise fall through to the event/record id.
+% #
+% # Cards whose header is itself a control bar (the event raw-JSON panel) or that
+% # have no header at all (the dashboard control card) stay hand written.
+% my $card_class   = stash('card_class')   // 'border-secondary mb-3';
+% my $header_class = stash('header_class') // 'py-1 small text-muted';
+% my $body_class   = stash('body_class')   // 'card-body py-2';
+% my $header_extra = stash('header_extra');
+% my $footer       = stash('footer');
+% my $card_id      = stash('card_id');
+% my $body_id      = stash('body_id');
+% my $title_span   = stash('title_span') // ( $header_extra ? 1 : 0 );
+% $header_class = join ' ', grep { $_ ne '' } $header_class,
+%     ( $header_extra ? 'd-flex justify-content-between align-items-center' : () );
+<div class="card <%= $card_class %>"<% if ($card_id) { %> id="<%= $card_id %>"<% } %>>
+  <div class="card-header<%= $header_class ne '' ? " $header_class" : '' %>">
+    % if ($title_span) {
+    <span><%= $title %></span>
+    % } else {
+    <%= $title %>
+    % }
+    % if ($header_extra) {
+    %= $header_extra->()
+    % }
+  </div>
+  <div class="<%= $body_class %>"<% if ($body_id) { %> id="<%= $body_id %>"<% } %>>
+    %= $body->()
+  </div>
+  % my $footer_html = $footer ? $footer->() : '';
+  % if ($footer_html =~ /\S/) {
+  <div class="card-footer py-2 d-flex gap-2">
+    %== $footer_html
+  </div>
+  % }
+</div>

@@ -114,9 +114,7 @@
 
 </form>
 
-% if ($error) {
-<div class="alert alert-danger py-2"><strong>Error:</strong> <%= $error %></div>
-% }
+%= include "partials/_error_alert", message => $error
 
 % if (defined $result) {
 %= include 'logs/_results'

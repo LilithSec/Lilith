@@ -357,11 +357,7 @@
 
 </form>
 
-% if ($error) {
-<div class="alert alert-danger py-2">
-  <strong>Error:</strong> <%= $error %>
-</div>
-% }
+%= include "partials/_error_alert", message => $error
 
 % if (defined $results) {
 %= include 'search/_results'
@@ -369,6 +365,7 @@
 
 <script src="/js/time-range.js"></script>
 <script src="/js/auto-refresh.js"></script>
+<script src="/js/lilith-table.js"></script>
 <script>
 var _orderByCols = {
   suricata: ['timestamp','id','src_ip','dest_ip','src_port','dest_port','proto','app_proto',
@@ -445,46 +442,6 @@ function bindFilter(selector, inputId, dataKey) {
   });
 }
 
-// Client-side column sorting for the results table.
-function initSort() {
-  var table = document.querySelector('#search-results table.table');
-  if (!table) { return; }
-  var thead = table.querySelector('thead');
-  var tbody = table.querySelector('tbody');
-  if (!thead || !tbody) { return; }
-  var headerCells = Array.from(thead.querySelectorAll('th'));
-  var sortCol = -1, sortAsc = true;
-
-  headerCells.forEach(function(headerCell) {
-    headerCell.dataset.origText = headerCell.textContent;
-    headerCell.style.cursor = 'pointer';
-    headerCell.style.userSelect = 'none';
-  });
-
-  headerCells.forEach(function(headerCell, idx) {
-    headerCell.addEventListener('click', function() {
-      if (sortCol === idx) {
-        sortAsc = !sortAsc;
-      } else {
-        sortCol = idx;
-        sortAsc = true;
-      }
-      headerCells.forEach(function(otherHeaderCell) { otherHeaderCell.textContent = otherHeaderCell.dataset.origText; });
-      headerCell.textContent = headerCell.dataset.origText + (sortAsc ? ' ▲' : ' ▼');
-
-      var rows = Array.from(tbody.querySelectorAll('tr'));
-      rows.sort(function(a, b) {
-        var aText = a.cells[idx] ? a.cells[idx].textContent.trim() : '';
-        var bText = b.cells[idx] ? b.cells[idx].textContent.trim() : '';
-        var aNum = parseFloat(aText), bNum = parseFloat(bText);
-        var cmp = (!isNaN(aNum) && !isNaN(bNum)) ? aNum - bNum : aText.localeCompare(bText);
-        return sortAsc ? cmp : -cmp;
-      });
-      rows.forEach(function(row) { tbody.appendChild(row); });
-    });
-  });
-}
-
 // (Re)wire all handlers and view state inside the results container. Safe to
 // call again after the results HTML is swapped in by an auto-refresh.
 function initResults() {
@@ -507,7 +464,7 @@ function initResults() {
   bindFilter('.proto-filter',         'proto-input',         'proto');
   bindFilter('.aproto-filter',        'app-proto-input',     'aproto');
 
-  initSort();
+  LilithTable.initSortIn('#search-results');
 
   // The IP info modal + lookup lives in the layout; just wire the buttons.
   document.querySelectorAll('#search-results .ip-info-btn').forEach(function(el) {

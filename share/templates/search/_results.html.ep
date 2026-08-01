@@ -138,6 +138,6 @@
   </div><!-- /table-responsive -->
 
   % } else {
-  <div class="alert alert-secondary py-2">No results found.</div>
+  %= include "partials/_empty_alert", message => "No results found."
   % }
 </div><!-- /search-results -->

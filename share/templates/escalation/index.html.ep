@@ -1,29 +1,17 @@
 % layout 'default';
 % title $can_edit ? 'Edit Escalation Targets' : 'Escalation Targets';
 
-<nav aria-label="breadcrumb" class="mb-3">
-  <ol class="breadcrumb">
-    <li class="breadcrumb-item"><a href="/search" class="text-danger">Search</a></li>
-    <li class="breadcrumb-item active"><%= $can_edit ? 'Edit Escalation Targets' : 'Escalation Targets' %></li>
-  </ol>
-</nav>
+%= include 'partials/_breadcrumb', crumbs => [ { label => 'Search', url => '/search' }, { label => ( $can_edit ? 'Edit Escalation Targets' : 'Escalation Targets' ) } ]
 
-% if ($error) {
-<div class="alert alert-danger py-2">
-  <strong>Error:</strong> <%= $error %>
-</div>
-% }
+%= include "partials/_error_alert", message => $error
 
-<div class="card border-secondary mb-3">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <span>Escalation Targets</span>
+%= include 'partials/_card', title => 'Escalation Targets', header_class => '', body_class => 'p-2', header_extra => begin
     % if ($can_edit) {
     <button type="button" class="btn btn-sm btn-danger" id="target-add-btn">Add Target</button>
     % } elsif ($self->escalation_manage_enable) {
     <a class="btn btn-sm btn-outline-secondary" href="/escalation/edit">Edit</a>
     % }
-  </div>
-  <div class="p-2">
+% end, body => begin
     <div id="esc-action-status" class="small mb-2" style="display:none"></div>
     % if (@$targets) {
     <div class="table-responsive">
@@ -67,94 +55,69 @@
       </table>
     </div>
     % } else {
-    <div class="alert alert-secondary py-2 mb-0">No escalation targets configured yet.</div>
+    %= include "partials/_empty_alert", message => "No escalation targets configured yet.", extra_class => "mb-0"
     % }
-  </div>
-</div>
+% end
 
 % if ($can_edit) {
 <!-- Target add/edit modal — the config form is built from the type's
      config_fields spec, so new escalation types need no template changes. -->
-<div class="modal fade" id="target-modal" tabindex="-1">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content bg-dark text-light border-secondary">
-      <div class="modal-header py-2 border-secondary">
-        <h6 class="modal-title" id="target-modal-title">Add Escalation Target</h6>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <input type="hidden" id="target-id" value="">
-        <div class="row g-2 mb-2">
-          <div class="col-md-6">
-            <label class="form-label small text-muted mb-1">Name</label>
-            <input type="text" id="target-name" class="form-control form-control-sm">
-          </div>
-          <div class="col-md-4">
-            <label class="form-label small text-muted mb-1">Type</label>
-            <select id="target-type" class="form-select form-select-sm"></select>
-          </div>
-          <div class="col-md-2 d-flex align-items-end">
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="target-enabled" checked>
-              <label class="form-check-label small" for="target-enabled">Enabled</label>
-            </div>
-          </div>
-        </div>
-        <div class="mb-2">
-          <label class="form-label small text-muted mb-1">Description</label>
-          <input type="text" id="target-description" class="form-control form-control-sm">
-        </div>
-        <div class="text-muted small mb-1" id="target-type-desc"></div>
-        <div id="target-config-fields" class="row g-2 mb-2"></div>
-        <div id="target-error" class="text-warning small" style="display:none"></div>
-      </div>
-      <div class="modal-footer py-2 border-secondary">
-        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-sm btn-danger" id="target-save-btn">Save</button>
+%= include 'partials/_modal', id => 'target-modal', title => 'Add Escalation Target', title_id => 'target-modal-title', dialog => 'modal-lg modal-dialog-scrollable', body => begin
+  <input type="hidden" id="target-id" value="">
+  <div class="row g-2 mb-2">
+    <div class="col-md-6">
+      <label class="form-label small text-muted mb-1">Name</label>
+      <input type="text" id="target-name" class="form-control form-control-sm">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label small text-muted mb-1">Type</label>
+      <select id="target-type" class="form-select form-select-sm"></select>
+    </div>
+    <div class="col-md-2 d-flex align-items-end">
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="target-enabled" checked>
+        <label class="form-check-label small" for="target-enabled">Enabled</label>
       </div>
     </div>
   </div>
-</div>
+  <div class="mb-2">
+    <label class="form-label small text-muted mb-1">Description</label>
+    <input type="text" id="target-description" class="form-control form-control-sm">
+  </div>
+  <div class="text-muted small mb-1" id="target-type-desc"></div>
+  <div id="target-config-fields" class="row g-2 mb-2"></div>
+  <div id="target-error" class="text-warning small" style="display:none"></div>
+% end, footer => begin
+  <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+  <button type="button" class="btn btn-sm btn-danger" id="target-save-btn">Save</button>
+% end
 
 <!-- Test result modal -->
-<div class="modal fade" id="test-result-modal" tabindex="-1">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content bg-dark text-light border-secondary">
-      <div class="modal-header py-2 border-secondary">
-        <h6 class="modal-title" id="test-result-title">Test Escalation</h6>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div id="test-result-loading" class="text-center text-muted py-3">Sending test escalation…</div>
-        <div id="test-result-content" style="display:none">
-          <div id="test-result-error" class="text-warning small mb-2" style="display:none"></div>
-          <div id="test-result-payload-wrap" style="display:none">
-            <span class="text-muted small fw-semibold">Payload sent</span>
-            <pre id="test-result-payload" class="small mt-1 mb-0"
-                 style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
-          </div>
-        </div>
-      </div>
+%= include 'partials/_modal', id => 'test-result-modal', title => 'Test Escalation', title_id => 'test-result-title', dialog => 'modal-lg modal-dialog-scrollable', body => begin
+  <div id="test-result-loading" class="text-center text-muted py-3">Sending test escalation…</div>
+  <div id="test-result-content" style="display:none">
+    <div id="test-result-error" class="text-warning small mb-2" style="display:none"></div>
+    <div id="test-result-payload-wrap" style="display:none">
+      <span class="text-muted small fw-semibold">Payload sent</span>
+      <pre id="test-result-payload" class="small mt-1 mb-0"
+           style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>
     </div>
   </div>
-</div>
+% end
 
 <script>
 var ESC_TARGETS = <%== $targets_json %>;
 var ESC_TYPES   = <%== $types_json %>;
 
 document.addEventListener('DOMContentLoaded', function() {
+  var util        = window.LilithUtil;
   var targetModal = new bootstrap.Modal(document.getElementById('target-modal'));
   var testModal   = new bootstrap.Modal(document.getElementById('test-result-modal'));
   var typeEl      = document.getElementById('target-type');
   var fieldsEl    = document.getElementById('target-config-fields');
   var statusEl    = document.getElementById('esc-action-status');
 
-  function showStatus(message, succeeded) {
-    statusEl.textContent = message;
-    statusEl.className = 'small mb-2 ' + (succeeded ? 'text-success' : 'text-warning');
-    statusEl.style.display = '';
-  }
+  function showStatus(message, succeeded) { util.showStatus(statusEl, message, succeeded); }
 
   function typeInfo(typeName) {
     for (var typeIndex = 0; typeIndex < ESC_TYPES.length; typeIndex++) {
@@ -163,12 +126,7 @@ document.addEventListener('DOMContentLoaded', function() {
     return null;
   }
 
-  function findTarget(targetId) {
-    for (var targetIndex = 0; targetIndex < ESC_TARGETS.length; targetIndex++) {
-      if (String(ESC_TARGETS[targetIndex].id) === String(targetId)) { return ESC_TARGETS[targetIndex]; }
-    }
-    return null;
-  }
+  function findTarget(targetId) { return util.findById(ESC_TARGETS, targetId); }
 
   // populate the type select
   ESC_TYPES.forEach(function(escType) {
@@ -382,7 +340,7 @@ document.addEventListener('DOMContentLoaded', function() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody)
     })
-      .then(function(response) { return response.json().then(function(responseData) { return { ok: response.ok, data: responseData }; }); })
+      .then(util.unwrap)
       .then(function(result) {
         if (!result.ok || result.data.error) {
           errorEl.textContent = result.data.error || 'save failed';
@@ -402,7 +360,7 @@ document.addEventListener('DOMContentLoaded', function() {
       var targetId = this.dataset.targetId;
       if (!window.confirm('Delete escalation target "' + this.dataset.targetName + '"?')) { return; }
       fetch('/api/escalation/targets/' + encodeURIComponent(targetId) + '/delete', { method: 'POST' })
-        .then(function(response) { return response.json().then(function(responseData) { return { ok: response.ok, data: responseData }; }); })
+        .then(util.unwrap)
         .then(function(result) {
           if (!result.ok || result.data.error) {
             showStatus(result.data.error || 'delete failed', false);
@@ -424,7 +382,7 @@ document.addEventListener('DOMContentLoaded', function() {
       document.getElementById('test-result-content').style.display = 'none';
       testModal.show();
       fetch('/api/escalation/targets/' + encodeURIComponent(targetId) + '/test', { method: 'POST' })
-        .then(function(response) { return response.json().then(function(responseData) { return { ok: response.ok, data: responseData }; }); })
+        .then(util.unwrap)
         .then(function(result) {
           var errorEl     = document.getElementById('test-result-error');
           var payloadWrap = document.getElementById('test-result-payload-wrap');

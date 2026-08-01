@@ -1,0 +1,24 @@
+/* Global Lilith styling, loaded by the default layout after Bootstrap. */
+
+body { padding-top: 56px; font-size: 0.9rem; }
+.navbar-brand { color: #dc3545 !important; font-weight: 700; letter-spacing: 2px; font-size: 1.1rem; }
+.table-sm td, .table-sm th { white-space: nowrap; font-size: 0.82rem; }
+pre.raw-json { max-height: 600px; overflow-y: auto; font-size: 0.78em; background: #1a1a2e; border-radius: 4px; padding: 1rem; }
+.event-link { color: #dc3545; text-decoration: none; }
+.event-link:hover { text-decoration: underline; }
+.form-label { font-size: 0.78rem; color: #adb5bd; margin-bottom: 2px; }
+
+/* The small "?" button that opens the IP / Domain info modal (partials/_info_btn). */
+.info-btn { font-size: 0.65rem; line-height: 1.2; }
+
+@keyframes rowNewFlash { from { background-color: rgba(255,193,7,0.35); } to { background-color: transparent; } }
+tr.row-new > td { animation: rowNewFlash 4s ease-out; }
+
+/* Compact multi-column layout for the event top info card: pack short
+   key/value pairs into as many columns as the viewport allows, letting
+   long values (and the IP rows with geo/lookup buttons) span the row. */
+.event-info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 0.1rem 1.5rem; }
+.event-info-item { display: flex; gap: 0.5rem; align-items: baseline; padding: 0.15rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); min-width: 0; }
+.event-info-key  { flex: 0 0 auto; min-width: 120px; font-size: 0.82rem; }
+.event-info-val  { font-size: 0.82rem; overflow-wrap: anywhere; min-width: 0; }
+.event-info-wide { grid-column: 1 / -1; }

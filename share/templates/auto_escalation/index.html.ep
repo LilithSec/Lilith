@@ -1,29 +1,17 @@
 % layout 'default';
 % title 'Auto-Escalation Rules';
 
-<nav aria-label="breadcrumb" class="mb-3">
-  <ol class="breadcrumb">
-    <li class="breadcrumb-item"><a href="/search" class="text-danger">Search</a></li>
-    <li class="breadcrumb-item active">Auto-Escalation Rules</li>
-  </ol>
-</nav>
+%= include "partials/_breadcrumb", crumbs => [ { label => "Search", url => "/search" }, { label => "Auto-Escalation Rules" } ]
 
-% if ($error) {
-<div class="alert alert-danger py-2">
-  <strong>Error:</strong> <%= $error %>
-</div>
-% }
+%= include "partials/_error_alert", message => $error
 
-<div class="card border-secondary mb-3">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <span>Auto-Escalation Rules</span>
+%= include 'partials/_card', title => 'Auto-Escalation Rules', header_class => '', body_class => 'p-2', header_extra => begin
     % if ($can_manage) {
     <button type="button" class="btn btn-sm btn-danger" id="rule-add-btn">Add Rule</button>
     % } else {
     <span class="badge bg-secondary">read-only — set auto_escalation_manage_enable to edit</span>
     % }
-  </div>
-  <div class="p-2">
+% end, body => begin
     <div id="ae-action-status" class="small mb-2" style="display:none"></div>
     % if (@$rules) {
     <div class="table-responsive">
@@ -74,21 +62,13 @@
       </table>
     </div>
     % } else {
-    <div class="alert alert-secondary py-2 mb-0">No auto-escalation rules configured yet.</div>
+    %= include "partials/_empty_alert", message => "No auto-escalation rules configured yet.", extra_class => "mb-0"
     % }
-  </div>
-</div>
+% end
 
 <!-- Add/edit/view rule modal. Phase 1 edits the match tree as JSON; the
      actions are built from the targets + note inputs. -->
-<div class="modal fade" id="rule-modal" tabindex="-1">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content bg-dark text-light border-secondary">
-      <div class="modal-header py-2 border-secondary">
-        <h6 class="modal-title" id="rule-modal-title">Add Rule</h6>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
+%= include 'partials/_modal', id => 'rule-modal', title => 'Add Rule', title_id => 'rule-modal-title', dialog => 'modal-lg modal-dialog-scrollable', body => begin
         <input type="hidden" id="rule-id" value="">
         <div class="row g-2 mb-2">
           <div class="col-md-5">
@@ -191,16 +171,12 @@
             </table>
           </div>
         </div>
-      </div>
-      <div class="modal-footer py-2 border-secondary">
+% end, footer => begin
         <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Close</button>
         % if ($can_manage) {
         <button type="button" class="btn btn-sm btn-danger" id="rule-save-btn">Save</button>
         % }
-      </div>
-    </div>
-  </div>
-</div>
+% end
 
 <script>
 var AE_RULES     = <%== $rules_json %>;
@@ -208,21 +184,13 @@ var AE_TARGETS   = <%== $targets_json %>;
 var AE_CAN_MANAGE = <%= $can_manage ? 'true' : 'false' %>;
 
 document.addEventListener('DOMContentLoaded', function() {
+  var util      = window.LilithUtil;
   var ruleModal = new bootstrap.Modal(document.getElementById('rule-modal'));
   var statusEl  = document.getElementById('ae-action-status');
 
-  function status(message, isSuccess) {
-    statusEl.textContent = message;
-    statusEl.className = 'small mb-2 ' + (isSuccess ? 'text-success' : 'text-warning');
-    statusEl.style.display = '';
-  }
+  function status(message, isSuccess) { util.showStatus(statusEl, message, isSuccess); }
 
-  function findRule(id) {
-    for (var index = 0; index < AE_RULES.length; index++) {
-      if (String(AE_RULES[index].id) === String(id)) { return AE_RULES[index]; }
-    }
-    return null;
-  }
+  function findRule(id) { return util.findById(AE_RULES, id); }
 
   // ---- Visual match builder ------------------------------------------------
   // The builder edits the same match tree the DSL uses. A group serializes to
@@ -521,7 +489,7 @@ document.addEventListener('DOMContentLoaded', function() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(built.body)
       })
-        .then(function(response){ return response.json().then(function(data){ return { ok: response.ok, data: data }; }); })
+        .then(util.unwrap)
         .then(function(result){
           if (!result.ok || result.data.error) {
             errorEl.textContent = result.data.error || 'save failed';
@@ -539,7 +507,7 @@ document.addEventListener('DOMContentLoaded', function() {
       var id = this.dataset.ruleId;
       if (!window.confirm('Delete auto-escalation rule "' + this.dataset.ruleName + '"?')) { return; }
       fetch('/api/auto_escalation/rules/' + encodeURIComponent(id) + '/delete', { method: 'POST' })
-        .then(function(response){ return response.json().then(function(data){ return { ok: response.ok, data: data }; }); })
+        .then(util.unwrap)
         .then(function(result){
           if (!result.ok || result.data.error) { status(result.data.error || 'delete failed', false); return; }
           window.location.reload();
@@ -555,7 +523,7 @@ document.addEventListener('DOMContentLoaded', function() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: wantEnabled ? 1 : 0 })
       })
-        .then(function(response){ return response.json().then(function(data){ return { ok: response.ok, data: data }; }); })
+        .then(util.unwrap)
         .then(function(result){
           if (!result.ok || result.data.error) { checkbox.checked = !wantEnabled; status(result.data.error || 'toggle failed', false); return; }
           status('rule ' + id + (wantEnabled ? ' enabled' : ' disabled'), true);
@@ -587,7 +555,7 @@ document.addEventListener('DOMContentLoaded', function() {
         go_back_minutes: document.getElementById('rule-preview-minutes').value.trim()
       })
     })
-      .then(function(response){ return response.json().then(function(data){ return { ok: response.ok, data: data }; }); })
+      .then(util.unwrap)
       .then(function(result){
         if (!result.ok || result.data.error) {
           previewStatusEl.textContent = result.data.error || 'preview failed';

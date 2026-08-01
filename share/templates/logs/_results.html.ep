@@ -33,6 +33,6 @@
     </table>
   </div><!-- /table-responsive -->
   % } else {
-  <div class="alert alert-secondary py-2">No log rows found.</div>
+  %= include "partials/_empty_alert", message => "No log rows found."
   % }
 </div>

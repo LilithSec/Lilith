@@ -1,0 +1,9 @@
+% # The "Error: ..." banner every page shows for a failed query. Include as:
+% #   %= include 'partials/_error_alert', message => $error
+% # Renders nothing when the message is unset, so callers need no guard.
+% my $message = stash('message');
+% if ($message) {
+<div class="alert alert-danger py-2">
+  <strong>Error:</strong> <%= $message %>
+</div>
+% }

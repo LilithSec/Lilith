@@ -8,14 +8,12 @@
 </div>
 
 % if ($error) {
-<div class="alert alert-danger py-2"><strong>Error:</strong> <%= $error %></div>
+%= include 'partials/_error_alert', message => $error
 % } elsif (!$row) {
-<div class="alert alert-secondary py-2">No such log record.</div>
+%= include 'partials/_empty_alert', message => 'No such log record.'
 % } else {
 
-<div class="card border-secondary mb-3">
-  <div class="card-header py-1 small text-muted">Columns</div>
-  <div class="card-body py-2">
+%= include 'partials/_card', title => 'Columns', body => begin
     <table class="table table-dark table-sm table-bordered mb-0">
       <tbody>
         % for my $col (sort keys %$row) {
@@ -27,16 +25,12 @@
         % }
       </tbody>
     </table>
-  </div>
-</div>
+% end
 
 % if (defined $pretty_raw) {
-<div class="card border-secondary">
-  <div class="card-header py-1 small text-muted">raw</div>
-  <div class="card-body py-2">
+%= include 'partials/_card', title => 'raw', card_class => 'border-secondary', body => begin
     <pre class="mb-0 small text-light" style="white-space:pre-wrap;word-break:break-word"><%= $pretty_raw %></pre>
-  </div>
-</div>
+% end
 % }
 
 % }

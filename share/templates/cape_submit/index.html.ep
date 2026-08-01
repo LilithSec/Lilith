@@ -1,18 +1,9 @@
 % layout 'default';
 % title 'CAPE Submit';
 
-<nav aria-label="breadcrumb" class="mb-3">
-  <ol class="breadcrumb">
-    <li class="breadcrumb-item"><a href="/search" class="text-danger">Search</a></li>
-    <li class="breadcrumb-item active">CAPE Submit</li>
-  </ol>
-</nav>
+%= include "partials/_breadcrumb", crumbs => [ { label => "Search", url => "/search" }, { label => "CAPE Submit" } ]
 
-<div class="card border-secondary mb-3">
-  <div class="card-header">
-    <span>Submit a File for Detonation</span>
-  </div>
-  <div class="p-3">
+%= include 'partials/_card', title => 'Submit a File for Detonation', header_class => '', body_class => 'p-3', title_span => 1, body => begin
     <form id="cape-submit-form">
       <div class="row g-3">
         <div class="col-md-6">
@@ -59,8 +50,7 @@
         </tbody>
       </table>
     </div>
-  </div>
-</div>
+% end
 
 <script>
 (function () {
@@ -96,10 +86,10 @@
     setStatus('muted', 'Submitting ' + fileInput.files[0].name + ' …');
 
     fetch('/api/cape_submit/submit', { method: 'POST', body: data })
-      .then(function (response) { return response.json().then(function (body) { return { ok: response.ok, body: body }; }); })
+      .then(window.LilithUtil.unwrap)
       .then(function (res) {
         btn.disabled = false;
-        var body = res.body || {};
+        var body = res.data || {};
         if (res.ok && body.status === 'ok') {
           setStatus('success', 'Submitted as ' + body.name);
         } else {

@@ -1,0 +1,16 @@
+% # Page breadcrumb. Include as:
+% #   %= include 'partials/_breadcrumb', crumbs => [ { label => 'Search', url => '/search' }, { label => 'CAPE Submit' } ]
+% # A crumb with no url renders as the active (final) item.
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    % for my $crumb (@$crumbs) {
+    % if (defined $crumb->{url}) {
+    <li class="breadcrumb-item">
+      <a href="<%= $crumb->{url} %>" class="text-danger"><%= $crumb->{label} %></a>
+    </li>
+    % } else {
+    <li class="breadcrumb-item active"><%= $crumb->{label} %></li>
+    % }
+    % }
+  </ol>
+</nav>

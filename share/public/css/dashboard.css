@@ -1,0 +1,24 @@
+/* Dashboard grid and widget styling, loaded by the dashboard page. */
+
+.grid-stack-item-content { overflow: hidden; }
+.db-card { display: flex; flex-direction: column; }
+.db-handle { cursor: move; user-select: none; }
+.db-handle::before { content: "\2637"; opacity: .35; margin-right: .4rem; font-size: .8em; }
+.db-chart { position: relative; min-height: 0; flex: 1 1 auto; }
+.db-chart > canvas { position: absolute; inset: 0; }
+.db-wbtn { line-height: 1; text-decoration: none; }
+
+/* stat (text) widgets are just a label + a number, so pack them tight enough
+   to sit one grid-row high instead of wasting a whole chart-sized cell. */
+.db-stat .card-body { padding: .25rem .5rem !important; }
+.db-stat .card-title { font-size: .7rem; text-transform: uppercase; letter-spacing: .02em; opacity: .75; }
+.db-stat [data-role=stat-value] { font-size: 1.5rem; line-height: 1.1; }
+
+/* Edit-only controls (Add widget, Reset, per-widget gear/×) are hidden until
+   the Edit toggle adds .db-editing to the body. */
+body:not(.db-editing) .db-edit-only { display: none; }
+
+/* outside edit mode the grid is locked, so drop the drag affordances too:
+   the move cursor and the drag-handle glyph before each widget title. */
+body:not(.db-editing) .db-handle { cursor: default; }
+body:not(.db-editing) .db-handle::before { content: none; }
