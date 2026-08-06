@@ -10,28 +10,28 @@ in the navbar (the frontend is unauthenticated — see [security](security.md)).
 
 Along the top:
 
-- **Dashboard** — which saved board to show. Pick another to switch to it; the
+- **Dashboard** :: which saved board to show. Pick another to switch to it; the
   star (★) marks the default board (the one loaded first).
-- **Default table** — the default source for any widget that does not set its
+- **Default table** :: the default source for any widget that does not set its
   own: Suricata, Sagan, CAPE, or Baphomet, and — when an [Allani](#allani-log-widgets)
   store is configured — the log sources `syslog`, `http (access)`, or
   `http error`. Each widget can override it (see the widget config below), so one
   board can span tables; a widget left to follow the default reads whichever it
   is set to.
-- **Time range** — a preset relative window (Last hour … Last 30 days) or a
+- **Time range** :: a preset relative window (Last hour … Last 30 days) or a
   **Custom range** with From/To pickers (native date plus 24-hour hour/minute).
   A relative window is what the board saves; a custom absolute range is a live
   override that is not persisted with the board.
-- **Bucket** — the time bucket the over-time charts use: `auto` (the default),
+- **Bucket** :: the time bucket the over-time charts use: `auto` (the default),
   or a fixed `minute` / `hour` / `day` / `week` / `month`. `auto` sizes the
   bucket to the window (minute up to 3h, hour up to 2d, day up to 90d, week up to
   ~2y, month beyond) so a long window does not produce a giant series. Each
   **Alerts over time** widget can override it (see the widget config below).
-- **Show GPCD** — off by default. When off, `Generic Protocol Command Decode`
+- **Show GPCD** :: off by default. When off, `Generic Protocol Command Decode`
   alerts are excluded everywhere (as the search page hides them). Tick it to
   include them. Only affects tables with a classification (Suricata/Sagan).
-- **Refresh** — re-pulls all data for the current controls.
-- **Edit** — toggles edit mode (see below). Its dropdown holds the board actions:
+- **Refresh** :: re-pulls all data for the current controls.
+- **Edit** :: toggles edit mode (see below). Its dropdown holds the board actions:
   **New dashboard**, **Rename**, **Set as default**, and **Delete**.
 
 The **Default table**, **Time range**, **Bucket**, and **Show GPCD** controls are
@@ -50,8 +50,8 @@ locked — widgets can't be moved or resized, so casually dragging one never
 overwrites the saved layout. Clicking **Edit** unlocks it and reveals the
 editing controls:
 
-- **+ Add widget** — opens the widget picker (see below).
-- **Reset to…** — replaces this board's widgets with a built-in **preset**
+- **+ Add widget** :: opens the widget picker (see below).
+- **Reset to…** :: replaces this board's widgets with a built-in **preset**
   (after a confirm). The menu offers **Suricata** (the SIEM overview seeded on
   the default board), **CAPE**, and **Baphomet** (a judgments overview); when an
   [Allani](#allani-log-widgets) store is
@@ -72,16 +72,16 @@ widget set below).
 
 ## Widget types
 
-- **Alerts over time** — a stacked bar over the time range, optionally split by a
+- **Alerts over time** :: a stacked bar over the time range, optionally split by a
   column (the default splits by classification/target). Its **Time bucket** field
   defaults to *Follow dashboard* (the board's Bucket control) but can pin its own
   `auto` / `minute` / `hour` / `day` / `week` / `month`.
-- **Top values** — the most common values of any column, as a **bar or pie**,
+- **Top values** :: the most common values of any column, as a **bar or pie**,
   showing between 1 and 50 values.
-- **Source countries** — the busiest source IPs resolved to countries through the
+- **Source countries** :: the busiest source IPs resolved to countries through the
   GeoIP databases (needs an MMDB configured, see [configuration](configuration.md);
   otherwise the panel notes it is unavailable).
-- **Stat (text)** — a single big number: the **Total** count, **Distinct** values
+- **Stat (text)** :: a single big number: the **Total** count, **Distinct** values
   of a column, **Escalated** count, or the **Busiest** value of a column, with an
   optional custom label (defaulting from the metric). Numbers are shown in full
   with thousands separators by default; tick **Abbreviate large numbers** to
@@ -98,15 +98,15 @@ they only offer columns that table actually supports.
 The **Top values** and **Alerts over time** widgets take a *measure* — what to
 aggregate, instead of just counting rows:
 
-- **Count** (default) — number of alerts.
-- **Total bytes / packets** (Suricata) — sums the flow byte/packet counters, so
+- **Count** (default) :: number of alerts.
+- **Total bytes / packets** (Suricata) :: sums the flow byte/packet counters, so
   "Top values of `src_ip` by Total bytes" is a **top-talkers** panel and
   "Alerts over time by Total bytes" is a **bandwidth** chart.
-- **Distinct destination ports / IPs / sources** — counts distinct values, so
+- **Distinct destination ports / IPs / sources** :: counts distinct values, so
   "Top values of `src_ip` by Distinct destination ports" surfaces **port scans /
   fan-out**.
 - **Average / Max malscore, Total size** (CAPE).
-- **Average / Max score, Distinct source / destination IPs** (Baphomet) — so
+- **Average / Max score, Distinct source / destination IPs** (Baphomet) :: so
   "Top values of `src_ip` by Max score" ranks the worst offenders by their
   harshest judgment.
 

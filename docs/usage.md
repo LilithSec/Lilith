@@ -178,11 +178,14 @@ LILITH_CONFIG=/etc/lilith.toml mojo_lilith prefork
 All the standard Mojolicious server commands work. Read
 [security](security.md) before exposing it — it is unauthenticated.
 
-- **/search** — the same filters as the CLI search, in a form. Escalated
+- **/search** :: the same filters as the CLI search, in a form. Escalated
   events are badged with a red **E**. The **When** control switches the time
   window between *Last N min* (relative) and *Range* (an explicit From/To); the
   range bounds are read in the server's timezone.
-- **/logs** — browse the logs an [Allani](https://github.com/LilithSec/Allani)
+- **/dashboard** :: a configurable grid of charts over the same alerts, with
+  saved boards, per-board time range and table, and built-in presets per
+  source. It has its own page: [dashboard](dashboard.md).
+- **/logs** :: browse the logs an [Allani](https://github.com/LilithSec/Allani)
   store holds, when an `[allani]` block is configured. A source selector
   switches between syslog, http (access), http error, and an interleaved
   http view; per-source filters, a minutes-back window, paging, and
@@ -193,7 +196,7 @@ All the standard Mojolicious server commands work. Read
   per-source preset (Syslog, HTTP, HTTP Access, HTTP Error). The page and its
   navbar entry stay hidden without `[allani]` — see
   [configuration](configuration.md).
-- **Event view** — the full event with the decoded EVE record. IPs open an
+- **Event view** :: the full event with the decoded EVE record. IPs open an
   info modal (reverse DNS, whois, GeoIP when databases are configured);
   domains an info panel with whois and DNS, plus an **HTTPS** button
   (certificate and per-phase timing detail against `https://DOMAIN:PORT/`)
@@ -204,7 +207,7 @@ All the standard Mojolicious server commands work. Read
   IP (interleaved http), windowed to reach back around the event. With
   `escalation_enable` on, an **Escalate** button and the escalation history
   appear ([escalation](escalation.md)).
-- **/cape_submit** — a **CAPE** navbar button and page for handing a file to a
+- **/cape_submit** :: a **CAPE** navbar button and page for handing a file to a
   configured CAPEv2 box (`mojo_cape_submit`) for detonation, the web equivalent
   of the `cape_submit` CLI command. Pick a server, set a slug (defaults to
   `cape_slug`), choose a file, and submit; the computed hashes/size/magic and the
@@ -212,13 +215,13 @@ All the standard Mojolicious server commands work. Read
   one `[cape_servers.*]` — like the CLI, it pushes a file to an outside service,
   so it is off by default. Uploads are capped at 1 GiB (raise or lower with
   `cape_max_upload_size`, in bytes).
-- **Virani dropdown** — appears in the navbar when any `[virani.*]` remote
+- **Virani dropdown** :: appears in the navbar when any `[virani.*]` remote
   is configured. **PCAP Search** takes an arbitrary BPF filter and time
   range: it always builds a ready-to-copy local `virani` command, and with
   `virani_search_enable` on it can download straight through the web
   server. With that option on, **Cached Searches** lists the remote's most
   recent (up to 50) cached searches with per-row download.
-- **Download PCAP** — fetches the PCAP for the event's flow (src/dest IP
+- **Download PCAP** :: fetches the PCAP for the event's flow (src/dest IP
   and ports over the flow window, widened by 60 seconds each end) and
   streams it back. The set to pull from is selectable (queried live from
   the remote), and a dropdown offers the equivalent `virani` command to run
@@ -233,26 +236,54 @@ LILITH_CONFIG=/etc/lilith.toml mojo_lilith_receiver prefork
 
 Instead of Lilith tailing EVE files locally, a remote sensor can parse its
 own EVE stream and push the resulting rows to a central Lilith. The sensor
-does the same `parse_eve` work `lilith run` does and POSTs the row as JSON;
+does the same `parse_eve` work `lilith run` does and sends the row as JSON;
 only the receiver touches the database.
 
-- **Endpoint** — `POST /eve/:table`, where `:table` is `suricata_alerts`,
+- **Endpoint** :: `/eve/:table`, where `:table` is `suricata_alerts`,
   `sagan_alerts`, `cape_alerts`, or `baphomet_alerts`. An unknown table is a
-  `404`.
-- **Auth** — `Authorization: Bearer <key>`, checked against the keys in the
+  `404`. It takes either an HTTP `POST` per alert or a WebSocket the sensor
+  streams alerts down (see below); both validate and insert identically.
+- **Auth** :: `Authorization: Bearer <key>`, checked against the keys in the
   database (see below). No/invalid key, or a key not permitted for the
   client's IP, is a `401`; a key not permitted for the row's instance is a
   `403`. With no keys created every request is refused.
-- **Body** — a JSON object with one key per ingestable column for that table
+- **Body** :: a JSON object with one key per ingestable column for that table
   (the same keys `parse_eve` returns, including `raw`). `raw` may be sent as
   a JSON object or as a JSON string.
-- **Rejected columns** — `id`, `escalations`, and `auto_escalated` are set by
+- **Rejected columns** :: `id`, `escalations`, and `auto_escalated` are set by
   the database and the escalation subsystem, never by a sensor. A body that
   carries any of them — or any key that is not a column of that table — is
   rejected with `400` rather than silently stripped, so a caller is never
   misled about what was stored.
-- **Response** — `201 {"status":"ok","id":<new id>}` on success; a `4xx`/`5xx`
+- **Response** :: `201 {"status":"ok","id":<new id>}` on success; a `4xx`/`5xx`
   with `{"status":"error","error":...}` otherwise.
+
+### Streaming over a WebSocket
+
+A sensor pushing a lot of alerts can open one WebSocket per table instead of
+paying for a request per alert:
+
+```
+GET /eve/:table   (Upgrade: websocket)
+Authorization: Bearer <key>
+
+-> {"instance":"...", ..., "raw":{ ... }}   one JSON frame per alert
+<- {"status":"ok","id":123}                 one status frame back per alert
+```
+
+The bearer key and its IP scope are checked at the handshake, exactly as for
+the POST, and a handshake for an unknown table is refused with the same `404`
+rather than opening a socket with nowhere to write. Each frame carries the
+same row object a POST body would, gets the same validation, and is answered
+with the same body the POST would have rendered. A bad frame is reported but
+leaves the connection up, so one malformed alert does not cost the rest of the
+batch. Idle connections are never timed out, since a sensor may go quiet
+between alerts.
+
+[Lilu](https://github.com/LilithSec/App-Lilu) picks between the two with its
+`lilith_websocket` config value.
+
+### Managing keys
 
 Keys are managed with the CLI and stored hashed (only the SHA-256 is kept):
 

@@ -53,6 +53,12 @@ before turning on any of the enables — the frontend is unauthenticated.
 | `geoip_ip_asn`               | Path to an ASN `.mmdb`. Same default scheme. Records from every database that opens are merged. |
 | `domaininfo_cache`           | Boolean. Cache domain info lookups in memory per worker. Default false. |
 | `domaininfo_cache_ttl`       | Seconds a cached domain info result stays fresh. Default `300`. |
+| `dnstracer_enable`           | Boolean. Run `dnstracer` as part of a domain info lookup and show its output in the panel. Off by default, and needs the `dnstracer` binary installed. Its own deadline is a fixed 30 seconds. |
+| `dnstracer_flags`            | Array of extra flags to pass `dnstracer`, e.g. `["-4"]`. Empty by default. |
+| `dns_bg_timeout`             | Seconds the domain info lookup waits on its DNS queries before giving up on the ones still outstanding. Default `3`. |
+| `cape_enable`                | Boolean. Enables the `/cape_submit` page and its CAPE navbar button. Off by default — a submission pushes a file to an outside service. Needs at least one `[cape_servers.*]` with a `url`; without one the page stays hidden and 404s. |
+| `cape_slug`                  | The default slug submissions are made under. Default `lilith`. |
+| `cape_max_upload_size`       | Caps an upload to the `/cape_submit` page, in bytes. Default `1073741824` (1 GiB), which also raises Mojolicious's own 16 MiB request cap so a large sample is not dropped mid-upload. Only applied when submission is on. |
 
 The CLI escalation actions are never gated by the enables above — those
 gates exist for the unauthenticated web frontend, while the CLI already
@@ -152,11 +158,52 @@ pass="WhateverYouSetAsApassword"
 Like the other web features it is unauthenticated; log lines can carry
 sensitive data, so read [security](security.md) before exposing it.
 
+## CAPEv2 boxes: `[cape_servers.*]`
+
+The CAPEv2 boxes (`mojo_cape_submit`) Lilith may hand a sample to, one sub
+table each. They do double duty:
+
+- **Submission** :: `lilith cape_submit` and the web `/cape_submit` page upload
+  a local file for detonation. This is what the top-level `cape_enable`,
+  `cape_slug`, and `cape_max_upload_size` above gate and configure.
+- **Results** :: the event view of a `cape` alert pulls that detonation's
+  screenshots, signatures, and malscore from the box it ran on, matching the
+  event's `instance` against the sub table name. Reading results is
+  independent of `cape_enable` — it never pushes anything out — so it stays
+  available with submission turned off.
+
+| key              | required | description                                             |
+|------------------|----------|----------------------------------------------------------|
+| `url`            | yes      | The `mojo_cape_submit` endpoint samples are POSTed to.   |
+| `apikey_needed`  | no       | Boolean. Whether the server wants an API key.            |
+| `apikey`         | no       | The key to send when one is needed. It goes in the `Authorization: Bearer` header and the `apikey` form field, never in the JSON. |
+| `results_url`    | no       | Where detonation results are read from, if not the same host as submission. Defaults to `url`. |
+| `results_apikey` | no       | The key for the results endpoint. Defaults to `apikey`.  |
+| `web_url`        | no       | The box's CAPEv2 web UI. When set, the event view links out to the full styled report there; without it the report is streamed back through the results endpoint and renders unstyled. |
+
+```toml
+cape_enable = true
+cape_slug   = "lilith"
+
+# name it after the instance whose cape alerts it detonates, so the event
+# view can find the results for a run
+[cape_servers.cape-foo]
+url           = "http://192.168.14.15:8080/"
+apikey_needed = true
+apikey        = "deadbeefdeadbeefdeadbeef"
+web_url       = "https://cape.example.net/"
+```
+
+See [usage](usage.md) for the `cape_submit` command and the page it mirrors.
+Submission is off by default for the same reason the other outward-reaching
+features are; read [security](security.md).
+
 ## EVE receiver keys
 
-`mojo_lilith_receiver` (the daemon that accepts pushed alert rows over HTTP)
-has no config-file settings — its bearer keys live in the database, not the
-TOML. Manage them with the `lilith receiver_key_*` commands:
+`mojo_lilith_receiver` (the daemon that accepts pushed alert rows, by HTTP
+POST or over a WebSocket) has no config-file settings — its bearer keys live
+in the database, not the TOML. Manage them with the `lilith receiver_key_*`
+commands:
 
 ```shell
 # a key that may push from a subnet, only as instances named foo-*
@@ -190,6 +237,9 @@ allowed_referers=["https://lilith.example.net/"]
 escalation_enable = true
 escalation_manage_enable = true
 #auto_escalation_manage_enable = true
+
+# hand samples to the CAPEv2 box configured further down
+cape_enable = true
 
 # a suricata instance
 [eves.suricata-eve]
@@ -229,4 +279,11 @@ set="default"
 dsn="dbi:Pg:dbname=allani;host=192.168.1.2"
 user="allani"
 pass="WhateverYouSetAsApassword"
+
+# the CAPEv2 box the [eves.cape] detonations run on; named after that
+# instance so the event view can pull a run's results back
+[cape_servers.cape]
+url="http://192.168.14.15:8080/"
+apikey_needed=true
+apikey="deadbeefdeadbeefdeadbeef"
 ```

@@ -67,9 +67,13 @@ lilith esc_target_create --name soc-hook --type Webhook \
 ## Auto escalation
 
 Standing orders live in the `auto_escalations` table: a rule (the DSL
-below), the tables it applies to (`suricata`, `sagan`, `cape` — default
-all), a priority (lower first), and a `stop_on_match` flag that halts later
-rules for an alert an earlier rule already matched.
+below), the tables it applies to (`suricata`, `sagan`, `cape`, or
+`baphomet`), a priority (lower first), and a `stop_on_match` flag that halts
+later rules for an alert an earlier rule already matched.
+
+A rule that names no tables gets `suricata`, `sagan`, and `cape`. Baphomet
+is deliberately left out of that default, so escalating a judgment stays
+opt-in: a rule has to name `baphomet` itself.
 
 `lilith auto_escalate` evaluates the enabled rules against alerts ingested
 within its `-m` window that have not been considered yet, and escalates

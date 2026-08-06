@@ -8,8 +8,9 @@ In the world above she is an alert keeper: a daemon that follows the EVE
 logs of [Suricata](https://suricata.io/) and
 [Sagan](https://github.com/quadrantsec/sagan) (and detonation reports from
 [CAPEv2](https://github.com/kevoreilly/CAPEv2) via
-[CAPE::Utils](https://metacpan.org/pod/CAPE::Utils)) and writes every alert
-into PostgreSQL. From her book the alerts can be searched from the CLI or a
+[CAPE::Utils](https://metacpan.org/pod/CAPE::Utils), and the judgments
+[Baphomet](https://github.com/LilithSec/Baphomet) hands down) and writes
+every alert into PostgreSQL. From her book the alerts can be searched from the CLI or a
 web frontend, any single omen examined in full, the packets behind it
 fetched, and word sent onward — by hand or by rule — to whoever must act.
 

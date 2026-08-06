@@ -68,19 +68,19 @@ read-only Allani role if you want defence in depth.
 Several web features cause the server to *send* data somewhere, so each is
 its own opt-in:
 
-- `escalation_enable` — the Escalate button, history, the read-only target
+- `escalation_enable` :: the Escalate button, history, the read-only target
   view, and the read-only rule page with its dry-run preview. Escalating
   pushes event data at the configured targets, so even the "read mostly"
   tier can emit.
-- `escalation_manage_enable` — creating/editing/deleting/testing targets
+- `escalation_manage_enable` :: creating/editing/deleting/testing targets
   from the web UI. Kept separate because editing a target changes *where
   alerts are sent*, and the test button pushes synthetic events at outside
   services.
-- `auto_escalation_manage_enable` — editing rules from the web UI. Kept
+- `auto_escalation_manage_enable` :: editing rules from the web UI. Kept
   separate because a saved and enabled rule escalates automatically on the
   timer, forever, without further human involvement. With it off, rules can
   be seen and previewed but only changed via the CLI.
-- `virani_search_enable` — downloading arbitrary PCAP searches and browsing
+- `virani_search_enable` :: downloading arbitrary PCAP searches and browsing
   cached searches through the web server. Off by default because it exposes
   arbitrary captures, not just the flow behind an alert being examined.
 

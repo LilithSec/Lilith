@@ -18,15 +18,22 @@ Declared in `Makefile.PL`; the load bearing ones are below.
 | `Net::Server::Daemonize`                | `run --daemonize`                              |
 | `File::ShareDir`                        | finding the templates, public assets, migrations |
 
-Optional, each powering a single web UI feature and loaded lazily — Lilith
-runs without them and the feature simply stays inactive:
+Optional, each powering a single feature and loaded lazily — Lilith runs
+without them and the feature simply stays inactive:
 
 | module                    | feature                                             |
 |---------------------------|-----------------------------------------------------|
 | `Virani`                  | fetching flow PCAPs from remote Virani instances    |
+| `Allani`                  | browsing an Allani log store from the `/logs` page and the dashboard's log widgets |
 | `IP::Geolocation::MMDB`   | GeoIP data in the IP info modal                     |
 | `Mozilla::PublicSuffix`   | accurate registrable-domain reduction for whois     |
 | `Net::IP`                 | IPv6 reverse-DNS lookups in the IP info modal       |
+| `File::LibMagic`          | the full libmagic description sent with a `cape_submit` submission; falls back to `file(1)` |
+
+Two of the web UI's lookups shell out to a binary rather than using a
+module: the whois shown for an IP or a domain needs a `whois` client, and
+the domain info panel's optional dnstracer section needs `dnstracer`
+installed and `dnstracer_enable` set.
 
 ## From source
 

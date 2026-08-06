@@ -3,18 +3,21 @@
 ## The shape of it
 
 ```
-  Suricata            Sagan              CAPEv2 (via CAPE::Utils)
-  eve.json            eve.json           eve-ish json
-     |                   |                  |
-     v                   v                  v
-  +---------------------------------------------+
-  |  lilith run --- the ingest daemon           |
-  |  one POE::Wheel::FollowTail per [eves.*]    |
-  +---------------------|-----------------------+
-                        v
-                  PostgreSQL
-     suricata_alerts / sagan_alerts / cape_alerts
+  Suricata    Sagan       CAPEv2          Baphomet       remote sensors
+  eve.json    eve.json    (CAPE::Utils)   eve.json       (Lilith or Lilu)
+     |          |           |                |                |
+     v          v           v                v                v
+  +---------------------------------------------------+  +-----------------+
+  |  lilith run --- the ingest daemon                 |  | mojo_lilith_    |
+  |  one POE::Wheel::FollowTail per [eves.*]          |  | receiver        |
+  +-------------------------|-------------------------+  +--------|--------+
+                            |                                     |
+                            +-----------------+-------------------+
+                                              v
+                                         PostgreSQL
+     suricata_alerts / sagan_alerts / cape_alerts / baphomet_alerts
      escalation_targets / escalations / auto_escalations
+     receiver_apikeys / dashboards
         |                |                 |
         v                v                 v
   lilith (CLI)      mojo_lilith       lilith auto_escalate
@@ -36,10 +39,12 @@ annals.
 `lilith run` reads the config, and for every instance under `[eves.*]`
 creates a [POE](https://metacpan.org/pod/POE) session with a
 `POE::Wheel::FollowTail` following that EVE file. Each line is decoded as
-JSON; anything that is not an `alert` event is ignored. A malformed
-instance (missing `eve` or an unknown `type`) is warned about and skipped,
-so one bad entry does not stop monitoring of the valid ones. Errors also go
-to syslog (facility `daemon`).
+JSON and kept only if it is something that instance's `type` cares about:
+an `alert` event for Suricata, Sagan, and CAPE, or a judgment record for
+Baphomet (whose event types can be trimmed further with
+`baphomet_event_ignore`). A malformed instance (missing `eve` or an unknown
+`type`) is warned about and skipped, so one bad entry does not stop
+monitoring of the valid ones. Errors also go to syslog (facility `daemon`).
 
 For every alert an `event_id` is computed as the SHA256 (base64) of
 instance + host + timestamp + flow id + interface, giving a stable handle
@@ -65,7 +70,7 @@ the sensors carry a much smaller dependency chain. See
 PostgreSQL is required — the `raw` column is jsonb, and the schema is
 managed with
 [DBIx::Class::Migration](https://metacpan.org/pod/DBIx::Class::Migration)
-(currently schema version 9; see [install](install.md) for the `lilith deploy`
+(currently schema version 11; see [install](install.md) for the `lilith deploy`
 and `lilith migrate` commands that wrap it).
 
 | table                | what                                                         |
@@ -73,9 +78,12 @@ and `lilith migrate` commands that wrap it).
 | `suricata_alerts`    | Suricata alerts — flow tuple, classification, sig, gid/sid/rev, flow counters, `raw` |
 | `sagan_alerts`       | Sagan alerts — as above plus facility, level, priority, program, xff, and both the sending `host` and the `instance_host` the instance runs on |
 | `cape_alerts`        | CAPEv2 detonations — target, task, malscore, hashes, package, slug, submission source, start/stop |
+| `baphomet_alerts`    | Baphomet judgments — event type, kur, score, the offender as `src_ip` (or a non-IP `subject`), ban time, recidive flag, country |
 | `escalation_targets` | where word can be sent — name, type, per-type jsonb config, enabled flag |
 | `escalations`        | the audit trail — every escalation attempt, its status, error, and the raw payload actually sent |
 | `auto_escalations`   | the standing orders — match/actions rule DSL, priority, table scoping, match stats |
+| `receiver_apikeys`   | the EVE receiver's bearer keys — the SHA-256 of each key, its IP and instance scopes, enabled flag, last use |
+| `dashboards`         | saved dashboard boards — the widget layout and view settings as jsonb, and which board is the default |
 
 Each alert table also carries a `escalations bigint[]` column (the IDs of
 escalations recorded for that row, appended in the same transaction as the
@@ -99,13 +107,19 @@ each action is a subcommand under `Lilith::CLI::Command`. Global options
 (`daemon`, `prefork`, ...). It reads the same config file, via the
 `LILITH_CONFIG` env var when set. It serves:
 
-- `/search` — the annals, filtered and paged, with per-event badges
-- `/event/<table>/<id>` — a single event in full, with the decoded `raw`,
+- `/search` :: the annals, filtered and paged, with per-event badges
+- `/event/<table>/<id>` :: a single event in full, with the decoded `raw`,
   IP/domain info lookups, escalation, and PCAP download via Virani
-- `/escalation` and `/auto_escalation` — target and rule management, each
+- `/dashboard` :: the configurable chart overview of the annals, its boards
+  saved in the `dashboards` table (see [dashboard](dashboard.md))
+- `/logs` :: the [Allani](https://github.com/LilithSec/Allani) log store,
+  read-only and only when `[allani]` is configured
+- `/escalation` and `/auto_escalation` :: target and rule management, each
   gated by its own config option (see [escalation](escalation.md) and
   [security](security.md))
-- `/api/...` — the JSON endpoints behind all of the above
+- `/cape_submit` :: handing a local file to a CAPEv2 box for detonation,
+  only when `cape_enable` is set with a server configured
+- `/api/...` :: the JSON endpoints behind all of the above
 
 Blocking work — Virani fetches, whois/DNS lookups, escalation sends — runs
 in subprocesses so the event loop is never stalled by a slow remote.
@@ -114,13 +128,19 @@ in subprocesses so the event loop is never stalled by a slow remote.
 
 `mojo_lilith_receiver` (`Lilith::Receiver`) is the network counterpart to the
 local ingest daemon. Instead of Lilith tailing EVE files on the database host,
-a remote sensor parses its own EVE stream with the same `parse_eve` and POSTs
-each row to `POST /eve/:table`. The receiver authenticates the bearer key,
+a remote sensor parses its own EVE stream with the same `parse_eve` and pushes
+each row to `/eve/:table`. The receiver authenticates the bearer key,
 validates the body against that table's column set — rejecting the
 database/escalation-managed columns (`id`, `escalations`, `auto_escalated`)
 outright — and inserts through the shared `Lilith::insert_alert`, the same
 method the local tailer uses, so neither can drift from `%Lilith::alert_columns`.
 Sensors thus need no database credentials of their own.
+
+The same path is offered over two transports, and a sensor picks one: an HTTP
+`POST` per alert, or a WebSocket the sensor holds open and streams one JSON
+frame per alert down, which spares a high-volume sensor a fresh request per
+alert. Both authenticate identically and share the one validate-and-insert
+routine, so they cannot drift in what they accept. See [usage](usage.md).
 
 Keys live in the `receiver_apikeys` table (managed with `lilith
 receiver_key_*`), stored as their SHA-256. Each key can be scoped to a set of

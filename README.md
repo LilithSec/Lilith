@@ -8,8 +8,9 @@ In the world above, Lilith is an alert keeper: a daemon that follows the
 EVE logs of [Suricata](https://suricata.io/) and
 [Sagan](https://github.com/quadrantsec/sagan) (plus detonation reports from
 [CAPEv2](https://github.com/kevoreilly/CAPEv2) via
-[CAPE::Utils](https://metacpan.org/pod/CAPE::Utils)) and writes every alert
-into PostgreSQL — the interesting fields as columns, the full EVE record as
+[CAPE::Utils](https://metacpan.org/pod/CAPE::Utils), and the judgments
+[Baphomet](https://github.com/LilithSec/Baphomet) hands down) and writes
+every alert into PostgreSQL — the interesting fields as columns, the full EVE record as
 jsonb beside them. From her book the alerts can be searched from the CLI or
 a Mojolicious web frontend, any single event examined in full, the flow
 PCAP behind it fetched from a remote
