@@ -111,6 +111,8 @@ share/templates/layouts/default.html.ep
 share/templates/search/index.html.ep
 share/templates/partials/_time_range.html.ep
 share/templates/partials/_results_pager.html.ep
+share/templates/partials/_class_options.html.ep
+share/templates/partials/_filter_chips.html.ep
 share/templates/partials/_table_options.html.ep
 share/templates/partials/_event_id_cell.html.ep
 share/templates/partials/_ip_cell.html.ep
@@ -140,7 +142,6 @@ rc/systemd/lilith-auto-escalate.timer
 rc/systemd/mojo_lilith.service
 rc/systemd/mojo_lilith_receiver.service
 rc/lilith-auto-escalate.cron
-share/migrations/PostgreSQL/deploy/1/001-auto.sql
 share/migrations/PostgreSQL/deploy/2/001-auto.sql
 share/migrations/PostgreSQL/deploy/3/001-auto.sql
 share/migrations/PostgreSQL/deploy/4/001-auto.sql
@@ -202,3 +203,6 @@ share/public/css/lilith.css
 share/public/css/dashboard.css
 share/public/vendor/gridstack/gridstack-all.js
 share/public/vendor/gridstack/gridstack.min.css
+share/public/vendor/tom-select-2.6.2/js/tom-select.complete.min.js
+share/public/vendor/tom-select-2.6.2/css/tom-select.bootstrap5.min.css
+share/public/vendor/tom-select-2.6.2/LICENSE

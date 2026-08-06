@@ -115,6 +115,99 @@ sub startup {
 	}
 	$self->helper( order_by_columns => sub { \%order_by_columns } );
 
+	# The alert classifications offered by the search page's classification
+	# pickers, as an array ref sorted case insensitively for display. Taken from
+	# %Lilith::class_map rather than listed again in the template, so the picker
+	# cannot drift from the classifications the rest of Lilith knows about.
+	#
+	# The blank key is dropped: it exists in the map only to give records with no
+	# classification a short label, and is not something to pick from a list.
+	my @classifications = sort { lc($a) cmp lc($b) } grep { $_ ne '' } keys %Lilith::class_map;
+	$self->helper( classifications => sub { \@classifications } );
+
+	# The active filter chips shown above a page's results: one chip per filter
+	# value the current request carries, each holding the URL that drops just
+	# that value, plus the URL that drops the lot. Lets a page say what it is
+	# filtering on without the reader having to open a collapsed panel and read
+	# thirty inputs.
+	#
+	# The URLs are built from the request rather than by JavaScript, so a chip
+	# is an ordinary link: it works with the back button, it can be opened in a
+	# new tab, and it needs nothing loaded to function.
+	#
+	# Args:
+	#
+	#   - $filter_fields :: Array ref of the filters the page offers, in the
+	#     order their chips should appear. Each is a hash ref:
+	#       - name :: the query parameter, e.g. 'src_ip'. Required.
+	#       - label :: what to call it on the chip, e.g. 'Src IP'. Required.
+	#       - values :: array ref of the values actually in force, for a filter
+	#         the query string does not spell out -- a default the controller
+	#         applies on its own. Optional; without it every_param is used.
+	#     Other keys are ignored, so a page can pass the same list it builds its
+	#     form from.
+	#
+	#   - $forced :: Hash ref of parameters to set on every URL built here, for
+	#     a page whose controller would otherwise put its default straight back.
+	#     Optional.
+	#
+	# Returns: a hash ref
+	#
+	#     {
+	#       chips => [
+	#         { label => 'Src IP', value => '1.2.3.4', url => <Mojo::URL> },
+	#         ...
+	#       ],
+	#       clear_url => <Mojo::URL>,
+	#     }
+	#
+	# One chip per value, so a filter holding three values gets three chips and
+	# removing one leaves the other two. chips is empty when nothing is filtered,
+	# which is the caller's cue to render no row at all. Every URL drops offset
+	# and partial: the page someone was on will not line up with a differently
+	# sized result set, and a chip must never link to a bare results fragment.
+	#
+	#     my $active = $c->filter_chips( [ { name => 'src_ip', label => 'Src IP' } ] );
+	#     # on /search?table=sagan&src_ip=1.2.3.4&offset=100 that gives one chip
+	#     # labelled 'Src IP' for '1.2.3.4', whose url is /search?table=sagan
+	$self->helper(
+		filter_chips => sub {
+			my ( $c, $filter_fields, $forced ) = @_;
+
+			my %base = ( %{ $forced // {} }, offset => undef, partial => undef );
+
+			my @chips;
+			foreach my $filter_field ( @{$filter_fields} ) {
+				my $name = $filter_field->{name};
+				my @values
+					= $filter_field->{values}
+					? @{ $filter_field->{values} }
+					: @{ $c->every_param($name) };
+				@values = grep { defined($_) && $_ ne '' } @values;
+
+				foreach my $index ( 0 .. $#values ) {
+					my @kept = @values;
+					splice( @kept, $index, 1 );
+					push(
+						@chips,
+						{
+							label => $filter_field->{label},
+							value => $values[$index],
+
+							# an empty list clears the parameter outright
+							url => $c->url_with->query( { %base, $name => \@kept } ),
+						}
+					);
+				} ## end foreach my $index ( 0 .. $#values )
+			} ## end foreach my $filter_field ( @{$filter_fields} )
+
+			return {
+				chips     => \@chips,
+				clear_url => $c->url_with->query( { %base, map { $_->{name} => undef } @{$filter_fields} } ),
+			};
+		}
+	);
+
 	# Whether the escalation system is available in the web UI. Off by
 	# default as the escalation endpoints can push data at outside services
 	# and change escalation target config.

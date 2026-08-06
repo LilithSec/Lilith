@@ -74,6 +74,13 @@ sub index {
 				unless grep { $_ eq 'Generic Protocol Command Decode' } @class_not;
 		}
 
+		# What the active filter chips show for class_not. Taken from here rather
+		# than from the query string because of the GPCD default above: on a
+		# fresh form the search runs with it excluded without the URL saying so,
+		# and a chip row that left it out would be describing a different search
+		# than the one whose results are on the page.
+		$self->stash( effective_class_not => [@class_not] );
+
 		push( @class, map { '!' . $_ } @class_not );
 
 		eval {

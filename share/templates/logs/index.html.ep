@@ -114,6 +114,16 @@
 
 </form>
 
+% # Chips for the filters in force. Only the ones the selected source accepts:
+% # the form submits its hidden fields too, so a filter left over from another
+% # source can sit in the URL without the reader ever having applied it. It
+% # comes back the moment that source is selected again.
+% my @_active_filter_fields = grep {
+%   my $field_sources = $_->{sources};
+%   grep { $_ eq $source } split( /\s+/, $field_sources );
+% } @filter_fields;
+%= include 'partials/_filter_chips', active => $self->filter_chips( \@_active_filter_fields )
+
 %= include 'partials/_error_alert', message => $error
 
 % if (defined $result) {

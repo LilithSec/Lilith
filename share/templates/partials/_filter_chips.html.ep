@@ -1,0 +1,20 @@
+% # The active filters above a page's results: a removable chip per filter value
+% # in force, and a link that drops them all. The filter_chips helper works out
+% # the URLs, so each chip is a plain link. Use:
+% #   %= include 'partials/_filter_chips', active => $self->filter_chips(\@filter_fields)
+% #
+% # active - the hash ref filter_chips returned. Nothing renders when it holds
+% #          no chips, so a page can include this unconditionally.
+% my $active = stash('active');
+% if ( @{ $active->{chips} } ) {
+<div class="d-flex flex-wrap align-items-center gap-1 mb-2">
+  <span class="text-muted small">Filtering on</span>
+  % for my $chip (@{ $active->{chips} }) {
+  %   # a long signature or hash would push the rest of the row off screen; the
+  %   # whole value stays readable in the title
+  %   my $shown = length( $chip->{value} ) > 40 ? substr( $chip->{value}, 0, 39 ) . '…' : $chip->{value};
+  <a class="badge text-bg-secondary fw-normal text-decoration-none" href="<%= $chip->{url} %>" title="Remove this filter — <%= $chip->{label} %>: <%= $chip->{value} %>"><span class="opacity-75"><%= $chip->{label} %>:</span> <%= $shown %> &times;</a>
+  % }
+  <a class="small ms-2" href="<%= $active->{clear_url} %>">clear all</a>
+</div>
+% }

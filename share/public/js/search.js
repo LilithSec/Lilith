@@ -3,6 +3,11 @@
  * toggles that persist in localStorage, the click-to-filter cells in the
  * results, and the shared auto-refresh.
  *
+ * Markup contract: the table <select> is #table-sel, and every filter field
+ * that only applies to some tables carries class .search-filter-field with a
+ * data-tables list of the tables it belongs to. Fields that do not match the
+ * selected table get .filter-hidden.
+ *
  * The sortable columns per table are not kept here: the page publishes them as
  * window.LilithSearch.orderByColumns (from the server's order_by_columns
  * helper), so this cannot drift from what Lilith::search accepts.
@@ -16,6 +21,9 @@
 // Lilith::search accepts. Each list leads with that table's default.
 var _orderByCols = (window.LilithSearch || {}).orderByColumns || {};
 
+// Repopulate the Order by picker for the selected table, keeping the current
+// column when the new table also has it and falling back to that table's
+// default (the first entry) when it does not.
 function syncOrderBy(keepVal) {
   var table = document.getElementById('table-sel').value;
   var orderBy = document.getElementById('order-by');
@@ -27,28 +35,46 @@ function syncOrderBy(keepVal) {
     option.value = column; option.textContent = column;
     orderBy.appendChild(option);
   });
-  // Restore previous value if still valid, otherwise use table default
   if (prev && cols.indexOf(prev) !== -1) {
     orderBy.value = prev;
   } else {
     orderBy.value = cols[0];
   }
-  var instanceHostField = document.getElementById('instance-host-field');
-  instanceHostField.style.display = (table === 'sagan' || table === 'cape') ? '' : 'none';
-  var capeFilters = document.getElementById('cape-filters');
-  capeFilters.style.display = (table === 'cape') ? '' : 'none';
-  var ruleFilters = document.getElementById('rule-filters');
-  ruleFilters.style.display = (table === 'cape') ? 'none' : '';
-  var classFilter = document.getElementById('class-filter');
-  classFilter.style.display = (table === 'cape') ? 'none' : 'flex';
-  // Baphomet has no gid/sid/rev and no port columns, so hide those inputs for
-  // it. The Signature, Event ID, and classification filters stay, as baphomet
-  // does have those columns.
-  var missingForBaphomet = ['gid-field', 'sid-field', 'rev-field',
-                            'src-port-field', 'dest-port-field', 'port-field'];
-  missingForBaphomet.forEach(function(fieldId) {
-    var fieldEl = document.getElementById(fieldId);
-    if (fieldEl) { fieldEl.style.display = (table === 'baphomet') ? 'none' : ''; }
+}
+
+// Upgrade the two classification pickers from list boxes needing ctrl/cmd-click
+// into type-to-filter fields with a removable chip per choice.
+//
+// This is enhancement only: Tom Select keeps the original <select multiple> as
+// the form control and just drives it, so the page still submits the same
+// class/class_not params. If the vendored file is missing the pickers stay the
+// plain multi-selects they are in the markup, which is why nothing else here
+// depends on TomSelect being defined.
+function initClassPickers() {
+  if (!window.TomSelect) { return; }
+  document.querySelectorAll('#filter-panel select[multiple]').forEach(function(selectEl) {
+    new TomSelect(selectEl, {
+      plugins:     ['remove_button'],
+      placeholder: 'type to filter…',
+      // there are more classifications than Tom Select's default cap of 50, and
+      // a silently truncated dropdown is worse than a scrolling one
+      maxOptions:  null
+    });
+  });
+  // the ctrl/cmd-click hint is about the control we just replaced
+  document.querySelectorAll('.multi-select-hint').forEach(function(hintEl) {
+    hintEl.style.display = 'none';
+  });
+}
+
+// Show only the filter fields that apply to the selected table. Which table a
+// field belongs to lives in the markup, as a data-tables list on each
+// .search-filter-field, so a new table needs no change here.
+function syncFilterFields() {
+  var table = document.getElementById('table-sel').value;
+  document.querySelectorAll('.search-filter-field').forEach(function(fieldEl) {
+    var fieldTables = (fieldEl.dataset.tables || '').split(/\s+/);
+    fieldEl.classList.toggle('filter-hidden', fieldTables.indexOf(table) === -1);
   });
 }
 function applyHostCol(show) {
@@ -106,8 +132,13 @@ function initResults() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-  document.getElementById('table-sel').addEventListener('change', function() { syncOrderBy(false); });
+  document.getElementById('table-sel').addEventListener('change', function() {
+    syncOrderBy(false);
+    syncFilterFields();
+  });
   syncOrderBy(false);
+  syncFilterFields();
+  initClassPickers();
   var wantedOrderBy = (window.LilithSearch || {}).orderBy;
   if (wantedOrderBy) { document.getElementById('order-by').value = wantedOrderBy; }
   var hostCheckbox = document.getElementById('show-host-col');

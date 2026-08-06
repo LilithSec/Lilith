@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Lilith — <%= title %></title>
   <link href="/vendor/bootstrap-5.3.3/css/bootstrap.min.css" rel="stylesheet">
+  % # Stylesheets a single page needs, pushed with "content_for head". They sit
+  % # between Bootstrap and lilith.css on purpose: framework, then vendored
+  % # theme, then our own rules, so lilith.css stays the last word.
+  %= content 'head'
   <link href="/css/lilith.css" rel="stylesheet">
 </head>
 <body>

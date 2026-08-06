@@ -181,16 +181,27 @@ All the standard Mojolicious server commands work. Read
 - **/search** :: the same filters as the CLI search, in a form. Escalated
   events are badged with a red **E**. The **When** control switches the time
   window between *Last N min* (relative) and *Range* (an explicit From/To); the
-  range bounds are read in the server's timezone.
+  range bounds are read in the server's timezone. The **Filters** panel shows
+  only the fields the selected table has, so picking CAPE swaps the rule and
+  port inputs for the sample ones. Its two classification pickers — match any
+  of, exclude all of — are type to filter, built on a vendored
+  [Tom Select](https://tom-select.js.org/), with a removable chip per choice.
+  Whatever is in force is listed above the results, one chip per value, so the
+  panel does not have to be open to see what is being filtered on. Clicking a
+  chip drops that one filter and **clear all** drops the lot, each an ordinary
+  link — including the *Generic Protocol Command Decode* exclusion a bare visit
+  starts with.
 - **/dashboard** :: a configurable grid of charts over the same alerts, with
   saved boards, per-board time range and table, and built-in presets per
   source. It has its own page: [dashboard](dashboard.md).
 - **/logs** :: browse the logs an [Allani](https://github.com/LilithSec/Allani)
   store holds, when an `[allani]` block is configured. A source selector
   switches between syslog, http (access), http error, and an interleaved
-  http view; per-source filters, a minutes-back window, paging, and
-  optional auto-refresh mirror the search page, and each row opens the full
-  stored record with its raw JSON. For charts over the same logs, the
+  http view; per-source filters, a minutes-back window, paging, active filter
+  chips, and optional auto-refresh mirror the search page, and each row opens
+  the full stored record with its raw JSON. Only the filters the selected
+  source accepts are chipped, and one set for another source is left in place
+  rather than dropped, so switching back brings it with you. For charts over the same logs, the
   configurable [dashboard](dashboard.md) reads Allani sources too — set its
   **Default table** to a log source, add log widgets, or pick a built-in
   per-source preset (Syslog, HTTP, HTTP Access, HTTP Error). The page and its

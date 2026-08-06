@@ -11,6 +11,24 @@ pre.raw-json { max-height: 600px; overflow-y: auto; font-size: 0.78em; backgroun
 /* The small "?" button that opens the IP / Domain info modal (partials/_info_btn). */
 .info-btn { font-size: 0.65rem; line-height: 1.2; }
 
+/* Tom Select's Bootstrap 5 theme (the classification pickers on /search) reads
+   --bs-* variables for most of its colours, so it follows the dark theme on its
+   own. These few it hardcodes to light values, which on a dark page show up as
+   pale blocks: the chip per selected classification, the divider before the
+   chip's remove button, and the dropdown border. Point them back at the theme.
+   The layout loads this sheet after the vendored one so these win. */
+.ts-wrapper.multi .ts-control > div { background: var(--bs-secondary-bg); color: var(--bs-body-color); }
+.ts-wrapper.plugin-remove_button:not(.rtl) .item .remove { border-left-color: var(--bs-border-color); }
+.ts-wrapper.plugin-remove_button.rtl .item .remove { border-right-color: var(--bs-border-color); }
+.ts-dropdown { border-color: var(--bs-border-color); }
+
+/* A filter field hidden because it does not apply to the selected table or
+   source. Toggled as a class rather than by setting an inline display, so each
+   field keeps whatever display mode it normally has when shown -- the search
+   page's classification column is a flex column, the rest are plain blocks.
+   !important is what lets it beat that inline display. */
+.filter-hidden { display: none !important; }
+
 @keyframes rowNewFlash { from { background-color: rgba(255,193,7,0.35); } to { background-color: transparent; } }
 tr.row-new > td { animation: rowNewFlash 4s ease-out; }
 

@@ -1,12 +1,99 @@
 % layout 'default';
 % title 'Search';
 
-% # Determine whether to show the filter panel open by default
-% my @_filter_keys = qw(src_ip dest_ip ip port src_port dest_port host instance_host
-%                        instance class class_not signature proto app_proto in_iface gid sid rev
-%                        event_id target slug pkg malscore size task
-%                        subbed_from_ip subbed_from_host md5 sha1 sha256);
-% my $show_filters = grep { defined(param($_)) && param($_) ne '' } @_filter_keys;
+% # Tom Select styles the classification pickers. Loaded through the layout's
+% # head block so the stylesheet lands in <head> rather than mid-body.
+% content_for head => begin
+  <link href="/vendor/tom-select-2.6.2/css/tom-select.bootstrap5.min.css" rel="stylesheet">
+% end
+
+% # Every text filter this page offers, grouped the way the filter panel lays
+% # them out. This table is the whole description of a filter: the panel renders
+% # from it, the chips above the results take their labels from it, and the
+% # show/hide by table is the data-tables it emits. Adding a filter is one line.
+% #
+% # - name :: the query parameter. Also the input's id, underscores to hyphens
+% #   and '-input' appended, which is the convention /js/search.js binds its
+% #   click-to-filter result cells to.
+% #
+% # - label :: plain text. Used on the chip, and as the form label unless
+% #   form_label overrides it. Kept free of markup so a chip can never end up
+% #   showing tags.
+% #
+% # - form_label :: optional richer label for the form only. Rendered unescaped,
+% #   so it is for the literals below and nothing that came off a request.
+% #
+% # - width :: Bootstrap column width. 2 unless given.
+% #
+% # - tables :: the alert tables the filter applies to, space separated. Omit
+% #   for one that applies to all of them.
+% my @_filter_groups = (
+%   {   heading => 'Network',
+%       fields  => [
+%           { name => 'src_ip',    label => 'Src IP' },
+%           { name => 'src_port',  label => 'Src Port',  form_label => 'Src Port(s)',            tables => 'suricata sagan cape' },
+%           { name => 'dest_ip',   label => 'Dst IP' },
+%           { name => 'dest_port', label => 'Dst Port',  form_label => 'Dst Port(s)',            tables => 'suricata sagan cape' },
+%           { name => 'ip',        label => 'IP',        form_label => 'IP (src <em>or</em> dst)' },
+%           { name => 'port',      label => 'Port',      form_label => 'Port (src <em>or</em> dst)', tables => 'suricata sagan cape' },
+%           { name => 'proto',     label => 'Proto' },
+%           { name => 'app_proto', label => 'App Proto' },
+%           { name => 'in_iface',  label => 'Interface' },
+%       ],
+%   },
+%   {   heading => 'Instance / Host',
+%       fields  => [
+%           { name => 'instance',      label => 'Instance' },
+%           { name => 'instance_host', label => 'Instance Host', tables => 'sagan cape' },
+%           { name => 'host',          label => 'Host' },
+%       ],
+%   },
+%   {   heading => 'Rule / Signature (Suricata / Sagan)',
+%       tables  => 'suricata sagan baphomet',
+%       fields  => [
+%           { name => 'signature', label => 'Signature', width => 3 },
+%           { name => 'gid',       label => 'GID', tables => 'suricata sagan' },
+%           { name => 'sid',       label => 'SID', tables => 'suricata sagan' },
+%           { name => 'rev',       label => 'Rev', tables => 'suricata sagan' },
+%           { name => 'event_id',  label => 'Event ID', width => 3 },
+%       ],
+%   },
+%   {   heading => 'CAPE',
+%       tables  => 'cape',
+%       fields  => [
+%           { name => 'target',           label => 'Target' },
+%           { name => 'slug',             label => 'Slug' },
+%           { name => 'pkg',              label => 'Package' },
+%           { name => 'malscore',         label => 'Malscore' },
+%           { name => 'size',             label => 'Size' },
+%           { name => 'task',             label => 'Task ID' },
+%           { name => 'subbed_from_ip',   label => 'Subbed From IP' },
+%           { name => 'subbed_from_host', label => 'Subbed From Host' },
+%           { name => 'md5',              label => 'MD5' },
+%           { name => 'sha1',             label => 'SHA1' },
+%           { name => 'sha256',           label => 'SHA256', width => 3 },
+%       ],
+%   },
+% );
+%
+% # A filter with no tables of its own applies to every table there is, which
+% # comes from the alert_tables helper so a new table needs nothing here.
+% my $all_tables = join( ' ', map { $_->{key} } @{ $self->alert_tables } );
+%
+% # The flat list, in the order the chips appear. The classification pickers are
+% # not in a group -- they live in their own column, hand written below -- so
+% # they join on the end.
+% my @_filter_fields = (
+%   ( map { @{ $_->{fields} } } @_filter_groups ),
+%   { name => 'class', label => 'Class' },
+%   # class_not is the one filter the query string does not always spell out:
+%   # the controller excludes GPCD on a fresh form. Chip it from what the
+%   # search really ran with, which it stashed for exactly this.
+%   { name => 'class_not', label => 'Not class', values => stash('effective_class_not') },
+% );
+% # only what was actually asked for opens the panel, so the GPCD default above
+% # does not have every visit landing on an expanded form
+% my $show_filters = grep { my $value = param( $_->{name} ); defined($value) && $value ne '' } @_filter_fields;
 
 <form method="GET" action="/search" id="search-form">
   <input type="hidden" name="search" value="1">
@@ -97,7 +184,10 @@
     </div><!-- /card-body -->
   </div><!-- /card -->
 
-  <!-- Filter panel -->
+  % # Filter panel. Fields that only apply to some tables carry class
+  % # search-filter-field and a data-tables list of the tables they belong to;
+  % # /js/search.js hides the ones that do not match the selected table, so
+  % # adding a table is an edit here rather than in the JavaScript.
   <div class="collapse <%= $show_filters ? 'show' : '' %>" id="filter-panel">
     <div class="card mb-2 border-secondary">
       <div class="card-header py-1 small text-muted">
@@ -108,243 +198,46 @@
 
           <div class="col-md-9">
 
-            <div class="row g-2 mb-1">
-              <div class="col-12"><span class="text-muted small fw-semibold">Network</span></div>
+            % # One row per group, one column per filter, all of it from
+            % # @_filter_groups above. Every row and field carries a data-tables
+            % # list -- a filter with no tables of its own gets all of them --
+            % # so /js/search.js needs no special cases.
+            % my $last_group = scalar(@_filter_groups) - 1;
+            % for my $group_index ( 0 .. $last_group ) {
+            %   my $group = $_filter_groups[$group_index];
+            <div class="row g-2 <%= $group_index < $last_group ? 'mb-1 ' : '' %>search-filter-field" data-tables="<%= $group->{tables} // $all_tables %>">
+              <div class="col-12"><span class="text-muted small fw-semibold"><%= $group->{heading} %></span></div>
 
-              <div class="col-md-2">
-                <label class="form-label">Src IP</label>
-                <input type="text" name="src_ip" class="form-control form-control-sm"
-                       value="<%= param('src_ip') // '' %>">
+              % for my $field ( @{ $group->{fields} } ) {
+              %   ( my $field_id = $field->{name} ) =~ s/_/-/g;
+              %   $field_id .= '-input';
+              <div class="col-md-<%= $field->{width} // 2 %> search-filter-field" data-tables="<%= $field->{tables} // $all_tables %>">
+                <label class="form-label" for="<%= $field_id %>"><%== $field->{form_label} // $field->{label} %></label>
+                <input type="text" name="<%= $field->{name} %>" id="<%= $field_id %>" class="form-control form-control-sm"
+                       value="<%= param( $field->{name} ) // '' %>">
               </div>
-              <div class="col-md-2" id="src-port-field">
-                <label class="form-label">Src Port(s)</label>
-                <input type="text" name="src_port" class="form-control form-control-sm"
-                       value="<%= param('src_port') // '' %>" placeholder="">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">Dst IP</label>
-                <input type="text" name="dest_ip" class="form-control form-control-sm"
-                       value="<%= param('dest_ip') // '' %>">
-              </div>
-              <div class="col-md-2" id="dest-port-field">
-                <label class="form-label">Dst Port(s)</label>
-                <input type="text" name="dest_port" class="form-control form-control-sm"
-                       value="<%= param('dest_port') // '' %>">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">IP (src <em>or</em> dst)</label>
-                <input type="text" name="ip" id="ip-input" class="form-control form-control-sm"
-                       value="<%= param('ip') // '' %>">
-              </div>
-              <div class="col-md-2" id="port-field">
-                <label class="form-label">Port (src <em>or</em> dst)</label>
-                <input type="text" name="port" id="port-input" class="form-control form-control-sm"
-                       value="<%= param('port') // '' %>">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">Proto</label>
-                <input type="text" name="proto" id="proto-input" class="form-control form-control-sm"
-                       value="<%= param('proto') // '' %>">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">App Proto</label>
-                <input type="text" name="app_proto" id="app-proto-input" class="form-control form-control-sm"
-                       value="<%= param('app_proto') // '' %>">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">Interface</label>
-                <input type="text" name="in_iface" id="in-iface-input" class="form-control form-control-sm"
-                       value="<%= param('in_iface') // '' %>">
-              </div>
-            </div><!-- /network row -->
-
-            <div class="row g-2 mb-1">
-              <div class="col-12"><span class="text-muted small fw-semibold">Instance / Host</span></div>
-
-              <div class="col-md-2">
-                <label class="form-label">Instance</label>
-                <input type="text" name="instance" id="instance-input" class="form-control form-control-sm"
-                       value="<%= param('instance') // '' %>" placeholder="">
-              </div>
-              <div class="col-md-2" id="instance-host-field">
-                <label class="form-label">Instance Host</label>
-                <input type="text" name="instance_host" id="instance-host-input" class="form-control form-control-sm"
-                       value="<%= param('instance_host') // '' %>">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">Host</label>
-                <input type="text" name="host" id="host-input" class="form-control form-control-sm"
-                       value="<%= param('host') // '' %>">
-              </div>
-            </div><!-- /host row -->
-
-            <div class="row g-2 mb-1" id="rule-filters">
-              <div class="col-12"><span class="text-muted small fw-semibold">Rule / Signature (Suricata / Sagan)</span></div>
-
-              <div class="col-md-3">
-                <label class="form-label">Signature</label>
-                <input type="text" name="signature" id="signature-input" class="form-control form-control-sm"
-                       value="<%= param('signature') // '' %>">
-              </div>
-              <div class="col-md-2" id="gid-field">
-                <label class="form-label">GID</label>
-                <input type="text" name="gid" id="gid-input" class="form-control form-control-sm"
-                       value="<%= param('gid') // '' %>">
-              </div>
-              <div class="col-md-2" id="sid-field">
-                <label class="form-label">SID</label>
-                <input type="text" name="sid" id="sid-input" class="form-control form-control-sm"
-                       value="<%= param('sid') // '' %>">
-              </div>
-              <div class="col-md-2" id="rev-field">
-                <label class="form-label">Rev</label>
-                <input type="text" name="rev" id="rev-input" class="form-control form-control-sm"
-                       value="<%= param('rev') // '' %>">
-              </div>
-              <div class="col-md-3">
-                <label class="form-label">Event ID</label>
-                <input type="text" name="event_id" class="form-control form-control-sm"
-                       value="<%= param('event_id') // '' %>">
-              </div>
-            </div><!-- /rule row -->
-
-            <div class="row g-2" id="cape-filters">
-              <div class="col-12"><span class="text-muted small fw-semibold">CAPE</span></div>
-
-              <div class="col-md-2">
-                <label class="form-label">Target</label>
-                <input type="text" name="target" class="form-control form-control-sm"
-                       value="<%= param('target') // '' %>">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">Slug</label>
-                <input type="text" name="slug" class="form-control form-control-sm"
-                       value="<%= param('slug') // '' %>">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">Package</label>
-                <input type="text" name="pkg" class="form-control form-control-sm"
-                       value="<%= param('pkg') // '' %>">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">Malscore</label>
-                <input type="text" name="malscore" class="form-control form-control-sm"
-                       value="<%= param('malscore') // '' %>" placeholder="">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">Size</label>
-                <input type="text" name="size" class="form-control form-control-sm"
-                       value="<%= param('size') // '' %>">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">Task ID</label>
-                <input type="text" name="task" class="form-control form-control-sm"
-                       value="<%= param('task') // '' %>">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">Subbed From IP</label>
-                <input type="text" name="subbed_from_ip" class="form-control form-control-sm"
-                       value="<%= param('subbed_from_ip') // '' %>">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">Subbed From Host</label>
-                <input type="text" name="subbed_from_host" class="form-control form-control-sm"
-                       value="<%= param('subbed_from_host') // '' %>">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">MD5</label>
-                <input type="text" name="md5" class="form-control form-control-sm"
-                       value="<%= param('md5') // '' %>">
-              </div>
-              <div class="col-md-2">
-                <label class="form-label">SHA1</label>
-                <input type="text" name="sha1" class="form-control form-control-sm"
-                       value="<%= param('sha1') // '' %>">
-              </div>
-              <div class="col-md-3">
-                <label class="form-label">SHA256</label>
-                <input type="text" name="sha256" class="form-control form-control-sm"
-                       value="<%= param('sha256') // '' %>">
-              </div>
-            </div><!-- /cape row -->
+              % }
+            </div><!-- /<%= lc $group->{heading} %> row -->
+            % }
 
           </div><!-- /filter rows col -->
 
-          <div class="col-md-3 flex-column" id="class-filter" style="display:flex">
-            <label class="form-label">Classification — match any of <span class="text-muted small">(ctrl/cmd-click for multiple)</span></label>
+          <div class="col-md-3 flex-column search-filter-field" data-tables="suricata sagan baphomet" style="display:flex">
+            % # The ctrl/cmd-click hint only applies to the plain multi-select.
+            % # /js/search.js drops it once Tom Select has taken the pickers over.
+            <label class="form-label">Classification — match any of <span class="text-muted small multi-select-hint">(ctrl/cmd-click for multiple)</span></label>
             % my %_sel_class     = map { $_ => 1 } grep { defined($_) && $_ ne '' } @{ $self->every_param('class') };
             % my %_sel_class_not = map { $_ => 1 } grep { defined($_) && $_ ne '' } @{ $self->every_param('class_not') };
             % # on a fresh form default to excluding GPCD; submitted searches keep the user's choice
             % if ( !param('search') ) {
             %   $_sel_class_not{'Generic Protocol Command Decode'} = 1;
             % }
-            % my @_classes = sort { lc($a) cmp lc($b) } (
-            %   'A Network Trojan was detected',
-            %   'A TCP connection was detected',
-            %   'A client was using an unusual port',
-            %   'A suspicious filename was detected',
-            %   'A suspicious string was detected',
-            %   'A system call was detected',
-            %   'An attempted login using a suspicious username was detected',
-            %   'Attempt to login by a default username and password',
-            %   'Attempted Access To File or Directory',
-            %   'Attempted Administrator Privilege Gain',
-            %   'Attempted Denial of Service',
-            %   'Attempted Information Leak',
-            %   'Attempted User Privilege Gain',
-            %   'Configuration Change',
-            %   'Configuration Error',
-            %   'Crypto Currency Mining Activity Detected',
-            %   'Decode of an RPC Query',
-            %   'Denial of Service',
-            %   'Detection of a Denial of Service Attack',
-            %   'Detection of a Network Scan',
-            %   'Detection of a non-standard protocol or event',
-            %   'Device Retrieving External IP Address Detected',
-            %   'Domain Observed Used for C2 Detected',
-            %   'Executable code was detected',
-            %   'Exploit Attempt',
-            %   'Exploit Kit Activity Detected',
-            %   'Generic ICMP event',
-            %   'Generic Protocol Command Decode',
-            %   'Hardware Event',
-            %   'Inappropriate Content was Detected',
-            %   'Information Leak',
-            %   'Large Scale Information Leak',
-            %   'Malware Command and Control Activity Detected',
-            %   'Misc Attack',
-            %   'Misc activity',
-            %   'Network event',
-            %   'Not Suspicious Traffic',
-            %   'Possible Social Engineering Attempted',
-            %   'Possibly Unwanted Program Detected',
-            %   'Potential Corporate Privacy Violation',
-            %   'Potentially Bad Traffic',
-            %   'Program Error',
-            %   'Spam',
-            %   'Successful Administrator Privilege Gain',
-            %   'Successful Credential Theft Detected',
-            %   'Successful User Privilege Gain',
-            %   'Suspicious Command Execution',
-            %   'Suspicious Traffic',
-            %   'System event',
-            %   'Targeted Malicious Activity was Detected',
-            %   'Unknown Traffic',
-            %   'Unsuccessful Admin Privilege',
-            %   'Unsuccessful User Privilege Gain',
-            %   'Web Application Attack',
-            %   'access to a potentially vulnerable web application',
-            % );
             <select name="class" class="form-select form-select-sm flex-grow-1" multiple>
-              % for my $class (@_classes) {
-                <option value="<%= $class %>" <%= $_sel_class{$class} ? 'selected' : '' %>><%= $class %></option>
-              % }
+              %= include 'partials/_class_options', selected => \%_sel_class
             </select>
             <label class="form-label mt-2">Classification — exclude all of</label>
             <select name="class_not" class="form-select form-select-sm flex-grow-1" multiple>
-              % for my $class (@_classes) {
-                <option value="<%= $class %>" <%= $_sel_class_not{$class} ? 'selected' : '' %>><%= $class %></option>
-              % }
+              %= include 'partials/_class_options', selected => \%_sel_class_not
             </select>
           </div><!-- /class filter col -->
         </div><!-- /row -->
@@ -353,6 +246,11 @@
   </div><!-- /collapse -->
 
 </form>
+
+% # Every chip URL sets search=1: without it the controller would read the URL
+% # as a fresh form and put the GPCD exclusion back, so dropping that chip would
+% # look like it did nothing.
+%= include 'partials/_filter_chips', active => $self->filter_chips( \@_filter_fields, { search => 1 } )
 
 %= include 'partials/_error_alert', message => $error
 
@@ -363,6 +261,7 @@
 <script src="/js/time-range.js"></script>
 <script src="/js/auto-refresh.js"></script>
 <script src="/js/lilith-table.js"></script>
+<script src="/vendor/tom-select-2.6.2/js/tom-select.complete.min.js"></script>
 <script>
 // Server-supplied bootstrap data for /js/search.js: the sortable columns per
 // table, and the column the current results are ordered by.
