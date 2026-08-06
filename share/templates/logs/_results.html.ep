@@ -33,6 +33,6 @@
     </table>
   </div><!-- /table-responsive -->
   % } else {
-  %= include "partials/_empty_alert", message => "No log rows found."
+  %= include 'partials/_empty_alert', message => "No log rows found."
   % }
 </div>

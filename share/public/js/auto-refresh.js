@@ -25,7 +25,7 @@
  * was not present before a refresh get the .row-new flash class.
  */
 (function () {
-  function pad2(value) { return (value < 10 ? '0' : '') + value; }
+  var pad2 = window.LilithUtil.pad2;
 
   function init(options) {
     var checkboxEl     = document.getElementById(options.checkboxId);

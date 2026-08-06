@@ -1,6 +1,7 @@
 package Lilith::Web::Controller::Search;
 
 use Mojo::Base 'Mojolicious::Controller';
+use Mojo::JSON ();
 
 use Lilith;
 
@@ -141,6 +142,10 @@ sub index {
 		order_dir       => $order_dir,
 		limit           => $limit,
 		offset          => $offset,
+
+		# the sort picker's options, so the page does not keep its own copy of
+		# which columns each table has
+		order_by_columns_json => Mojo::JSON::to_json( $self->order_by_columns ),
 	);
 
 	# Auto-refresh fetches partial=1 to get just the results fragment (no layout

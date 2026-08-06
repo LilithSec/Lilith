@@ -1,7 +1,7 @@
 % layout 'default';
 % title 'CAPE Submit';
 
-%= include "partials/_breadcrumb", crumbs => [ { label => "Search", url => "/search" }, { label => "CAPE Submit" } ]
+%= include 'partials/_breadcrumb', crumbs => [ { label => "Search", url => "/search" }, { label => "CAPE Submit" } ]
 
 %= include 'partials/_card', title => 'Submit a File for Detonation', header_class => '', body_class => 'p-3', title_span => 1, body => begin
     <form id="cape-submit-form">
@@ -52,65 +52,4 @@
     </div>
 % end
 
-<script>
-(function () {
-  var form   = document.getElementById('cape-submit-form');
-  var btn    = document.getElementById('cape-submit-btn');
-  var status = document.getElementById('cape-submit-status');
-  var result = document.getElementById('cape-submit-result');
-
-  function setStatus(cls, text) {
-    status.style.display = '';
-    status.className = 'small mt-3 text-' + cls;
-    status.textContent = text;
-  }
-
-  function setCell(id, value) {
-    document.getElementById(id).textContent = (value === undefined || value === null) ? '' : value;
-  }
-
-  form.addEventListener('submit', function (event) {
-    event.preventDefault();
-
-    var fileInput = document.getElementById('cape-file');
-    if (!fileInput.files.length) { setStatus('warning', 'Pick a file to submit.'); return; }
-
-    var data = new FormData();
-    data.append('file', fileInput.files[0]);
-    var server = document.getElementById('cape-server');
-    if (server) { data.append('server', server.value); }
-    data.append('slug', document.getElementById('cape-slug').value);
-
-    btn.disabled = true;
-    result.style.display = 'none';
-    setStatus('muted', 'Submitting ' + fileInput.files[0].name + ' …');
-
-    fetch('/api/cape_submit/submit', { method: 'POST', body: data })
-      .then(window.LilithUtil.unwrap)
-      .then(function (res) {
-        btn.disabled = false;
-        var body = res.data || {};
-        if (res.ok && body.status === 'ok') {
-          setStatus('success', 'Submitted as ' + body.name);
-        } else {
-          setStatus('danger', 'Failed: ' + (body.error || ('HTTP ' + (body.http_status || 'error'))));
-        }
-        // show whatever facts came back, even on a rejected submission
-        setCell('cape-res-status', body.status);
-        setCell('cape-res-server', body.server);
-        setCell('cape-res-name',   body.name);
-        setCell('cape-res-http',   body.http_status);
-        setCell('cape-res-magic',  body.magic);
-        setCell('cape-res-size',   body.size);
-        setCell('cape-res-md5',    body.md5);
-        setCell('cape-res-sha1',   body.sha1);
-        setCell('cape-res-sha256', body.sha256);
-        if (body.name || body.sha256) { result.style.display = ''; }
-      })
-      .catch(function (err) {
-        btn.disabled = false;
-        setStatus('danger', 'Request failed: ' + err);
-      });
-  });
-})();
-</script>
+<script src="/js/cape-submit.js"></script>

@@ -17,11 +17,8 @@
 
         <div class="col-auto">
           <label class="form-label">Table</label>
-          <select name="table" class="form-select form-select-sm" style="width:110px" id="table-sel" onchange="syncOrderBy(false)">
-            <option value="suricata" <%= $table eq 'suricata' ? 'selected' : '' %>>Suricata</option>
-            <option value="sagan"    <%= $table eq 'sagan'    ? 'selected' : '' %>>Sagan</option>
-            <option value="cape"     <%= $table eq 'cape'     ? 'selected' : '' %>>CAPE</option>
-            <option value="baphomet" <%= $table eq 'baphomet' ? 'selected' : '' %>>Baphomet</option>
+          <select name="table" class="form-select form-select-sm" style="width:110px" id="table-sel">
+            %= include 'partials/_table_options', selected => $table
           </select>
         </div>
 
@@ -357,7 +354,7 @@
 
 </form>
 
-%= include "partials/_error_alert", message => $error
+%= include 'partials/_error_alert', message => $error
 
 % if (defined $results) {
 %= include 'search/_results'
@@ -367,164 +364,11 @@
 <script src="/js/auto-refresh.js"></script>
 <script src="/js/lilith-table.js"></script>
 <script>
-var _orderByCols = {
-  suricata: ['timestamp','id','src_ip','dest_ip','src_port','dest_port','proto','app_proto',
-             'signature','classification','gid','sid','rev','in_iface','host','instance',
-             'flow_id','flow_start','flow_pkts_toserver','flow_bytes_toserver',
-             'flow_pkts_toclient','flow_bytes_toclient','event_id'],
-  sagan:    ['timestamp','id','src_ip','src_port','dest_ip','dest_port','proto','host',
-             'program','facility','level','priority','signature','classification',
-             'gid','sid','rev','instance','instance_host','stream','event_id'],
-  cape:     ['stop','start','id','malscore','task','target','instance','instance_host',
-             'pkg','size','proto','src_ip','src_port','dest_ip','dest_port',
-             'subbed_from_ip','subbed_from_host','slug','url','url_hostname',
-             'md5','sha1','sha256'],
-  baphomet: ['timestamp','id','src_ip','dest_ip','signature','classification','severity',
-             'score','event_type','host','instance','event_id','country','ban_time',
-             'recidive','path','kur','subject']
+// Server-supplied bootstrap data for /js/search.js: the sortable columns per
+// table, and the column the current results are ordered by.
+window.LilithSearch = {
+  orderByColumns: <%== $order_by_columns_json %>,
+  orderBy:        '<%= $order_by %>'
 };
-function syncOrderBy(keepVal) {
-  var table = document.getElementById('table-sel').value;
-  var orderBy = document.getElementById('order-by');
-  var prev = keepVal ? orderBy.value : null;
-  var cols = _orderByCols[table] || _orderByCols.suricata;
-  orderBy.innerHTML = '';
-  cols.forEach(function(column) {
-    var option = document.createElement('option');
-    option.value = column; option.textContent = column;
-    orderBy.appendChild(option);
-  });
-  // Restore previous value if still valid, otherwise use table default
-  if (prev && cols.indexOf(prev) !== -1) {
-    orderBy.value = prev;
-  } else {
-    orderBy.value = cols[0];
-  }
-  var instanceHostField = document.getElementById('instance-host-field');
-  instanceHostField.style.display = (table === 'sagan' || table === 'cape') ? '' : 'none';
-  var capeFilters = document.getElementById('cape-filters');
-  capeFilters.style.display = (table === 'cape') ? '' : 'none';
-  var ruleFilters = document.getElementById('rule-filters');
-  ruleFilters.style.display = (table === 'cape') ? 'none' : '';
-  var classFilter = document.getElementById('class-filter');
-  classFilter.style.display = (table === 'cape') ? 'none' : 'flex';
-  // Baphomet has no gid/sid/rev and no port columns, so hide those inputs for
-  // it. The Signature, Event ID, and classification filters stay, as baphomet
-  // does have those columns.
-  var missingForBaphomet = ['gid-field', 'sid-field', 'rev-field',
-                            'src-port-field', 'dest-port-field', 'port-field'];
-  missingForBaphomet.forEach(function(fieldId) {
-    var fieldEl = document.getElementById(fieldId);
-    if (fieldEl) { fieldEl.style.display = (table === 'baphomet') ? 'none' : ''; }
-  });
-}
-function applyHostCol(show) {
-  document.querySelectorAll('.col-host').forEach(function(el) {
-    el.style.display = show ? '' : 'none';
-  });
-}
-
-// Toggle the GeoIP city label shown next to each IP's country flag.
-function applyGeoCity(show) {
-  document.querySelectorAll('#search-results .geoip-city').forEach(function(el) {
-    el.style.display = show ? '' : 'none';
-  });
-}
-
-// Bind a class of clickable result cells to a filter input + submit.
-function bindFilter(selector, inputId, dataKey) {
-  document.querySelectorAll(selector).forEach(function(el) {
-    el.addEventListener('click', function(event) {
-      event.preventDefault();
-      document.getElementById(inputId).value = this.dataset[dataKey];
-      document.getElementById('search-form').submit();
-    });
-  });
-}
-
-// (Re)wire all handlers and view state inside the results container. Safe to
-// call again after the results HTML is swapped in by an auto-refresh.
-function initResults() {
-  var hostCheckbox = document.getElementById('show-host-col');
-  applyHostCol(hostCheckbox && hostCheckbox.checked);
-
-  var cityCheckbox = document.getElementById('show-city');
-  applyGeoCity(!cityCheckbox || cityCheckbox.checked);
-
-  bindFilter('.host-filter',          'host-input',          'host');
-  bindFilter('.instance-host-filter', 'instance-host-input', 'instanceHost');
-  bindFilter('.instance-filter',      'instance-input',      'instance');
-  bindFilter('.iface-filter',         'in-iface-input',      'iface');
-  bindFilter('.ip-filter',            'ip-input',            'ip');
-  bindFilter('.sig-filter',           'signature-input',     'sig');
-  bindFilter('.gid-filter',           'gid-input',           'gid');
-  bindFilter('.sid-filter',           'sid-input',           'sid');
-  bindFilter('.rev-filter',           'rev-input',           'rev');
-  bindFilter('.port-filter',          'port-input',          'port');
-  bindFilter('.proto-filter',         'proto-input',         'proto');
-  bindFilter('.aproto-filter',        'app-proto-input',     'aproto');
-
-  LilithTable.initSortIn('#search-results');
-
-  // The IP info modal + lookup lives in the layout; just wire the buttons.
-  document.querySelectorAll('#search-results .ip-info-btn').forEach(function(el) {
-    el.addEventListener('click', function() { window.showIpInfo(this.dataset.ip); });
-  });
-}
-
-document.addEventListener('DOMContentLoaded', function() {
-  syncOrderBy(false);
-  document.getElementById('order-by').value = '<%= $order_by %>' || document.getElementById('order-by').value;
-  var hostCheckbox = document.getElementById('show-host-col');
-  var storedHostCol = localStorage.getItem('showHostCol') === 'true';
-  hostCheckbox.checked = storedHostCol;
-  applyHostCol(storedHostCol);
-  hostCheckbox.addEventListener('change', function() {
-    localStorage.setItem('showHostCol', this.checked);
-    applyHostCol(this.checked);
-  });
-
-  // GeoIP city: show the city label next to each IP's country flag. Defaults on
-  // when the user has not made an explicit choice.
-  var cityCheckbox  = document.getElementById('show-city');
-  var storedCity    = localStorage.getItem('showGeoCity');
-  cityCheckbox.checked = ( storedCity === null ) ? true : ( storedCity === 'true' );
-  applyGeoCity(cityCheckbox.checked);
-  cityCheckbox.addEventListener('change', function() {
-    localStorage.setItem('showGeoCity', this.checked);
-    applyGeoCity(this.checked);
-  });
-
-  // Auto-FC: keep the filter panel collapsed on load (overriding the server's
-  // auto-expand when filters are set) until the Filters button is clicked.
-  var autoFcCheckbox = document.getElementById('auto-fc');
-  var filterPanel  = document.getElementById('filter-panel');
-  var storedAutoFc = localStorage.getItem('autoFc');
-  // default on when the user has not made an explicit choice
-  autoFcCheckbox.checked = ( storedAutoFc === null ) ? true : ( storedAutoFc === 'true' );
-  if (autoFcCheckbox.checked) { filterPanel.classList.remove('show'); }
-  autoFcCheckbox.addEventListener('change', function() {
-    localStorage.setItem('autoFc', this.checked);
-    if (this.checked) {
-      bootstrap.Collapse.getOrCreateInstance(filterPanel, { toggle: false }).hide();
-    }
-  });
-
-  // Bind everything inside the results container. Re-run after an auto-refresh
-  // swaps in fresh rows so the new elements get their handlers.
-  initResults();
-
-  // Auto-refresh (shared module): fetch fresh results every N seconds and swap
-  // them in place, with no full page reload (so scroll position and form state
-  // are kept). State is kept in localStorage so it persists across navigation.
-  LilithAutoRefresh.init({
-    checkboxId:     'auto-refresh',
-    secondsInputId: 'auto-refresh-secs',
-    statusId:       'ar-status',
-    containerId:    'search-results',
-    storagePrefix:  'autoRefresh',
-    afterSwap:      initResults
-  });
-});
-
 </script>
+<script src="/js/search.js"></script>

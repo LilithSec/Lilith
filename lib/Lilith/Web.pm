@@ -84,6 +84,37 @@ sub startup {
 
 	$self->helper( lilith => sub { $lilith } );
 
+	# The alert tables a page may offer, in display order, as
+	# [ { key => 'suricata', label => 'Suricata' }, ... ]. Single-sourced here so
+	# a new table means one edit rather than one per template: the navbar's Go to
+	# Event picker, the search and dashboard table selects, and the auto
+	# escalation rule scoping all render from this (see partials/_table_options).
+	my @alert_tables = (
+		{ key => 'suricata', label => 'Suricata' },
+		{ key => 'sagan',    label => 'Sagan' },
+		{ key => 'cape',     label => 'CAPE' },
+		{ key => 'baphomet', label => 'Baphomet' },
+	);
+	$self->helper( alert_tables => sub { \@alert_tables } );
+
+	# The columns each alert table may be ordered by, as a table => [columns]
+	# hash ref, derived from %Lilith::alert_columns rather than hand-kept in the
+	# search page's JavaScript -- so adding a column to a table offers it for
+	# sorting without a second edit, and cannot drift from what Lilith::search
+	# will actually accept.
+	#
+	# The table's own default sort column leads the list (the picker takes the
+	# first entry as the default), followed by the row id, then the rest. raw is
+	# left out: it is the whole EVE record as jsonb, which is not something to
+	# sort by.
+	my %order_by_columns;
+	foreach my $alert_table ( keys %Lilith::alert_columns ) {
+		my $default = $alert_table eq 'cape' ? 'stop' : 'timestamp';
+		$order_by_columns{$alert_table}
+			= [ $default, 'id', grep { $_ ne 'raw' && $_ ne $default } @{ $Lilith::alert_columns{$alert_table} } ];
+	}
+	$self->helper( order_by_columns => sub { \%order_by_columns } );
+
 	# Whether the escalation system is available in the web UI. Off by
 	# default as the escalation endpoints can push data at outside services
 	# and change escalation target config.

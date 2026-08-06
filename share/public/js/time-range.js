@@ -17,7 +17,7 @@
  * window.LilithTimeRange.{read,set} for the dashboard's live controls.
  */
 (function () {
-  function pad(num) { return (num < 10 ? '0' : '') + num; }
+  var pad = window.LilithUtil.pad2;
 
   function clampInt(value, low, high) {
     value = parseInt(value, 10);

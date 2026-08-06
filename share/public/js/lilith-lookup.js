@@ -14,14 +14,17 @@
   // Every lookup modal is the same shape: a loading line, a hidden content
   // block, and a title rewritten to whatever is being looked up. This drives
   // that sequence and hands the parsed response to a fill function.
+  //
+  // A non-2xx goes to onError with the server's message rather than to fill:
+  // the endpoints answer a bad or failed lookup with a 4xx/5xx carrying
+  // { error }, and handing that to fill would render an empty-looking success.
   function runLookup(prefix, title, url, fill, onError) {
     document.getElementById(prefix + '-modal-title').textContent = title;
     document.getElementById(prefix + '-loading').style.display = '';
     document.getElementById(prefix + '-content').style.display = 'none';
-    fetch(url)
-      .then(function (response) { return response.json(); })
+    util.getJSON(url)
       .then(function (data) { fill(data); })
-      .catch(function () { onError(); })
+      .catch(function (error) { onError(error && error.message ? error.message : 'Error fetching data'); })
       .finally(function () {
         document.getElementById(prefix + '-loading').style.display = 'none';
         document.getElementById(prefix + '-content').style.display = '';
@@ -83,9 +86,13 @@
         setError(document.getElementById('ipinfo-geo-error'), data.geo_error);
         geoSection.style.display = (geoKeys.length || data.geo_error) ? '' : 'none';
 
+        setError(document.getElementById('ipinfo-error'), null);
         document.getElementById('ipinfo-whois').textContent = data.whois || '(none)';
-      }, function () {
-        document.getElementById('ipinfo-rdns').textContent = 'Error fetching data';
+      }, function (message) {
+        setError(document.getElementById('ipinfo-error'), message);
+        document.getElementById('ipinfo-rdns').textContent = '';
+        document.getElementById('ipinfo-ptr-name').textContent = '';
+        document.getElementById('ipinfo-geo-section').style.display = 'none';
         document.getElementById('ipinfo-whois').textContent = '';
       });
     };
@@ -110,17 +117,27 @@
         if (data.dns && Object.keys(data.dns).length) {
           var typeOrder = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT', 'SOA', 'CAA', 'SRV', 'PTR'];
           var recordTypes = Object.keys(data.dns).sort(function (typeA, typeB) {
-            var rankA = typeOrder.indexOf(typeA), rankB = typeOrder.indexOf(typeB);
-            if (rankA === -1) rankA = 999; if (rankB === -1) rankB = 999;
+            // an unlisted type sorts after every listed one
+            var rankA = typeOrder.indexOf(typeA);
+            var rankB = typeOrder.indexOf(typeB);
+            if (rankA === -1) { rankA = 999; }
+            if (rankB === -1) { rankB = 999; }
             return rankA - rankB;
           });
-          // record values are DNS data of an arbitrary looked-up domain (TXT
-          // especially can carry anything), so they must be escaped
-          dnsEl.innerHTML = recordTypes.map(function (type) {
-            return data.dns[type].map(function (recordValue) {
-              return '<strong>' + util.escapeHtml(type) + '</strong> ' + util.escapeHtml(recordValue);
-            }).join('<br>');
-          }).join('<br>');
+          // Built as nodes rather than markup: record values are DNS data of an
+          // arbitrary looked-up domain (TXT especially can carry anything), and
+          // textContent takes them as text whatever they hold.
+          dnsEl.textContent = '';
+          recordTypes.forEach(function (type) {
+            data.dns[type].forEach(function (recordValue) {
+              var line = document.createElement('div');
+              var typeEl = document.createElement('strong');
+              typeEl.textContent = type;
+              line.appendChild(typeEl);
+              line.appendChild(document.createTextNode(' ' + recordValue));
+              dnsEl.appendChild(line);
+            });
+          });
         } else {
           dnsEl.textContent = '(none)';
         }
@@ -138,9 +155,12 @@
         } else {
           dnstracerSection.style.display = 'none';
         }
-      }, function () {
-        document.getElementById('nav-domaininfo-dns').textContent = 'Error fetching data';
+        setError(document.getElementById('nav-domaininfo-error'), null);
+      }, function (message) {
+        setError(document.getElementById('nav-domaininfo-error'), message);
+        document.getElementById('nav-domaininfo-dns').textContent = '';
         document.getElementById('nav-domaininfo-whois').textContent = '';
+        document.getElementById('nav-domaininfo-dnstracer-section').style.display = 'none';
       });
     };
     document.getElementById('nav-domain-go-btn').addEventListener('click', function () {
@@ -194,8 +214,8 @@
         util.kvRow(certEl, 'SHA-1 fingerprint', cert.fp_sha1);
         util.kvRow(certEl, 'SHA-256 fingerprint', cert.fp_sha256);
         if (data.valid === 0 && data.valid_error) { util.kvRow(certEl, 'Validation error', data.valid_error, 'text-warning'); }
-      }, function () {
-        setError(document.getElementById('httpsinfo-error'), 'Error fetching HTTPS info.');
+      }, function (message) {
+        setError(document.getElementById('httpsinfo-error'), message);
       });
     }
     document.getElementById('nav-https-btn').addEventListener('click', function () {
@@ -220,10 +240,11 @@
     }
     function showMailInfo(domain, ip, selector) {
       mailModal.show();
-      var url = '/api/mailinfo/' + encodeURIComponent(domain)
-        + (ip ? '&ip=' + encodeURIComponent(ip) : '')
-        + (selector ? '&selector=' + encodeURIComponent(selector) : '');
-      url = url.replace('&', '?');
+      var params = new URLSearchParams();
+      if (ip)       { params.set('ip', ip); }
+      if (selector) { params.set('selector', selector); }
+      var query = params.toString();
+      var url = '/api/mailinfo/' + encodeURIComponent(domain) + (query ? '?' + query : '');
       runLookup('mailinfo', 'Mail Info — ' + domain, url, function (data) {
         setError(document.getElementById('mailinfo-error'), data.error);
 
@@ -303,8 +324,8 @@
           fallbackNote.textContent = dkim.note;
           dkimBody.appendChild(fallbackNote);
         }
-      }, function () {
-        setError(document.getElementById('mailinfo-error'), 'Error fetching mail info.');
+      }, function (message) {
+        setError(document.getElementById('mailinfo-error'), message);
       });
     }
     document.getElementById('nav-mail-btn').addEventListener('click', function () {

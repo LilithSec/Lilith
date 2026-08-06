@@ -26,7 +26,7 @@
 
         <div class="col-auto">
           <label class="form-label">Source</label>
-          <select name="source" class="form-select form-select-sm" style="width:150px" id="source-sel" onchange="syncFilters()">
+          <select name="source" class="form-select form-select-sm" style="width:150px" id="source-sel">
             % for my $source_option (@$sources) {
             <option value="<%= $source_option->{key} %>" <%= $source eq $source_option->{key} ? 'selected' : '' %>><%= $source_option->{label} %></option>
             % }
@@ -114,7 +114,7 @@
 
 </form>
 
-%= include "partials/_error_alert", message => $error
+%= include 'partials/_error_alert', message => $error
 
 % if (defined $result) {
 %= include 'logs/_results'
@@ -122,27 +122,4 @@
 
 <script src="/js/time-range.js"></script>
 <script src="/js/auto-refresh.js"></script>
-<script>
-// Show only the filter fields that apply to the selected source.
-function syncFilters() {
-  var selectedSource = document.getElementById('source-sel').value;
-  document.querySelectorAll('.log-filter-field').forEach(function(fieldEl) {
-    var fieldSources = (fieldEl.dataset.sources || '').split(/\s+/);
-    fieldEl.style.display = (fieldSources.indexOf(selectedSource) !== -1) ? '' : 'none';
-  });
-}
-
-document.addEventListener('DOMContentLoaded', function() {
-  syncFilters();
-
-  // Auto-refresh (shared module): fetch fresh results every N seconds and swap
-  // #log-results in place. State is kept in localStorage so it persists.
-  LilithAutoRefresh.init({
-    checkboxId:     'logs-auto-refresh',
-    secondsInputId: 'logs-auto-refresh-secs',
-    statusId:       'logs-ar-status',
-    containerId:    'log-results',
-    storagePrefix:  'logsAutoRefresh'
-  });
-});
-</script>
+<script src="/js/logs.js"></script>

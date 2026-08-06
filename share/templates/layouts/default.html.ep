@@ -99,10 +99,7 @@
             <div class="col-auto">
               <label class="form-label small text-muted mb-1">Table</label>
               <select id="lookup-table" class="form-select form-select-sm" style="width:100px">
-                <option value="suricata">Suricata</option>
-                <option value="sagan">Sagan</option>
-                <option value="cape">CAPE</option>
-                <option value="baphomet">Baphomet</option>
+                %= include 'partials/_table_options'
               </select>
             </div>
             <div class="col">
@@ -163,6 +160,7 @@
 %= include 'partials/_modal', id => 'ipinfo-modal', title => 'IP Info', title_id => 'ipinfo-modal-title', dialog => 'modal-lg modal-dialog-scrollable', body => begin
   <div id="ipinfo-loading" class="text-center text-muted py-3">Loading…</div>
   <div id="ipinfo-content" style="display:none">
+    <div id="ipinfo-error" class="text-warning small mb-2" style="display:none"></div>
     <div class="mb-2">
       <span class="text-muted small fw-semibold">Reverse DNS</span>
       <div id="ipinfo-rdns" class="font-monospace small mt-1"></div>
@@ -187,6 +185,7 @@
 %= include 'partials/_modal', id => 'nav-domaininfo-modal', title => 'Domain Info', title_id => 'nav-domaininfo-modal-title', dialog => 'modal-lg modal-dialog-scrollable', body => begin
   <div id="nav-domaininfo-loading" class="text-center text-muted py-3">Loading…</div>
   <div id="nav-domaininfo-content" style="display:none">
+    <div id="nav-domaininfo-error" class="text-warning small mb-2" style="display:none"></div>
     <div class="mb-2">
       <span class="text-muted small fw-semibold">DNS Records</span>
       <div id="nav-domaininfo-dns" class="font-monospace small mt-1"></div>

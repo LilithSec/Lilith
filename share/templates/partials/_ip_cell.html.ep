@@ -3,5 +3,19 @@
 % # with subdivision and (toggleable) city. Expects $ip; renders nothing when
 % # the IP is unset. Shared by the suricata/sagan/baphomet search result tables.
 % if ($ip) {
-<a href="#" class="ip-filter" data-ip="<%= $ip %>"><%= $ip %></a> <%= include 'partials/_info_btn', kind => 'ip', value => $ip %><% if (my $country = $self->ip_country($ip)) { %> <span class="text-muted small" title="<%= $country %>"><%= $self->country_flag($country) %> <%= $country %><% if (my $subdivision = $self->ip_subdivision($ip)) { %>/<%= $subdivision %><% } %><% if (my $city = $self->ip_city($ip)) { %><span class="geoip-city"> <%= $city %></span><% } %></span><% } %>
+<a href="#" class="ip-filter" data-ip="<%= $ip %>"><%= $ip %></a>
+%= include 'partials/_info_btn', kind => 'ip', value => $ip
+% # The geo annotation: flag, country, and /subdivision run together with no
+% # space between the country and its subdivision, so that part is assembled in
+% # Perl rather than spread over template lines whose newlines would show as
+% # gaps. The city keeps its own span so the search page can toggle it.
+% if (my $country = $self->ip_country($ip)) {
+%   my $geo = $self->country_flag($country) . ' ' . $country;
+%   if (my $subdivision = $self->ip_subdivision($ip)) { $geo .= '/' . $subdivision }
+%   my $city = $self->ip_city($ip);
+<span class="text-muted small" title="<%= $country %>"><%= $geo =%>
+<% if ($city) { =%>
+<span class="geoip-city"> <%= $city %></span><% } =%>
+</span>
+% }
 % }

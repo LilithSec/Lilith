@@ -46,14 +46,6 @@
       function (letter) { return 0x1F1E6 + letter.charCodeAt(0) - 65; }));
   }
 
-  // Only for the few places that must build markup as a string; anywhere a node
-  // will do, set textContent instead and skip the escaping entirely.
-  function escapeHtml(text) {
-    return String(text).replace(/[&<>"']/g, function (ch) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
-    });
-  }
-
   // ---- DOM -----------------------------------------------------------------
 
   // a <td> carrying text (never markup — textContent escapes)
@@ -119,30 +111,35 @@
   }
 
   // ---- fetch ---------------------------------------------------------------
+  //
+  // Two shapes, because both are wanted: getJSON/postJSON reject on a non-2xx
+  // (the caller has a .catch that shows the message), while unwrap/postResult
+  // resolve with { ok, data } (the caller renders the server's error into the
+  // page rather than treating it as an exception).
 
-  // GET JSON, rejecting with the server's error message on a non-2xx.
-  function getJSON(url) {
-    return fetch(url).then(function (response) {
-      return response.json().then(function (data) {
-        if (!response.ok) { throw new Error(data && data.error ? data.error : ('HTTP ' + response.status)); }
-        return data;
-      });
-    });
-  }
-
-  // POST JSON, rejecting with the server's error message on a non-2xx.
-  function postJSON(url, body) {
-    return fetch(url, {
+  // The fetch options for a JSON POST body.
+  function jsonPost(body) {
+    return {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
-    }).then(function (response) {
-      return response.json().then(function (data) {
-        if (!response.ok) { throw new Error(data && data.error ? data.error : ('HTTP ' + response.status)); }
-        return data;
-      });
+    };
+  }
+
+  // Response -> its parsed body, throwing the server's error message on a
+  // non-2xx. Shared by getJSON and postJSON.
+  function throwOnError(response) {
+    return response.json().then(function (data) {
+      if (!response.ok) { throw new Error(data && data.error ? data.error : ('HTTP ' + response.status)); }
+      return data;
     });
   }
+
+  // GET JSON, rejecting with the server's error message on a non-2xx.
+  function getJSON(url) { return fetch(url).then(throwOnError); }
+
+  // POST JSON, rejecting with the server's error message on a non-2xx.
+  function postJSON(url, body) { return fetch(url, jsonPost(body)).then(throwOnError); }
 
   // Turn a Response into { ok, data }, for the callers that render the server's
   // error into the page instead of throwing. Use as `.then(LilithUtil.unwrap)`.
@@ -150,31 +147,27 @@
     return response.json().then(function (data) { return { ok: response.ok, data: data }; });
   }
 
-  // Fetch and resolve with { ok, data } rather than rejecting.
-  function fetchResult(url, options) {
-    return fetch(url, options).then(unwrap);
-  }
-
-  // POST JSON and resolve with { ok, data }.
-  function postResult(url, body) {
-    return fetchResult(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-  }
+  // POST JSON and resolve with { ok, data } rather than rejecting.
+  function postResult(url, body) { return fetch(url, jsonPost(body)).then(unwrap); }
 
   // ---- misc ----------------------------------------------------------------
 
-  // Find an entry by id, comparing as strings since ids arrive both ways.
-  function findById(list, id) {
+  // Find an entry whose `key` matches `value`, comparing as strings since ids
+  // and the like arrive both as numbers and as strings.
+  function findBy(list, key, value) {
     for (var index = 0; index < (list || []).length; index++) {
-      if (String(list[index].id) === String(id)) { return list[index]; }
+      if (String(list[index][key]) === String(value)) { return list[index]; }
     }
     return null;
   }
 
+  // The common case: find an entry by its id.
+  function findById(list, id) { return findBy(list, 'id', id); }
+
   // Hand the browser a generated file. `data` is a string or a Uint8Array.
+  // The object URL is revoked on the next tick rather than immediately: the
+  // click only queues the download, and revoking in the same turn can pull the
+  // blob out from under a browser that has not started reading it yet.
   function downloadBlob(data, filename, type) {
     var blob = new Blob([data], { type: type || 'application/octet-stream' });
     var url = URL.createObjectURL(blob);
@@ -182,7 +175,7 @@
     downloadLink.href = url;
     downloadLink.download = filename;
     downloadLink.click();
-    URL.revokeObjectURL(url);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 0);
   }
 
   // Same, for a base64 payload carried in a data attribute. The content type may
@@ -196,12 +189,11 @@
   }
 
   window.LilithUtil = {
-    pad2: pad2, fmtTime: fmtTime, fmtSize: fmtSize, fmtNum: fmtNum,
-    flagFor: flagFor, escapeHtml: escapeHtml,
+    pad2: pad2, fmtTime: fmtTime, fmtSize: fmtSize, fmtNum: fmtNum, flagFor: flagFor,
     cell: cell, kvRow: kvRow, badge: badge, appendBadge: appendBadge,
     statusBadge: statusBadge, showStatus: showStatus,
-    getJSON: getJSON, postJSON: postJSON, unwrap: unwrap,
-    fetchResult: fetchResult, postResult: postResult,
-    findById: findById, downloadBlob: downloadBlob, downloadBase64: downloadBase64
+    getJSON: getJSON, postJSON: postJSON, unwrap: unwrap, postResult: postResult,
+    findById: findById, findBy: findBy,
+    downloadBlob: downloadBlob, downloadBase64: downloadBase64
   };
 })();

@@ -49,10 +49,5 @@
     });
   }
 
-  // Convenience: sort the results table inside a container, if there is one.
-  function initSortIn(containerSelector) {
-    initSort(document.querySelector(containerSelector + ' table.table'));
-  }
-
-  window.LilithTable = { initSort: initSort, initSortIn: initSortIn };
+  window.LilithTable = { initSort: initSort };
 })();

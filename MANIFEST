@@ -111,6 +111,7 @@ share/templates/layouts/default.html.ep
 share/templates/search/index.html.ep
 share/templates/partials/_time_range.html.ep
 share/templates/partials/_results_pager.html.ep
+share/templates/partials/_table_options.html.ep
 share/templates/partials/_event_id_cell.html.ep
 share/templates/partials/_ip_cell.html.ep
 share/templates/partials/_modal.html.ep
@@ -189,6 +190,14 @@ share/public/js/lilith-util.js
 share/public/js/lilith-lookup.js
 share/public/js/lilith-virani.js
 share/public/js/lilith-table.js
+share/public/js/search.js
+share/public/js/logs.js
+share/public/js/event-view.js
+share/public/js/escalation.js
+share/public/js/auto-escalation.js
+share/public/js/cape-submit.js
+share/public/js/dashboard.js
+share/public/js/dashboard-presets.js
 share/public/css/lilith.css
 share/public/css/dashboard.css
 share/public/vendor/gridstack/gridstack-all.js
