@@ -30,6 +30,16 @@ a update means "keep the current value".
 # read tier gate; returns 1 when the caller may proceed, else renders the
 # 404 and returns 0. The shared logic lives in the require_escalation_view
 # helper in Lilith::Web.
+#
+# A refusal is a 404 rather than a 403 so a frontend with escalation switched
+# off does not advertise that the pages exist at all.
+#
+# Args: none.
+#
+# Returns: 1 when escalation_enable is set, 0 otherwise -- having already
+# rendered the 404, so a caller returns straight away on 0.
+#
+#     return unless ->_require_view;
 sub _require_view {
 	return $_[0]->require_escalation_view;
 }
@@ -38,6 +48,17 @@ sub _require_view {
 # Renders a 404 (view off) or 403 (management off) and returns 0 on refusal.
 # The shared logic lives in the require_escalation_manage helper in
 # Lilith::Web.
+#
+# The two refusals differ on purpose: with view off the page does not exist as
+# far as a caller can tell (404), while with view on but management off the
+# page is real and the action is simply not allowed (403).
+#
+# Args: none.
+#
+# Returns: 1 when both tiers allow it, 0 otherwise -- having already rendered
+# the refusal, so a caller returns straight away on 0.
+#
+#     return unless ->_require_manage;
 sub _require_manage {
 	my $self = shift;
 

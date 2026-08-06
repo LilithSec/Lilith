@@ -24,6 +24,17 @@ as the escalation preview and PCAP download do.
 
 # feature gate; returns 1 when the caller may proceed, else renders the 404 and
 # returns 0. CAPE submission is off unless enabled with a server configured.
+#
+# A refusal is a 404 rather than a 403, matching the escalation gates: with the
+# feature off the page does not exist as far as a caller can tell.
+#
+# Args: none.
+#
+# Returns: 1 when cape_enable is set and at least one [cape_servers.*] carries
+# a url, 0 otherwise -- having already rendered the 404, so a caller returns
+# straight away on 0.
+#
+#     return unless $self->_require_enabled;
 sub _require_enabled {
 	my $self = shift;
 

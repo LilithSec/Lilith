@@ -121,7 +121,25 @@ sub check_rule {
 	return 1;
 } ## end sub check_rule
 
-# validates a condition node, dieing with the path to the first problem
+# Validates a condition node, dieing with the path to the first problem.
+# Recurses into the children of a combinator, so one call checks a whole match
+# tree. Split from check_rule because a node is checked in several places (the
+# top of the tree, and each child of an all/any/not) with only the path
+# differing.
+#
+# Args:
+#
+#   - $node :: the condition node as a hash ref -- a combinator
+#     ({ all => [...] }, { any => [...] }, { not => {...} }) or a leaf test
+#     ({ field => ..., op => ..., value => ... }).
+#   - $where :: the path to this node for error messages, e.g. "match.all[0]".
+#     The caller builds it as it descends.
+#
+# Returns: 1 when the node and everything below it is well formed. Dies with a
+# message beginning with $where otherwise, so the reported problem names the
+# node it is in rather than just the rule.
+#
+#     $class->_check_node( $rule->{match}, 'match' );
 sub _check_node {
 	my ( $class, $node, $where ) = @_;
 
@@ -237,7 +255,26 @@ sub compile {
 	return $class->_compile_node($match);
 } ## end sub compile
 
-# turns a validated condition node into a coderef of sub ($obj) -> bool
+# Turns a validated condition node into a coderef of sub ($obj) -> bool.
+# Compiling once and running the closure per alert keeps the tree walk out of
+# the hot path: a rule is compiled when it is loaded, then called for every
+# alert in the window.
+#
+# Nothing here evaluates the rule as Perl. A combinator becomes a loop over its
+# compiled children and a leaf becomes a hash lookup plus a fixed comparison,
+# which is what makes a rule safe to accept from the web UI.
+#
+# Args:
+#
+#   - $node :: the condition node as a hash ref, already through _check_node.
+#     A combinator (all/any/not) or a leaf test.
+#
+# Returns: a code ref taking one alert row hash ref and returning 1 or 0. A
+# node that is not a hash ref compiles to a closure that always returns 0,
+# rather than dying at match time.
+#
+#     my $match = $class->_compile_node( $rule->{match} );
+#     if ( $match->($alert_row) ) { ... }
 sub _compile_node {
 	my ( $class, $node ) = @_;
 
@@ -275,7 +312,29 @@ sub _compile_node {
 	return $class->_compile_leaf($node);
 } ## end sub _compile_node
 
-# turns a validated leaf node into a coderef of sub ($obj) -> bool
+# Turns a validated leaf node into a coderef of sub ($obj) -> bool. One closure
+# per operator, with the field name and target value closed over, so the operator
+# is decided once at compile time rather than re-dispatched per alert.
+#
+# A leaf whose field is missing from the alert is false for every operator but
+# 'exists', and a numeric comparison against a non-numeric field is false rather
+# than an error -- a rule written for suricata does not blow up when it reaches
+# a cape row that has no such column.
+#
+# Args:
+#
+#   - $node :: the leaf as a hash ref, already through _check_node. 'field' is
+#     a column name or a dotted path into the raw EVE ('raw.alert.severity');
+#     'op' is one of ==, !=, >, >=, <, <=, regex, in, contains, or exists; and
+#     'value' is what to compare against -- a scalar for most, an array ref for
+#     'in', a boolean for 'exists'.
+#
+# Returns: a code ref taking one alert row hash ref and returning 1 or 0.
+#
+#     my $test = $class->_compile_leaf(
+#         { field => 'malscore', op => '>=', value => 8 }
+#     );
+#     $test->($alert_row);    # 1 when the alert scored 8 or worse
 sub _compile_leaf {
 	my ( $class, $node ) = @_;
 
@@ -297,10 +356,12 @@ sub _compile_leaf {
 			my $v = $class->_field_value( $_[0], $field );
 			return 0 if !defined($v) || ref($v) || $v !~ /^-?\d+(?:\.\d+)?$/;
 			my $n = $v + 0;
-			return ( $op eq '>' ? $n > $target
+			return (
+				  $op eq '>'  ? $n > $target
 				: $op eq '>=' ? $n >= $target
 				: $op eq '<'  ? $n < $target
-				: $n <= $target ) ? 1
+				:               $n <= $target
+				) ? 1
 				: 0;
 		}; ## end sub
 	} ## end if ( $op eq '>' || $op eq '>=' || $op eq '<'...)
@@ -349,7 +410,24 @@ sub _compile_leaf {
 	}; ## end sub
 } ## end sub _compile_leaf
 
-# equality that is numeric when both sides look numeric, else string eq
+# Equality that is numeric when both sides look numeric, else string eq. A rule
+# is JSON, so a port written as 22 and one written as "22" mean the same thing
+# to whoever wrote it; comparing them as strings would surprise. Plain function,
+# not a method.
+#
+# Args:
+#
+#   - $a :: the alert's field value, as _field_value returned it.
+#   - $b :: the rule's value.
+#
+# The two are interchangeable -- the comparison is symmetric.
+#
+# Returns: 1 when equal, 0 otherwise. An undef on either side is 0, never a
+# warning, so a missing field simply does not match.
+#
+#     _eq( 22, '22' );        # 1, both look numeric
+#     _eq( 'tcp', 'tcp' );    # 1, string compare
+#     _eq( undef, 'tcp' );    # 0
 sub _eq {
 	my ( $a, $b ) = @_;
 
@@ -364,8 +442,30 @@ sub _eq {
 	return ( $a eq $b ) ? 1 : 0;
 } ## end sub _eq
 
-# resolves a dotted field path against a alert row, decoding the raw JSON
-# column when a path descends into it
+# Resolves a dotted field path against a alert row, decoding the raw JSON
+# column when a path descends into it. This is what lets a rule reach a field
+# that was never promoted to a column, without every rule having to decode raw
+# for itself.
+#
+# The walk only ever reads: a hash is indexed by name, an array by a numeric
+# part, and anything else ends the walk. Nothing is called, so a path cannot
+# reach code however it is written.
+#
+# Args:
+#
+#   - $obj :: the alert row as a hash ref, keyed by column name, with 'raw'
+#     still the JSON text the database returned.
+#   - $field :: the dotted path, e.g. 'src_ip' for a column or
+#     'raw.alert.severity' to descend into the EVE record. Numeric parts index
+#     arrays, e.g. 'raw.alert.metadata.mitre_tactic.0'.
+#
+# Returns: the value at that path -- a scalar, or a hash or array ref when the
+# path stops on a structure. undef when any step is missing, when the path
+# runs into a scalar partway down, or when $field was not given.
+#
+#     $class->_field_value( $row, 'malscore' );             # 9
+#     $class->_field_value( $row, 'raw.alert.severity' );   # 1
+#     $class->_field_value( $row, 'raw.nope.deeper' );      # undef
 sub _field_value {
 	my ( $class, $obj, $field ) = @_;
 

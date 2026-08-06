@@ -1,3 +1,8 @@
+# esc_targets -- list the configured escalation targets: ID, name, type,
+# whether enabled, description, and when last changed. The table output leaves
+# the per-type config out, since it holds secrets; --output json includes it.
+#
+#     lilith esc_targets
 package Lilith::CLI::Command::EscTargets;
 
 use strict;
@@ -15,6 +20,18 @@ sub opt_spec {
 	return $class->output_opt_spec;
 }
 
+# Fetch every target and render it.
+#
+# The table output leaves the per-type config out on purpose -- it holds
+# webhook keys and SMTP passwords -- so listing targets over someone's shoulder
+# is safe. --output json includes it.
+#
+# Args:
+#
+#   - $opt :: the parsed options -- just the shared --output/--pretty pair.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: whatever the chosen renderer returned.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 
@@ -30,7 +47,9 @@ sub execute {
 				push(
 					@td,
 					[
-						$item->{id}, $item->{name}, $item->{type},
+						$item->{id},
+						$item->{name},
+						$item->{type},
 						( $item->{enabled} ? '1' : '0' ),
 						defined( $item->{description} ) ? $item->{description} : '',
 						defined( $item->{updated} )     ? $item->{updated}     : '',

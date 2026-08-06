@@ -1,3 +1,12 @@
+# esc_target_update -- change one escalation target, found by --tid or --name.
+#
+# --set items merge over the current config rather than replacing it, so one
+# field can be changed without restating the rest; an empty value removes the
+# key, letting the type's default apply again. When the target was found by
+# --tid, --name is read as the new name rather than as a lookup.
+#
+#     lilith esc_target_update --name soc-hook --set url=https://new.example.net/hook
+#     lilith esc_target_update --tid 3 --name soc-hook-old --disable
 package Lilith::CLI::Command::EscTargetUpdate;
 
 use strict;
@@ -22,6 +31,17 @@ sub opt_spec {
 	);
 } ## end sub opt_spec
 
+# Refuse the run when --enable and --disable were both given, since that is a
+# contradiction rather than a preference.
+#
+# Args:
+#
+#   - $opt :: the parsed options. Only the --enable/--disable pair is looked
+#     at; the target is identified in execute.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: nothing meaningful when the run may proceed; otherwise calls
+# usage_error, which prints the usage and exits non-zero.
 sub validate_args {
 	my ( $self, $opt, $args ) = @_;
 
@@ -32,6 +52,21 @@ sub validate_args {
 	return;
 }
 
+# Look the target up, merge the changes over what it already has, and save it.
+#
+# The config is merged rather than replaced so one field can be changed without
+# restating the credentials alongside it, and an empty value removes its key so
+# the type's default applies again. When --tid identified the target, --name is
+# free to mean the new name.
+#
+# Args:
+#
+#   - $opt :: the parsed options, as opt_spec above describes them.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: nothing meaningful. Prints 'updated escalation target <id>'. Dies
+# out of the lookup when nothing matched, or out of Lilith when the update was
+# refused.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 

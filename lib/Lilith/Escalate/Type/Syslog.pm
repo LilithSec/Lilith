@@ -234,7 +234,21 @@ sub escalate {
 
 # values land inside key="value" pairs and come from event data; escape
 # backslashes and quotes so the quoting cannot be broken out of, and control
-# characters so a newline cannot forge additional pairs or split the line
+# characters so a newline cannot forge additional pairs or split the line.
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $value :: the value to escape, straight off an alert -- a signature, a
+#     classification, an IP, or anything else being logged. Expected to be
+#     defined; the caller decides what a missing field becomes.
+#
+# Returns: the escaped value as a string, safe to place between double quotes.
+# Backslashes and quotes gain a backslash, and control characters (including
+# newline and tab) become a \xNN escape, so the result is always one line.
+#
+#     _escape_log_value( 'ET SCAN "nmap"' );      # 'ET SCAN \"nmap\"'
+#     _escape_log_value( "two\nlines" );          # 'two\x0alines'
 sub _escape_log_value {
 	my $value = shift;
 	$value =~ s/\\/\\\\/g;

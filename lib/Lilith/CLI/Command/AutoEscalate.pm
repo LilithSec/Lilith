@@ -1,3 +1,15 @@
+# auto_escalate -- evaluate the enabled rules against alerts ingested in the
+# window and escalate what matches. This is the command the systemd timer and
+# the cron entry run; see docs/escalation.md.
+#
+# --m only bounds how far back to scan; the per-alert auto_escalated stamp is
+# what stops an alert being escalated twice, so a generous window is safe.
+# --dry-run reports what would fire and sends nothing, leaving the alerts
+# unstamped so a real run still sees them. Exits 0 either way -- a rule that
+# matched nothing is not an error.
+#
+#     lilith auto_escalate --dry-run
+#     lilith auto_escalate -m 60 --tables suricata,cape
 package Lilith::CLI::Command::AutoEscalate;
 
 use strict;
@@ -21,6 +33,22 @@ sub opt_spec {
 	);
 } ## end sub opt_spec
 
+# Scan each table in turn and render the summaries.
+#
+# All four tables are scanned by default, baphomet included, so a rule scoped
+# to it can fire. That is not the same as the default a rule with no tables of
+# its own gets, which stays suricata/sagan/cape -- scanning baphomet lets an
+# opted-in rule see it, without opting every rule in.
+#
+# Args:
+#
+#   - $opt :: the parsed options, as opt_spec above describes them.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: whatever the chosen renderer returned. Prints one row per
+# rule/alert match, or a bare per-table row when a table matched nothing.
+# Exits 0 whether or not anything was escalated; a database or target failure
+# dies out of Lilith.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 
@@ -58,19 +86,24 @@ sub execute {
 			my @td;
 			foreach my $summary (@summaries) {
 				if ( !@{ $summary->{escalations} } ) {
-					push( @td,
-						[ $summary->{table}, $summary->{scanned}, $summary->{rules}, $summary->{matched}, '', '', '', '' ]
+					push(
+						@td,
+						[
+							$summary->{table}, $summary->{scanned}, $summary->{rules}, $summary->{matched},
+							'',                '',                  '',                ''
+						]
 					);
 					next;
-				}
+				} ## end if ( !@{ $summary->{escalations} } )
 				foreach my $entry ( @{ $summary->{escalations} } ) {
 					my @targets = @{ $entry->{target_ids} };
 					push( @targets, map { $_ . '?' } @{ $entry->{unknown_targets} } );
 					push(
 						@td,
 						[
-							$summary->{table},  $summary->{scanned}, $summary->{rules},     $summary->{matched},
-							$entry->{alert_id}, $entry->{rule_name}, join( ',', @targets ), $entry->{status},
+							$summary->{table},     $summary->{scanned}, $summary->{rules},
+							$summary->{matched},   $entry->{alert_id},  $entry->{rule_name},
+							join( ',', @targets ), $entry->{status},
 						]
 					);
 				} ## end foreach my $entry ( @{ $summary->{escalations} ...})

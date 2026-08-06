@@ -1,4 +1,5 @@
 use utf8;
+
 package Lilith::Schema::Result::Escalation;
 
 =head1 NAME
@@ -101,35 +102,35 @@ __PACKAGE__->table("escalations");
 =cut
 
 __PACKAGE__->add_columns(
-  "id",
-  {
-    data_type         => "bigint",
-    is_auto_increment => 1,
-    is_nullable       => 0,
-    sequence          => "escalations_id_seq",
-  },
-  "table_name",
-  { data_type => "varchar", is_nullable => 0, size => 64 },
-  "alert_id",
-  { data_type => "bigint", is_nullable => 0 },
-  "event_id",
-  { data_type => "varchar", is_nullable => 1, size => 64 },
-  "target_id",
-  { data_type => "bigint", is_nullable => 1 },
-  "target_name",
-  { data_type => "varchar", is_nullable => 1, size => 255 },
-  "status",
-  { data_type => "varchar", is_nullable => 0, size => 32 },
-  "note",
-  { data_type => "text", is_nullable => 1 },
-  "requested_by",
-  { data_type => "varchar", is_nullable => 1, size => 255 },
-  "error",
-  { data_type => "text", is_nullable => 1 },
-  "raw",
-  { data_type => "jsonb", is_nullable => 1 },
-  "timestamp",
-  { data_type => "timestamp with time zone", is_nullable => 0 },
+	"id",
+	{
+		data_type         => "bigint",
+		is_auto_increment => 1,
+		is_nullable       => 0,
+		sequence          => "escalations_id_seq",
+	},
+	"table_name",
+	{ data_type => "varchar", is_nullable => 0, size => 64 },
+	"alert_id",
+	{ data_type => "bigint", is_nullable => 0 },
+	"event_id",
+	{ data_type => "varchar", is_nullable => 1, size => 64 },
+	"target_id",
+	{ data_type => "bigint", is_nullable => 1 },
+	"target_name",
+	{ data_type => "varchar", is_nullable => 1, size => 255 },
+	"status",
+	{ data_type => "varchar", is_nullable => 0, size => 32 },
+	"note",
+	{ data_type => "text", is_nullable => 1 },
+	"requested_by",
+	{ data_type => "varchar", is_nullable => 1, size => 255 },
+	"error",
+	{ data_type => "text", is_nullable => 1 },
+	"raw",
+	{ data_type => "jsonb", is_nullable => 1 },
+	"timestamp",
+	{ data_type => "timestamp with time zone", is_nullable => 0 },
 );
 
 =head1 PRIMARY KEY

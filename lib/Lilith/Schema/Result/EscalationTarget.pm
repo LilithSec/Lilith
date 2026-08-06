@@ -1,4 +1,5 @@
 use utf8;
+
 package Lilith::Schema::Result::EscalationTarget;
 
 =head1 NAME
@@ -69,25 +70,25 @@ __PACKAGE__->table("escalation_targets");
 =cut
 
 __PACKAGE__->add_columns(
-  "id",
-  {
-    data_type         => "bigint",
-    is_auto_increment => 1,
-    is_nullable       => 0,
-    sequence          => "escalation_targets_id_seq",
-  },
-  "name",
-  { data_type => "varchar", is_nullable => 0, size => 255 },
-  "type",
-  { data_type => "varchar", is_nullable => 0, size => 255 },
-  "config",
-  { data_type => "jsonb", is_nullable => 0 },
-  "enabled",
-  { data_type => "boolean", is_nullable => 0 },
-  "description",
-  { data_type => "varchar", is_nullable => 1, size => 2048 },
-  "updated",
-  { data_type => "timestamp with time zone", is_nullable => 0 },
+	"id",
+	{
+		data_type         => "bigint",
+		is_auto_increment => 1,
+		is_nullable       => 0,
+		sequence          => "escalation_targets_id_seq",
+	},
+	"name",
+	{ data_type => "varchar", is_nullable => 0, size => 255 },
+	"type",
+	{ data_type => "varchar", is_nullable => 0, size => 255 },
+	"config",
+	{ data_type => "jsonb", is_nullable => 0 },
+	"enabled",
+	{ data_type => "boolean", is_nullable => 0 },
+	"description",
+	{ data_type => "varchar", is_nullable => 1, size => 2048 },
+	"updated",
+	{ data_type => "timestamp with time zone", is_nullable => 0 },
 );
 
 =head1 PRIMARY KEY

@@ -1,3 +1,10 @@
+# ae_update -- change one auto escalation rule, found by the numeric --id.
+# Only the options given are touched, so a rule can be re-scoped or renamed
+# without restating the rest of it. The paired flags (--stop/--no-stop and
+# --enable/--disable) exist because a plain flag cannot express "set this to
+# false"; giving both of a pair is refused rather than guessed at.
+#
+#     lilith ae_update --id 3 --priority 5 --disable
 package Lilith::CLI::Command::AeUpdate;
 
 use strict;
@@ -26,6 +33,21 @@ sub opt_spec {
 	);
 } ## end sub opt_spec
 
+# Refuse the run when --id is missing or when either pair of opposing flags was
+# given together.
+#
+# The pairs cannot be resolved by precedence: --stop with --no-stop is a
+# contradiction rather than a preference, so it is refused rather than one
+# quietly winning.
+#
+# Args:
+#
+#   - $opt :: the parsed options. --id, and the --enable/--disable and
+#     --stop/--no-stop pairs, are looked at.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: nothing meaningful when the run may proceed; otherwise calls
+# usage_error, which prints the usage and exits non-zero.
 sub validate_args {
 	my ( $self, $opt, $args ) = @_;
 
@@ -44,6 +66,22 @@ sub validate_args {
 	return;
 } ## end sub validate_args
 
+# Build the update from whichever options were given and apply it.
+#
+# Only the fields actually passed go into the update, so anything left off is
+# untouched rather than reset. --tables is the one exception to the "defined
+# and non-empty" test: an empty --tables is meaningful, clearing the scoping
+# back to the default set.
+#
+# Args:
+#
+#   - $opt :: the parsed options, as opt_spec above describes them. --id names
+#     the rule and is already known to be present from validate_args.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: nothing meaningful. Prints 'updated auto escalation <id>'. A
+# malformed rule, an unknown table, or an ID that does not exist dies out of
+# Lilith.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 

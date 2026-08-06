@@ -286,12 +286,12 @@ is( $lilith->parse_eve( type => 'bogus',    json => { event_type => 'alert' } ),
 	my $row = $lilith->parse_eve( type => 'cape', json => $eve, instance => 'cape1', host => 'sensor1' );
 
 	is( $row->{target},           'huntslug-1753208651-putty.exe', 'target from lilith_cape_submit.filename' );
-	is( $row->{md5},              'lcs-md5',    'md5 from lilith_cape_submit' );
-	is( $row->{sha1},             'lcs-sha1',   'sha1 from lilith_cape_submit' );
-	is( $row->{sha256},           'lcs-sha256', 'sha256 from lilith_cape_submit' );
-	is( $row->{slug},             'huntslug',   'slug from lilith_cape_submit' );
-	is( $row->{subbed_from_host}, 'lilith01',   'subbed_from_host from lilith_cape_submit.host' );
-	is( $row->{size},             4096,         'size falls back to fileinfo.size' );
+	is( $row->{md5},              'lcs-md5',                       'md5 from lilith_cape_submit' );
+	is( $row->{sha1},             'lcs-sha1',                      'sha1 from lilith_cape_submit' );
+	is( $row->{sha256},           'lcs-sha256',                    'sha256 from lilith_cape_submit' );
+	is( $row->{slug},             'huntslug',                      'slug from lilith_cape_submit' );
+	is( $row->{subbed_from_host}, 'lilith01',                      'subbed_from_host from lilith_cape_submit.host' );
+	is( $row->{size},             4096,                            'size falls back to fileinfo.size' );
 }
 
 # -- realistic return trip: mojo_cape_submit layers cape_submit on top, but the
@@ -376,8 +376,8 @@ is( $lilith->parse_eve( type => 'bogus',    json => { event_type => 'alert' } ),
 		path       => '/var/log/auth.log',
 		references => [ 'https://example/1', 'https://example/2' ],
 		attack     => { tactic => 'credential-access' },
-		rule       => { name => 'sshd-bruteforce', id => 42 },
-		found      => { count => 12 },
+		rule       => { name   => 'sshd-bruteforce', id => 42 },
+		found      => { count  => 12 },
 		marks_set  => ['sshd'],
 	};
 	my $raw = encode_json($eve);
@@ -400,27 +400,27 @@ is( $lilith->parse_eve( type => 'bogus',    json => { event_type => 'alert' } ),
 		'baphomet row keys match the baphomet_alerts column set exactly'
 	);
 
-	is( $row->{host},           'ids1',            'baphomet host is the record hostname, not the sensor host' );
-	is( $row->{kur},            'baphomet-sshd',   'kur carried through' );
-	is( $row->{event_type},     'banish',          'event_type carried through' );
-	is( $row->{src_ip},         '203.0.113.66',    'offender ip -> src_ip' );
-	is( $row->{dest_ip},        '198.51.100.9',    'dest_ip carried through' );
-	is( $row->{subject},        undef,             'no subject on a banish' );
-	is( $row->{ban_time},       3600,              'ban_time carried through' );
-	is( $row->{recidive},       1,                 'recidive JSON true coerced to 1' );
-	is( $row->{country},        'US',              'country carried through' );
+	is( $row->{host},           'ids1',              'baphomet host is the record hostname, not the sensor host' );
+	is( $row->{kur},            'baphomet-sshd',     'kur carried through' );
+	is( $row->{event_type},     'banish',            'event_type carried through' );
+	is( $row->{src_ip},         '203.0.113.66',      'offender ip -> src_ip' );
+	is( $row->{dest_ip},        '198.51.100.9',      'dest_ip carried through' );
+	is( $row->{subject},        undef,               'no subject on a banish' );
+	is( $row->{ban_time},       3600,                'ban_time carried through' );
+	is( $row->{recidive},       1,                   'recidive JSON true coerced to 1' );
+	is( $row->{country},        'US',                'country carried through' );
 	is( $row->{path},           '/var/log/auth.log', 'path carried through' );
-	is( $row->{signature},      'SSH brute force', 'msg -> signature' );
-	is( $row->{classification}, 'attempted-admin', 'classtype -> classification' );
-	is( $row->{severity},       'high',            'severity carried through' );
-	is( $row->{score},          9.5,               'score carried through' );
-	is( $row->{raw},            $raw,              'raw stored verbatim' );
+	is( $row->{signature},      'SSH brute force',   'msg -> signature' );
+	is( $row->{classification}, 'attempted-admin',   'classtype -> classification' );
+	is( $row->{severity},       'high',              'severity carried through' );
+	is( $row->{score},          9.5,                 'score carried through' );
+	is( $row->{raw},            $raw,                'raw stored verbatim' );
 
 	# the nested detail is not promoted to columns (the exact-keys check above
 	# guarantees that); it is preserved only in raw, reachable via raw->'...'
 	my $raw_decoded = decode_json( $row->{raw} );
 	is_deeply( $raw_decoded->{attack}, { tactic => 'credential-access' }, 'nested attack detail is kept in raw' );
-	is_deeply( $raw_decoded->{rule}, { name => 'sshd-bruteforce', id => 42 }, 'nested rule detail is kept in raw' );
+	is_deeply( $raw_decoded->{rule},   { name   => 'sshd-bruteforce', id => 42 }, 'nested rule detail is kept in raw' );
 	is_deeply( $raw_decoded->{references}, [ 'https://example/1', 'https://example/2' ], 'references kept in raw' );
 
 	# event_id = SHA256 (base64) of hostname + kur + timestamp + event_type +

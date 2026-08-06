@@ -7,7 +7,7 @@ use Test::More;
 plan tests => 1;
 
 BEGIN {
-    use_ok( 'Lilith' ) || print "Bail out!\n";
+	use_ok('Lilith') || print "Bail out!\n";
 }
 
-diag( "Testing Lilith $Lilith::VERSION, Perl $], $^X" );
+diag("Testing Lilith $Lilith::VERSION, Perl $], $^X");

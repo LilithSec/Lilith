@@ -1,3 +1,8 @@
+# esc_target_test -- send a synthetic event to one escalation target and print
+# the payload it was sent, so a target can be proven before an alert depends on
+# it. This really does send: the webhook is POSTed to, the mail is delivered.
+#
+#     lilith esc_target_test --name soc-hook
 package Lilith::CLI::Command::EscTargetTest;
 
 use strict;
@@ -19,6 +24,17 @@ sub opt_spec {
 	);
 }
 
+# Look the target up, send it a synthetic event, and print what was sent.
+#
+# Args:
+#
+#   - $opt :: the parsed options. --tid names the target by ID, --name by name;
+#     one or the other. --pretty indents the output.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: nothing meaningful. Prints the payload the target was sent, so what
+# arrived at the far end can be compared against what left. Dies out of the
+# lookup when nothing matched, or out of the send when the target refused it.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 

@@ -1,20 +1,20 @@
 package Lilith::Web::Controller::Api;
 
 use Mojo::Base 'Mojolicious::Controller';
-use Net::DNS     ();
-use IO::Select   ();
-use Mojo::IOLoop ();
-use Mojo::JSON qw(decode_json);
-use Time::Piece   ();
-use Time::HiRes   ();
-use Time::Local   ();
-use IO::Socket::IP ();
-use IO::Socket::SSL qw(SSL_VERIFY_PEER SSL_VERIFY_NONE);
-use Net::SSLeay ();
-use Mozilla::CA ();
-use Mail::SPF            ();
+use Net::DNS              ();
+use IO::Select            ();
+use Mojo::IOLoop          ();
+use Mojo::JSON            qw(decode_json);
+use Time::Piece           ();
+use Time::HiRes           ();
+use Time::Local           ();
+use IO::Socket::IP        ();
+use IO::Socket::SSL       qw(SSL_VERIFY_PEER SSL_VERIFY_NONE);
+use Net::SSLeay           ();
+use Mozilla::CA           ();
+use Mail::SPF             ();
 use Mail::DMARC::PurePerl ();
-use Mail::DMARC::Policy  ();
+use Mail::DMARC::Policy   ();
 use Mail::DKIM::PublicKey ();
 
 =head2 virani_sets
@@ -162,7 +162,7 @@ sub virani_cached_list {
 					$item->{filter}     = $meta->{filter}     if defined $meta->{filter};
 					$item->{final_size} = $meta->{final_size} if defined $meta->{final_size};
 				}
-			}
+			} ## end for my $item (@sorted)
 			return \@sorted;
 		},
 		sub {
@@ -282,7 +282,7 @@ sub _run_capture {
 			$timed_out = 1;
 			last;
 		}
-	}
+	} ## end while (1)
 
 	# Kill a still-running child so close()'s waitpid cannot hang on it.
 	if ($timed_out) {
@@ -414,7 +414,7 @@ sub _flatten_geo {
 			} else {
 				_flatten_geo( $value, $dotted, $out );
 			}
-		}
+		} ## end for my $key ( sort keys %{$data} )
 	} elsif ( ref $data eq 'ARRAY' ) {
 		for my $i ( 0 .. $#{$data} ) {
 			_flatten_geo( $data->[$i], $prefix . '.' . $i, $out );
@@ -444,20 +444,27 @@ sub _dns_records {
 		elsif ( $type eq 'NS' )    { push @recs, $rr->nsdname; }
 		elsif ( $type eq 'CNAME' ) { push @recs, $rr->cname; }
 		elsif ( $type eq 'PTR' )   { push @recs, $rr->ptrdname; }
-		elsif ( $type eq 'SOA' )   {
-			push @recs, $rr->mname . ' ' . $rr->rname
-				. ' serial=' . $rr->serial
-				. ' refresh=' . $rr->refresh
-				. ' retry=' . $rr->retry
-				. ' expire=' . $rr->expire
-				. ' min=' . $rr->minimum;
-		}
-		elsif ( $type eq 'CAA' ) { push @recs, $rr->flags . ' ' . $rr->tag . ' ' . $rr->value; }
-		elsif ( $type eq 'SRV' ) {
+		elsif ( $type eq 'SOA' ) {
+			push @recs,
+				  $rr->mname . ' '
+				. $rr->rname
+				. ' serial='
+				. $rr->serial
+				. ' refresh='
+				. $rr->refresh
+				. ' retry='
+				. $rr->retry
+				. ' expire='
+				. $rr->expire . ' min='
+				. $rr->minimum;
+		} elsif ( $type eq 'CAA' ) {
+			push @recs, $rr->flags . ' ' . $rr->tag . ' ' . $rr->value;
+		} elsif ( $type eq 'SRV' ) {
 			push @recs, $rr->priority . ' ' . $rr->weight . ' ' . $rr->port . ' ' . $rr->target;
+		} else {
+			push @recs, $rr->address;
 		}
-		else { push @recs, $rr->address; }
-	}
+	} ## end for my $rr ( $reply->answer )
 	return \@recs;
 } ## end sub _dns_records
 
@@ -471,7 +478,7 @@ heuristic as a fallback.
 
 sub _whois_domain {
 	my ($domain) = @_;
-	my @labels = split /\./, $domain;
+	my @labels   = split /\./, $domain;
 	return $domain unless @labels > 2;
 
 	my $found = 0;
@@ -482,14 +489,14 @@ sub _whois_domain {
 		if ( defined $suffix && length $suffix ) {
 			my $suffix_count = scalar( split /\./, $suffix );
 			$whois_domain = join( '.', @labels[ -( $suffix_count + 1 ) .. -1 ] ) if @labels > $suffix_count;
-			$found = 1;
+			$found        = 1;
 		}
 	};
 	return $whois_domain // $domain if $found;
 
 	# Fallback heuristic: known two-level TLDs get 3 labels, rest get 2.
 	my $two_level = join( '.', @labels[ -2 .. -1 ] );
-	my %tld2 = map { $_ => 1 } qw(
+	my %tld2      = map { $_ => 1 } qw(
 		co.uk co.au co.nz co.za co.in co.jp co.kr co.id co.il
 		com.au com.br com.cn com.mx com.ar com.sg com.hk com.tw
 		org.uk net.uk me.uk org.au net.au
@@ -609,7 +616,7 @@ sub _domaininfo_gather {
 		$wait = 0 if $wait < 0;
 
 		for my $h ( $sel->can_read($wait) ) {
-			my $fn = fileno($h);            # capture before any close() invalidates it
+			my $fn = fileno($h);                            # capture before any close() invalidates it
 			my $p  = defined $fn ? $pending{$fn} : undef;
 			next unless $p;
 			if ( $p->{kind} eq 'dns' ) {
@@ -631,8 +638,8 @@ sub _domaininfo_gather {
 				} else {
 					$p->{buf} .= $chunk;
 				}
-			}
-		}
+			} ## end else [ if ( $p->{kind} eq 'dns' ) ]
+		} ## end for my $h ( $sel->can_read($wait) )
 
 		# Retire any source that has passed its deadline; kill live subprocesses
 		# so close() cannot block on them.
@@ -650,7 +657,7 @@ sub _domaininfo_gather {
 				else                           { $dnstracer_out = $p->{buf}; }
 			}
 			delete $pending{$fn};
-		}
+		} ## end for my $fn ( keys %pending )
 	} ## end while (%pending)
 
 	return {
@@ -692,8 +699,10 @@ sub httpsinfo {
 			my ( $subprocess, $err, $result ) = @_;
 			if ( $err || ref $result ne 'HASH' ) {
 				chomp( my $why = ( $err // 'lookup failed' ) );
-				return $self->render( json => { domain => $domain, error => 'httpsinfo failed: ' . $why },
-					status => 500 );
+				return $self->render(
+					json   => { domain => $domain, error => 'httpsinfo failed: ' . $why },
+					status => 500
+				);
 			}
 			$self->render( json => $result );
 		},
@@ -745,10 +754,18 @@ sub _httpsinfo_gather {
 	$r{tcp_connect_ms} = _ms_since($start);
 
 	my $t1 = Time::HiRes::time();
-	unless ( IO::Socket::SSL->start_SSL( $tcp, SSL_verify_mode => SSL_VERIFY_NONE, SSL_hostname => $domain, Timeout => $timeout ) ) {
+	unless (
+		IO::Socket::SSL->start_SSL(
+			$tcp,
+			SSL_verify_mode => SSL_VERIFY_NONE,
+			SSL_hostname    => $domain,
+			Timeout         => $timeout
+		)
+		)
+	{
 		$r{error} = 'TLS handshake failed: ' . ( $IO::Socket::SSL::SSL_ERROR // $! );
 		return \%r;
-	}
+	} ## end unless ( IO::Socket::SSL->start_SSL( $tcp, SSL_verify_mode...))
 	$r{tls_handshake_ms} = _ms_since($t1);
 
 	# certificate details, best effort — skip any field that is unavailable
@@ -771,6 +788,7 @@ sub _httpsinfo_gather {
 		$c{sig_alg}    = eval { Net::SSLeay::OBJ_obj2txt( Net::SSLeay::P_X509_get_signature_alg($x) ) };
 		$c{fp_sha1}    = eval { Net::SSLeay::X509_get_fingerprint( $x, 'sha1' ) };
 		$c{fp_sha256}  = eval { Net::SSLeay::X509_get_fingerprint( $x, 'sha256' ) };
+
 		for my $k ( keys %c ) {
 			delete $c{$k} unless defined $c{$k} && ( ref $c{$k} || $c{$k} ne '' );
 		}
@@ -801,12 +819,12 @@ sub _httpsinfo_gather {
 				$timed_out = 1;
 				last;
 			}
-		}
+		} ## end while (1)
 	}
-	$r{response_ms}  = _ms_since($t2);
-	$r{total_ms}     = _ms_since($start);
-	$r{timed_out}    = $timed_out;
-	$r{read_capped}  = $read_capped;
+	$r{response_ms} = _ms_since($t2);
+	$r{total_ms}    = _ms_since($start);
+	$r{timed_out}   = $timed_out;
+	$r{read_capped} = $read_capped;
 	close($tcp);
 
 	if ( $resp =~ m{\AHTTP/\d(?:\.\d)?\s+(\d{3})([^\r\n]*)} ) {
@@ -864,11 +882,15 @@ sub mailinfo {
 	if ( defined $ip && $ip ne '' ) {
 		return $self->render( json => { error => 'Invalid IP' }, status => 400 )
 			unless $ip =~ /^[0-9a-fA-F:.]+$/;
-	} else { $ip = undef; }
+	} else {
+		$ip = undef;
+	}
 	if ( defined $selector && $selector ne '' ) {
 		return $self->render( json => { error => 'Invalid selector' }, status => 400 )
 			unless $selector =~ /^[A-Za-z0-9._-]+$/;
-	} else { $selector = undef; }
+	} else {
+		$selector = undef;
+	}
 
 	$self->render_later;
 	Mojo::IOLoop->subprocess(
@@ -877,8 +899,10 @@ sub mailinfo {
 			my ( $subprocess, $err, $result ) = @_;
 			if ( $err || ref $result ne 'HASH' ) {
 				chomp( my $why = ( $err // 'lookup failed' ) );
-				return $self->render( json => { domain => $domain, error => 'mailinfo failed: ' . $why },
-					status => 500 );
+				return $self->render(
+					json   => { domain => $domain, error => 'mailinfo failed: ' . $why },
+					status => 500
+				);
 			}
 			$self->render( json => $result );
 		},
@@ -901,7 +925,7 @@ sub _mailinfo_gather {
 		dmarc  => _dmarc_gather($domain),
 		dkim   => _dkim_gather( $domain, $selector ),
 	};
-}
+} ## end sub _mailinfo_gather
 
 =head2 _mx_gather
 
@@ -949,7 +973,7 @@ sub _fetch_txt {
 		}
 	};
 	return $rec;
-}
+} ## end sub _fetch_txt
 
 =head2 _dmarc_gather
 
@@ -962,7 +986,7 @@ sub _dmarc_gather {
 	my ($domain) = @_;
 	my %d;
 
-	my $org = eval { Mail::DMARC::PurePerl->new->get_organizational_domain($domain) };
+	my $org   = eval { Mail::DMARC::PurePerl->new->get_organizational_domain($domain) };
 	my @cands = ($domain);
 	push( @cands, $org ) if defined $org && $org ne $domain;
 
@@ -983,8 +1007,8 @@ sub _dmarc_gather {
 			}
 		}
 	} else {
-		$d{note} = 'no DMARC record found for ' . $domain
-			. ( ( defined $org && $org ne $domain ) ? ' or ' . $org : '' );
+		$d{note}
+			= 'no DMARC record found for ' . $domain . ( ( defined $org && $org ne $domain ) ? ' or ' . $org : '' );
 	}
 	return \%d;
 } ## end sub _dmarc_gather
@@ -1008,8 +1032,8 @@ sub _dkim_gather {
 	my %d;
 	my @selectors;
 	if ( defined $selector && $selector ne '' ) {
-		@selectors    = ($selector);
-		$d{selector}  = $selector;
+		@selectors = ($selector);
+		$d{selector} = $selector;
 	} else {
 		@selectors = @COMMON_DKIM_SELECTORS;
 		$d{probed} = 1;
@@ -1022,7 +1046,8 @@ sub _dkim_gather {
 	}
 	$d{keys} = \@keys;
 	unless (@keys) {
-		$d{note} = $d{probed}
+		$d{note}
+			= $d{probed}
 			? 'no DKIM key found for the probed common selectors — supply the selector if known'
 			: 'no DKIM key found for that selector';
 	}
@@ -1052,7 +1077,7 @@ sub _dkim_parse_record {
 	$info{notes}           = $tag{n} if defined $tag{n};
 	$info{flags}           = $tag{t} if defined $tag{t};
 	$info{testing}         = ( defined $tag{t} && $tag{t} =~ /(?:^|:)\s*y\s*(?::|$)/ ) ? 1 : 0;
-	$info{revoked}         = ( !defined $tag{p} || $tag{p} eq '' ) ? 1 : 0;
+	$info{revoked}         = ( !defined $tag{p} || $tag{p} eq '' )                     ? 1 : 0;
 	$info{public_key}      = $tag{p} if defined $tag{p} && $tag{p} ne '';
 
 	unless ( $info{revoked} ) {
@@ -1108,7 +1133,7 @@ sub _spfinfo_gather {
 			( my $why = $@ ) =~ s/\s+\z//;
 			$r{error} = 'SPF evaluation failed: ' . $why;
 		}
-	}
+	} ## end if ( defined $ip && $ip ne '' )
 
 	return \%r;
 } ## end sub _spfinfo_gather
@@ -1129,7 +1154,7 @@ sub _spf_summary {
 	shift @terms if @terms && lc( $terms[0] ) eq 'v=spf1';
 
 	my %qual = ( '+' => 'pass', '-' => 'fail', '~' => 'softfail', '?' => 'neutral' );
-	my %s = ( mechanisms => [], modifiers => [], dns_lookups => 0 );
+	my %s    = ( mechanisms => [], modifiers => [], dns_lookups => 0 );
 	for my $term (@terms) {
 		next if $term eq '';
 		if ( $term =~ /^(redirect|exp)=/i ) {
@@ -1143,7 +1168,7 @@ sub _spf_summary {
 		if ( $name eq 'all' ) { $s{all} = $qual{ $q eq '' ? '+' : $q } // 'pass'; }
 		push @{ $s{mechanisms} }, $term;
 		$s{dns_lookups}++ if $name =~ /^(?:include|a|mx|ptr|exists)$/;
-	}
+	} ## end for my $term (@terms)
 	return \%s;
 } ## end sub _spf_summary
 

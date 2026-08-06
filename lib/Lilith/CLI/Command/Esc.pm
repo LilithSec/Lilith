@@ -1,3 +1,15 @@
+# esc -- escalate one event to one or more escalation targets by hand, the CLI
+# counterpart to the web event view's Escalate button. Never gated by the
+# escalation_enable options: those exist for the unauthenticated web frontend,
+# and the CLI already holds the database credentials.
+#
+# --to takes target IDs or names, comma separated. --by records who asked,
+# defaulting to the invoking user. Every attempt lands in the escalations table
+# whether it succeeded or not.
+#
+# Exits non-zero when any target failed, so a script can tell.
+#
+#     lilith esc --id 42 --to soc-hook,mail-oncall --note 'C2 traffic'
 package Lilith::CLI::Command::Esc;
 
 use strict;
@@ -21,6 +33,19 @@ sub opt_spec {
 	);
 } ## end sub opt_spec
 
+# Refuse the run when --id was not given.
+#
+# --to is not checked here: an escalation with no targets resolves to an empty
+# list and is reported as such, which is different from not naming an event at
+# all.
+#
+# Args:
+#
+#   - $opt :: the parsed options. Only --id is looked at.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: nothing meaningful when the run may proceed; otherwise calls
+# usage_error, which prints the usage and exits non-zero.
 sub validate_args {
 	my ( $self, $opt, $args ) = @_;
 
@@ -31,6 +56,23 @@ sub validate_args {
 	return;
 }
 
+# Resolve the targets, escalate the event to each, and render the results.
+#
+# --by defaults to the invoking user rather than a fixed string, so the audit
+# trail records who actually asked. getlogin is tried first and the passwd
+# entry second, since neither is reliable alone -- under a service manager or a
+# bare container both can fail, hence the final 'unknown'.
+#
+# Args:
+#
+#   - $opt :: the parsed options, as opt_spec above describes them. --to is a
+#     comma separated list of target IDs or names.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: does not return. Renders a row per target -- its name, whether the
+# send succeeded, the escalation ID recorded, and any error -- then exits 1
+# when any target failed and 0 otherwise. Every attempt is recorded in the
+# escalations table either way.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 
@@ -63,7 +105,9 @@ sub execute {
 				push(
 					@td,
 					[
-						defined( $result->{target_name} ) ? $result->{target_name} : ( 'id ' . $result->{target_id} ),
+						defined( $result->{target_name} )
+						? $result->{target_name}
+						: ( 'id ' . $result->{target_id} ),
 						$result->{status},
 						defined( $result->{escalation_id} ) ? $result->{escalation_id} : '',
 						defined( $result->{error} )         ? $result->{error}         : '',

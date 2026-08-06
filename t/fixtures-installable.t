@@ -22,10 +22,7 @@ plan skip_all => "no $fixtures directory (not run from the dist root)"
 	unless -d $fixtures;
 
 my @conf_dirs;
-File::Find::find(
-	sub { push @conf_dirs, $File::Find::name if -d $_ && $_ eq 'conf' },
-	$fixtures,
-);
+File::Find::find( sub { push @conf_dirs, $File::Find::name if -d $_ && $_ eq 'conf' }, $fixtures, );
 @conf_dirs = sort @conf_dirs;
 
 ok( scalar @conf_dirs, "found fixtures conf directories under $fixtures" );
@@ -36,11 +33,8 @@ for my $dir (@conf_dirs) {
 	closedir($dh);
 
 	ok( scalar @files, "$dir carries a placeholder file (so the dir installs)" );
-	is_deeply(
-		[ grep { $_ eq '.exists' } @files ],
-		[],
-		"$dir has no reserved .exists placeholder (ExtUtils::Install would skip it)"
-	);
+	is_deeply( [ grep { $_ eq '.exists' } @files ],
+		[], "$dir has no reserved .exists placeholder (ExtUtils::Install would skip it)" );
 }
 
 done_testing;

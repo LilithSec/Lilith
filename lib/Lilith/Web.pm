@@ -43,6 +43,23 @@ defaulting to C</usr/local/etc/lilith.toml>.
 
 =cut
 
+# Mojolicious calls this once per worker at boot. It reads the TOML config and
+# turns it into the app: the Lilith object every controller reaches through the
+# 'lilith' helper, the optional features (Virani remotes, the Allani log store,
+# GeoIP databases, CAPE servers) each built only when their config is present,
+# the referer check when allowed_referers is set, and the routes.
+#
+# Everything expensive to build and safe to share -- database connection
+# details, opened MMDB handles, the per-feature helper closures -- is built here
+# rather than per request, so a request does no setup work. Anything a feature
+# needs but has not got simply leaves that feature switched off, which is why so
+# much of this is conditional rather than fatal.
+#
+# Args: none beyond the app object Mojolicious passes.
+#
+# Returns: nothing meaningful. Called for its effect on the app: helpers,
+# hooks, and routes. Dies when the config file is missing, unreadable, or not
+# parseable as TOML, since none of the above can be built without it.
 sub startup {
 	my $self = shift;
 

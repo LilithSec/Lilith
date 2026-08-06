@@ -1,3 +1,10 @@
+# ae_list -- list the auto escalation rules, one per row: ID, name, whether it
+# is enabled, its priority and stop_on_match flag, the tables it is scoped to,
+# how many times it has matched, and its description. The rule DSL itself is
+# not shown; ae_get prints that.
+#
+#     lilith ae_list
+#     lilith ae_list --output json --pretty
 package Lilith::CLI::Command::AeList;
 
 use strict;
@@ -15,6 +22,16 @@ sub opt_spec {
 	return $class->output_opt_spec;
 }
 
+# Fetch every rule and render it.
+#
+# Args:
+#
+#   - $opt :: the parsed options -- just the shared --output/--pretty pair.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: whatever the chosen renderer returned, which output_dispatch passes
+# back. Prints the rules as an ANSI table or as JSON. With no rules defined it
+# prints an empty table or an empty array rather than complaining.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 
@@ -24,7 +41,8 @@ sub execute {
 		$opt,
 		json  => sub { $self->print_json( $rules, $opt->{pretty} ) },
 		table => sub {
-			my $tb = $self->table( 'ID', 'Name', 'Enabled', 'Priority', 'Stop', 'Tables', 'Matches', 'Description' );
+			my $tb
+				= $self->table( 'ID', 'Name', 'Enabled', 'Priority', 'Stop', 'Tables', 'Matches', 'Description' );
 			my @td;
 			foreach my $rule ( @{$rules} ) {
 				push(

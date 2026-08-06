@@ -67,8 +67,10 @@ use_ok('Lilith::Stats') or BAIL_OUT('Lilith::Stats failed to load');
 	my %cm = map { $_->{name} => 1 } @{ $s->measures('cape') };
 	ok( $cm{avg_malscore} && !$cm{bytes}, 'cape measures reflect its columns' );
 	my %bm = map { $_->{name} => 1 } @{ $s->measures('baphomet') };
-	ok( $bm{avg_score} && $bm{max_score} && $bm{distinct_src_ip} && $bm{distinct_dest_ip},
-		'baphomet measures include score aggregates and distinct-IP fan-out' );
+	ok(
+		$bm{avg_score} && $bm{max_score} && $bm{distinct_src_ip} && $bm{distinct_dest_ip},
+		'baphomet measures include score aggregates and distinct-IP fan-out'
+	);
 	is( $s->measures('baphomet')->[0]{name}, 'count', 'baphomet count is the first measure' );
 
 	# The time-window fragment: an absolute start/end range (quoted, cast) takes
@@ -79,15 +81,23 @@ use_ok('Lilith::Stats') or BAIL_OUT('Lilith::Stats failed to load');
 	*Lilith::Test::MockQuote::quote = sub { my ( undef, $v ) = @_; return "'" . $v . "'"; };
 	use warnings 'once';
 
-	is( $s->_window_frag( $mock_dbh, 'timestamp', {}, 1440 ),
-		"timestamp >= CURRENT_TIMESTAMP - interval '1440 minutes'", 'no range -> now-relative window' );
 	is(
-		$s->_window_frag( $mock_dbh, 'timestamp', { start => '2026-07-18 00:00', end => '2026-07-18 12:00' }, 1440 ),
+		$s->_window_frag( $mock_dbh, 'timestamp', {}, 1440 ),
+		"timestamp >= CURRENT_TIMESTAMP - interval '1440 minutes'",
+		'no range -> now-relative window'
+	);
+	is(
+		$s->_window_frag(
+			$mock_dbh, 'timestamp', { start => '2026-07-18 00:00', end => '2026-07-18 12:00' }, 1440
+		),
 		"timestamp >= '2026-07-18 00:00'::timestamptz and timestamp <= '2026-07-18 12:00'::timestamptz",
 		'start+end -> a quoted, cast absolute range'
 	);
-	is( $s->_window_frag( $mock_dbh, 'stop', { start => '2026-07-18 00:00' }, 1440 ),
-		"stop >= '2026-07-18 00:00'::timestamptz", 'start alone -> lower bound on the cape stop column' );
+	is(
+		$s->_window_frag( $mock_dbh, 'stop', { start => '2026-07-18 00:00' }, 1440 ),
+		"stop >= '2026-07-18 00:00'::timestamptz",
+		'start alone -> lower bound on the cape stop column'
+	);
 }
 
 # ---------------------------------------------------------------------------
@@ -315,7 +325,11 @@ SKIP: {
 		local $SIG{__WARN__} = sub { push @warnings, $_[0] };
 		is_deeply(
 			$s->top( table => 'baphomet', column => 'src_ip', measure => 'max_score' ),
-			[ { value => '1.1.1.1', count => 9 }, { value => '2.2.2.2', count => 3 }, { value => '3.3.3.3', count => 0 } ],
+			[
+				{ value => '1.1.1.1', count => 9 },
+				{ value => '2.2.2.2', count => 3 },
+				{ value => '3.3.3.3', count => 0 }
+			],
 			'a null-score offender surfaces as max_score 0'
 		);
 		is( scalar(@warnings), 0, 'no uninitialized-value warning from a null aggregate' );

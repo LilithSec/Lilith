@@ -77,7 +77,18 @@ schema_version commands.
 =cut
 
 # Reproduce the old getopt behavior (no_ignore_case + bundling) for every
-# command's own option parsing.
+# command's own option parsing. no_ignore_case is what keeps -c (search's
+# classification) and -C apart, and bundling is what lets short options be run
+# together the way the pre-App::Cmd script allowed.
+#
+# Args:
+#
+#   - @args :: whatever App::Cmd passes through to usage_desc and opt_spec.
+#     Forwarded to both untouched.
+#
+# Returns: the list App::Cmd expects from this hook -- the usage string, then
+# the option spec entries, then a trailing hash ref of Getopt::Long::Descriptive
+# configuration carrying the getopt_conf above.
 sub _option_processing_params {
 	my ( $class, @args ) = @_;
 

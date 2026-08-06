@@ -1,3 +1,15 @@
+# ae_create -- create a auto escalation rule, a standing order the
+# auto_escalate timer evaluates against newly ingested alerts.
+#
+# --name and the rule itself are what matter; everything else has a default.
+# --tables scopes the rule to particular alert tables, and a rule that names
+# none gets suricata/sagan/cape, leaving baphomet opt-in. --priority orders the
+# rules against each other, lower first, and --stop halts later rules for an
+# alert this one matched. A rule created with --disable is stored but not
+# evaluated until ae_update --enable.
+#
+#     lilith ae_create --name 'high malscore' --rule @rule.json \
+#         --tables cape --priority 10
 package Lilith::CLI::Command::AeCreate;
 
 use strict;
@@ -23,6 +35,18 @@ sub opt_spec {
 	);
 } ## end sub opt_spec
 
+# Read the rule, work the options into the create arguments, and store it.
+#
+# Args:
+#
+#   - $opt :: the parsed options, as opt_spec above describes them. --rule is
+#     JSON inline or, with a leading @, the path to a file holding it.
+#   - $args :: array ref of leftover positional arguments. Unused; a rule is
+#     described entirely by its options.
+#
+# Returns: nothing meaningful. Prints 'created auto escalation <id>' with the
+# new rule's ID. A malformed rule, an unknown table, or a database failure
+# dies out of Lilith with the reason.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 

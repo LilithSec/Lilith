@@ -13,16 +13,16 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 # ---------------------------------------------------------------------------
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is( $app->dns_bg_timeout(), 3, 'dns_bg_timeout defaults to 3' );
-    is( $app->dnstracer_enable(), 0, 'dnstracer_enable defaults to 0 (false)' );
-    is_deeply( $app->dnstracer_flags(), [], 'dnstracer_flags defaults to empty arrayref' );
+	is( $app->dns_bg_timeout(),   3, 'dns_bg_timeout defaults to 3' );
+	is( $app->dnstracer_enable(), 0, 'dnstracer_enable defaults to 0 (false)' );
+	is_deeply( $app->dnstracer_flags(), [], 'dnstracer_flags defaults to empty arrayref' );
 }
 
 # ---------------------------------------------------------------------------
@@ -30,15 +30,15 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 # ---------------------------------------------------------------------------
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    print $fh "dns_bg_timeout = 10\n";
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	print $fh "dns_bg_timeout = 10\n";
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is( $app->dns_bg_timeout(), 10, 'dns_bg_timeout reads custom value from config' );
+	is( $app->dns_bg_timeout(), 10, 'dns_bg_timeout reads custom value from config' );
 }
 
 # ---------------------------------------------------------------------------
@@ -46,15 +46,15 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 # ---------------------------------------------------------------------------
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    print $fh "dnstracer_enable = true\n";
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	print $fh "dnstracer_enable = true\n";
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is( $app->dnstracer_enable(), 1, 'dnstracer_enable is 1 when set to true in config' );
+	is( $app->dnstracer_enable(), 1, 'dnstracer_enable is 1 when set to true in config' );
 }
 
 # Note: the TOML module (not TOML::Tiny) parses the bare word `false` as the
@@ -67,19 +67,15 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 # ---------------------------------------------------------------------------
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    print $fh "dnstracer_flags = [\"-q\", \"-s\", \"8.8.8.8\"]\n";
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	print $fh "dnstracer_flags = [\"-q\", \"-s\", \"8.8.8.8\"]\n";
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is_deeply(
-        $app->dnstracer_flags(),
-        [ '-q', '-s', '8.8.8.8' ],
-        'dnstracer_flags reads array from config'
-    );
+	is_deeply( $app->dnstracer_flags(), [ '-q', '-s', '8.8.8.8' ], 'dnstracer_flags reads array from config' );
 }
 
 # ---------------------------------------------------------------------------
@@ -87,19 +83,15 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 # ---------------------------------------------------------------------------
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    print $fh "dnstracer_flags = \"-q\"\n";    # scalar, not array
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	print $fh "dnstracer_flags = \"-q\"\n";    # scalar, not array
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is_deeply(
-        $app->dnstracer_flags(),
-        [],
-        'non-array dnstracer_flags in config is ignored; helper returns []'
-    );
+	is_deeply( $app->dnstracer_flags(), [], 'non-array dnstracer_flags in config is ignored; helper returns []' );
 }
 
 # ---------------------------------------------------------------------------
@@ -107,30 +99,30 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 # ---------------------------------------------------------------------------
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is( $app->domaininfo_cache_enabled(), 0,   'domaininfo cache is disabled by default' );
-    is( $app->domaininfo_cache_ttl(),     300, 'domaininfo cache ttl defaults to 300' );
-    is_deeply( $app->domaininfo_cache(), {}, 'domaininfo cache store starts empty' );
+	is( $app->domaininfo_cache_enabled(), 0,   'domaininfo cache is disabled by default' );
+	is( $app->domaininfo_cache_ttl(),     300, 'domaininfo cache ttl defaults to 300' );
+	is_deeply( $app->domaininfo_cache(), {}, 'domaininfo cache store starts empty' );
 }
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    print $fh "domaininfo_cache = true\n";
-    print $fh "domaininfo_cache_ttl = 900\n";
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	print $fh "domaininfo_cache = true\n";
+	print $fh "domaininfo_cache_ttl = 900\n";
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is( $app->domaininfo_cache_enabled(), 1,   'domaininfo_cache = true enables the cache' );
-    is( $app->domaininfo_cache_ttl(),     900, 'domaininfo_cache_ttl is read from config' );
+	is( $app->domaininfo_cache_enabled(), 1,   'domaininfo_cache = true enables the cache' );
+	is( $app->domaininfo_cache_ttl(),     900, 'domaininfo_cache_ttl is read from config' );
 }
 
 # ---------------------------------------------------------------------------
@@ -138,32 +130,32 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 # ---------------------------------------------------------------------------
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is( $app->virani_enabled(),        0, 'virani disabled when no [virani.*] configured' );
-    is( $app->virani_search_enable(),  0, 'virani search disabled by default' );
-    is_deeply( $app->virani_remotes(), {}, 'no virani remotes by default' );
+	is( $app->virani_enabled(),       0, 'virani disabled when no [virani.*] configured' );
+	is( $app->virani_search_enable(), 0, 'virani search disabled by default' );
+	is_deeply( $app->virani_remotes(), {}, 'no virani remotes by default' );
 }
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    print $fh "virani_search_enable = true\n";
-    print $fh qq{[virani.r1]\nurl = "https://v.example/"\n};
-    print $fh qq{[virani.bad]\napikey = "k"\n};    # no url => skipped
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	print $fh "virani_search_enable = true\n";
+	print $fh qq{[virani.r1]\nurl = "https://v.example/"\n};
+	print $fh qq{[virani.bad]\napikey = "k"\n};    # no url => skipped
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is( $app->virani_enabled(),       1, 'virani enabled with a configured remote' );
-    is( $app->virani_search_enable(), 1, 'virani_search_enable read from config' );
-    is_deeply( [ keys %{ $app->virani_remotes() } ], ['r1'], 'url-less remote is skipped' );
+	is( $app->virani_enabled(),       1, 'virani enabled with a configured remote' );
+	is( $app->virani_search_enable(), 1, 'virani_search_enable read from config' );
+	is_deeply( [ keys %{ $app->virani_remotes() } ], ['r1'], 'url-less remote is skipped' );
 }
 
 # ---------------------------------------------------------------------------
@@ -171,19 +163,19 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 # ---------------------------------------------------------------------------
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is( $app->country_flag('US'), "\x{1F1FA}\x{1F1F8}", 'US maps to the regional-indicator flag' );
-    is( $app->country_flag('de'), "\x{1F1E9}\x{1F1EA}", 'lowercase code is upcased before mapping' );
-    is( $app->country_flag(''),      '', 'empty code yields empty string' );
-    is( $app->country_flag(undef),   '', 'undef code yields empty string' );
-    is( $app->country_flag('USA'),   '', 'non two-letter code yields empty string' );
-    is( $app->country_flag('1.2'),   '', 'non-alpha code yields empty string' );
+	is( $app->country_flag('US'),  "\x{1F1FA}\x{1F1F8}", 'US maps to the regional-indicator flag' );
+	is( $app->country_flag('de'),  "\x{1F1E9}\x{1F1EA}", 'lowercase code is upcased before mapping' );
+	is( $app->country_flag(''),    '',                   'empty code yields empty string' );
+	is( $app->country_flag(undef), '',                   'undef code yields empty string' );
+	is( $app->country_flag('USA'), '',                   'non two-letter code yields empty string' );
+	is( $app->country_flag('1.2'), '',                   'non-alpha code yields empty string' );
 }
 
 # ---------------------------------------------------------------------------
@@ -191,24 +183,24 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 # ---------------------------------------------------------------------------
 
 {
-    # Force every geoip key to a missing path so the platform defaults (which
-    # may be installed on the test host) are overridden and no DB loads. The
-    # missing paths warn by design; capture them to keep the output clean.
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    print $fh qq{geoip_ip_city    = "/nonexistent/city.mmdb"\n};
-    print $fh qq{geoip_ip_country = "/nonexistent/country.mmdb"\n};
-    print $fh qq{geoip_ip_asn     = "/nonexistent/asn.mmdb"\n};
-    close $fh;
+	# Force every geoip key to a missing path so the platform defaults (which
+	# may be installed on the test host) are overridden and no DB loads. The
+	# missing paths warn by design; capture them to keep the output clean.
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	print $fh qq{geoip_ip_city    = "/nonexistent/city.mmdb"\n};
+	print $fh qq{geoip_ip_country = "/nonexistent/country.mmdb"\n};
+	print $fh qq{geoip_ip_asn     = "/nonexistent/asn.mmdb"\n};
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    local $SIG{__WARN__} = sub { };
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	local $SIG{__WARN__}      = sub { };
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is( $app->ip_country('8.8.8.8'),   '', 'ip_country is empty when no MMDB is loaded' );
-    is( $app->ip_country('not-an-ip'), '', 'ip_country rejects malformed input' );
-    is( $app->ip_country(undef),       '', 'ip_country handles undef' );
-    is( $app->ip_country('10.0.0.1'),  '', 'ip_country is empty for a private IP' );
+	is( $app->ip_country('8.8.8.8'),   '', 'ip_country is empty when no MMDB is loaded' );
+	is( $app->ip_country('not-an-ip'), '', 'ip_country rejects malformed input' );
+	is( $app->ip_country(undef),       '', 'ip_country handles undef' );
+	is( $app->ip_country('10.0.0.1'),  '', 'ip_country is empty for a private IP' );
 }
 
 # ---------------------------------------------------------------------------
@@ -217,19 +209,19 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 # ---------------------------------------------------------------------------
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    my $cc = $app->ip_country('8.8.8.8');
-  SKIP: {
-        skip 'no country-aware MMDB installed on this host', 2 unless $cc ne '';
-        like( $cc, qr/^[A-Z]{2}$/, 'ip_country returns a two-letter uppercase code' );
-        is( length( $app->country_flag($cc) ), 2, 'the code renders as a two-codepoint emoji flag' );
-    }
+	my $cc = $app->ip_country('8.8.8.8');
+SKIP: {
+		skip 'no country-aware MMDB installed on this host', 2 unless $cc ne '';
+		like( $cc, qr/^[A-Z]{2}$/, 'ip_country returns a two-letter uppercase code' );
+		is( length( $app->country_flag($cc) ), 2, 'the code renders as a two-codepoint emoji flag' );
+	}
 }
 
 # ---------------------------------------------------------------------------
@@ -239,35 +231,35 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 # ---------------------------------------------------------------------------
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-  SKIP: {
-        skip 'no MMDB installed on this host to iterate over', 4
-            unless @{ $app->geoip_mmdbs };
+SKIP: {
+		skip 'no MMDB installed on this host to iterate over', 4
+			unless @{ $app->geoip_mmdbs };
 
-        my $record;
-        no warnings qw(redefine once);
-        local *IP::Geolocation::MMDB::record_for_address = sub { return $record };
-        use warnings qw(redefine once);
+		my $record;
+		no warnings qw(redefine once);
+		local *IP::Geolocation::MMDB::record_for_address = sub { return $record };
+		use warnings qw(redefine once);
 
-        $record = { country => { iso_code => 'de' } };
-        is( $app->ip_country('1.2.3.4'), 'DE', 'physical country is used and upcased' );
+		$record = { country => { iso_code => 'de' } };
+		is( $app->ip_country('1.2.3.4'), 'DE', 'physical country is used and upcased' );
 
-        # anycast / hosting IPs (e.g. Cloudflare) expose only registered_country
-        $record = { registered_country => { iso_code => 'US' } };
-        is( $app->ip_country('1.2.3.4'), 'US', 'falls back to registered_country' );
+		# anycast / hosting IPs (e.g. Cloudflare) expose only registered_country
+		$record = { registered_country => { iso_code => 'US' } };
+		is( $app->ip_country('1.2.3.4'), 'US', 'falls back to registered_country' );
 
-        $record = { represented_country => { iso_code => 'GB' } };
-        is( $app->ip_country('1.2.3.4'), 'GB', 'falls back to represented_country' );
+		$record = { represented_country => { iso_code => 'GB' } };
+		is( $app->ip_country('1.2.3.4'), 'GB', 'falls back to represented_country' );
 
-        $record = { city => { names => { en => 'Nowhere' } } };
-        is( $app->ip_country('1.2.3.4'), '', 'no country field of any kind yields empty' );
-    }
+		$record = { city => { names => { en => 'Nowhere' } } };
+		is( $app->ip_country('1.2.3.4'), '', 'no country field of any kind yields empty' );
+	} ## end SKIP:
 }
 
 # ---------------------------------------------------------------------------
@@ -275,34 +267,34 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 # ---------------------------------------------------------------------------
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is( $app->ip_subdivision('not-an-ip'), '', 'ip_subdivision rejects malformed input' );
-    is( $app->ip_subdivision(undef),       '', 'ip_subdivision handles undef' );
+	is( $app->ip_subdivision('not-an-ip'), '', 'ip_subdivision rejects malformed input' );
+	is( $app->ip_subdivision(undef),       '', 'ip_subdivision handles undef' );
 
-  SKIP: {
-        skip 'no MMDB installed on this host to iterate over', 3
-            unless @{ $app->geoip_mmdbs };
+SKIP: {
+		skip 'no MMDB installed on this host to iterate over', 3
+			unless @{ $app->geoip_mmdbs };
 
-        my $record;
-        no warnings qw(redefine once);
-        local *IP::Geolocation::MMDB::record_for_address = sub { return $record };
-        use warnings qw(redefine once);
+		my $record;
+		no warnings qw(redefine once);
+		local *IP::Geolocation::MMDB::record_for_address = sub { return $record };
+		use warnings qw(redefine once);
 
-        $record = { subdivisions => [ { iso_code => 'tx' }, { iso_code => 'zz' } ] };
-        is( $app->ip_subdivision('1.2.3.4'), 'TX', 'returns the first subdivision code, upcased' );
+		$record = { subdivisions => [ { iso_code => 'tx' }, { iso_code => 'zz' } ] };
+		is( $app->ip_subdivision('1.2.3.4'), 'TX', 'returns the first subdivision code, upcased' );
 
-        $record = { country => { iso_code => 'US' } };
-        is( $app->ip_subdivision('1.2.3.4'), '', 'empty when the record has no subdivisions' );
+		$record = { country => { iso_code => 'US' } };
+		is( $app->ip_subdivision('1.2.3.4'), '', 'empty when the record has no subdivisions' );
 
-        $record = { subdivisions => [] };
-        is( $app->ip_subdivision('1.2.3.4'), '', 'empty when the subdivisions list is empty' );
-    }
+		$record = { subdivisions => [] };
+		is( $app->ip_subdivision('1.2.3.4'), '', 'empty when the subdivisions list is empty' );
+	} ## end SKIP:
 }
 
 # ---------------------------------------------------------------------------
@@ -310,34 +302,34 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 # ---------------------------------------------------------------------------
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is( $app->ip_city('not-an-ip'), '', 'ip_city rejects malformed input' );
-    is( $app->ip_city(undef),       '', 'ip_city handles undef' );
+	is( $app->ip_city('not-an-ip'), '', 'ip_city rejects malformed input' );
+	is( $app->ip_city(undef),       '', 'ip_city handles undef' );
 
-  SKIP: {
-        skip 'no MMDB installed on this host to iterate over', 3
-            unless @{ $app->geoip_mmdbs };
+SKIP: {
+		skip 'no MMDB installed on this host to iterate over', 3
+			unless @{ $app->geoip_mmdbs };
 
-        my $record;
-        no warnings qw(redefine once);
-        local *IP::Geolocation::MMDB::record_for_address = sub { return $record };
-        use warnings qw(redefine once);
+		my $record;
+		no warnings qw(redefine once);
+		local *IP::Geolocation::MMDB::record_for_address = sub { return $record };
+		use warnings qw(redefine once);
 
-        $record = { city => { names => { en => 'Austin' } } };
-        is( $app->ip_city('1.2.3.4'), 'Austin', 'returns the English city name' );
+		$record = { city => { names => { en => 'Austin' } } };
+		is( $app->ip_city('1.2.3.4'), 'Austin', 'returns the English city name' );
 
-        $record = { country => { iso_code => 'US' } };
-        is( $app->ip_city('1.2.3.4'), '', 'empty when the record has no city' );
+		$record = { country => { iso_code => 'US' } };
+		is( $app->ip_city('1.2.3.4'), '', 'empty when the record has no city' );
 
-        $record = { city => { names => {} } };
-        is( $app->ip_city('1.2.3.4'), '', 'empty when the city has no English name' );
-    }
+		$record = { city => { names => {} } };
+		is( $app->ip_city('1.2.3.4'), '', 'empty when the city has no English name' );
+	} ## end SKIP:
 }
 
 # ---------------------------------------------------------------------------
@@ -345,46 +337,51 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 # ---------------------------------------------------------------------------
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is_deeply( $app->ip_geo('not-an-ip'), { country => '', subdivision => '', city => '' },
-        'ip_geo returns empty triple for malformed input' );
+	is_deeply(
+		$app->ip_geo('not-an-ip'),
+		{ country => '', subdivision => '', city => '' },
+		'ip_geo returns empty triple for malformed input'
+	);
 
-  SKIP: {
-        skip 'no MMDB installed on this host to iterate over', 3
-            unless @{ $app->geoip_mmdbs };
+SKIP: {
+		skip 'no MMDB installed on this host to iterate over', 3
+			unless @{ $app->geoip_mmdbs };
 
-        my $record = {
-            country      => { iso_code => 'us' },
-            subdivisions => [ { iso_code => 'ca' } ],
-            city         => { names => { en => 'Mountain View' } },
-        };
-        my $calls = 0;
-        my $orig  = IP::Geolocation::MMDB->can('record_for_address');
-        no warnings qw(redefine once);
-        local *IP::Geolocation::MMDB::record_for_address = sub { $calls++; return $record };
-        use warnings qw(redefine once);
+		my $record = {
+			country      => { iso_code => 'us' },
+			subdivisions => [ { iso_code => 'ca' } ],
+			city         => { names => { en => 'Mountain View' } },
+		};
+		my $calls = 0;
+		my $orig  = IP::Geolocation::MMDB->can('record_for_address');
+		no warnings qw(redefine once);
+		local *IP::Geolocation::MMDB::record_for_address = sub { $calls++; return $record };
+		use warnings qw(redefine once);
 
-        is_deeply( $app->ip_geo('1.2.3.4'),
-            { country => 'US', subdivision => 'CA', city => 'Mountain View' },
-            'ip_geo returns country, subdivision, and city from one pass, upcased where applicable' );
+		is_deeply(
+			$app->ip_geo('1.2.3.4'),
+			{ country => 'US', subdivision => 'CA', city => 'Mountain View' },
+			'ip_geo returns country, subdivision, and city from one pass, upcased where applicable'
+		);
 
-        # per-request memoization: repeated IPs on the same controller only hit
-        # the databases on the first lookup
-        my $c = $app->build_controller;
-        $calls = 0;
-        $c->ip_geo('9.9.9.9');
-        my $first = $calls;
-        $c->ip_geo('9.9.9.9');
-        $c->ip_geo('9.9.9.9');
-        ok( $first >= 1, 'first ip_geo performs at least one database lookup' );
-        is( $calls, $first, 'repeated ip_geo for the same IP adds no further lookups (memoized)' );
-    }
+		# per-request memoization: repeated IPs on the same controller only hit
+		# the databases on the first lookup
+		my $c = $app->build_controller;
+		$calls = 0;
+		$c->ip_geo('9.9.9.9');
+		my $first = $calls;
+		$c->ip_geo('9.9.9.9');
+		$c->ip_geo('9.9.9.9');
+		ok( $first >= 1, 'first ip_geo performs at least one database lookup' );
+		is( $calls, $first, 'repeated ip_geo for the same IP adds no further lookups (memoized)' );
+	} ## end SKIP:
 }
 
 # ---------------------------------------------------------------------------
@@ -394,55 +391,55 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 # ---------------------------------------------------------------------------
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is( $app->cape_results_enabled(), 0, 'cape_results_enabled defaults to 0 with no cape_servers' );
-    is( $app->cape_results_for('anything'), undef, 'cape_results_for returns undef with no cape_servers' );
-    is( $app->cape_results_for(undef),      undef, 'cape_results_for(undef) is undef' );
+	is( $app->cape_results_enabled(),       0,     'cape_results_enabled defaults to 0 with no cape_servers' );
+	is( $app->cape_results_for('anything'), undef, 'cape_results_for returns undef with no cape_servers' );
+	is( $app->cape_results_for(undef),      undef, 'cape_results_for(undef) is undef' );
 }
 
 {
-    my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
-    print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
-    # cape_enable intentionally left off: results viewing must not depend on it.
-    print $fh "[cape_servers.main]\n";
-    print $fh "url = \"https://cape.example:8080/\"\n";
-    print $fh "apikey = \"submitkey\"\n";
-    print $fh "[cape_servers.split]\n";
-    print $fh "url = \"https://submit.example:8080\"\n";
-    print $fh "apikey = \"submitkey2\"\n";
-    print $fh "results_url = \"https://results.example:9090/\"\n";
-    print $fh "results_apikey = \"resultkey\"\n";
-    print $fh "web_url = \"https://cape-ui.example/\"\n";
-    close $fh;
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	# cape_enable intentionally left off: results viewing must not depend on it.
+	print $fh "[cape_servers.main]\n";
+	print $fh "url = \"https://cape.example:8080/\"\n";
+	print $fh "apikey = \"submitkey\"\n";
+	print $fh "[cape_servers.split]\n";
+	print $fh "url = \"https://submit.example:8080\"\n";
+	print $fh "apikey = \"submitkey2\"\n";
+	print $fh "results_url = \"https://results.example:9090/\"\n";
+	print $fh "results_apikey = \"resultkey\"\n";
+	print $fh "web_url = \"https://cape-ui.example/\"\n";
+	close $fh;
 
-    local $ENV{LILITH_CONFIG} = $cf;
-    my $app = Test::Mojo->new('Lilith::Web')->app;
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-    is( $app->cape_results_enabled(), 1, 'cape_results_enabled is 1 when a cape_server is configured' );
+	is( $app->cape_results_enabled(), 1, 'cape_results_enabled is 1 when a cape_server is configured' );
 
-    # main: results fall back to the submission url (trailing slash trimmed) and
-    # apikey; no web_url configured, so the key is absent (not undef)
-    is_deeply(
-        $app->cape_results_for('main'),
-        { url => 'https://cape.example:8080', apikey => 'submitkey' },
-        'results default to url/apikey with the trailing slash normalised off, no web_url'
-    );
+	# main: results fall back to the submission url (trailing slash trimmed) and
+	# apikey; no web_url configured, so the key is absent (not undef)
+	is_deeply(
+		$app->cape_results_for('main'),
+		{ url => 'https://cape.example:8080', apikey => 'submitkey' },
+		'results default to url/apikey with the trailing slash normalised off, no web_url'
+	);
 
-    # split: explicit results_url/results_apikey win over the submission ones, and
-    # web_url is carried through with its trailing slash normalised off
-    is_deeply(
-        $app->cape_results_for('split'),
-        { url => 'https://results.example:9090', apikey => 'resultkey', web_url => 'https://cape-ui.example' },
-        'results_url/results_apikey/web_url override and normalise correctly'
-    );
+	# split: explicit results_url/results_apikey win over the submission ones, and
+	# web_url is carried through with its trailing slash normalised off
+	is_deeply(
+		$app->cape_results_for('split'),
+		{ url => 'https://results.example:9090', apikey => 'resultkey', web_url => 'https://cape-ui.example' },
+		'results_url/results_apikey/web_url override and normalise correctly'
+	);
 
-    is( $app->cape_results_for('nope'), undef, 'cape_results_for is undef for an unknown instance' );
+	is( $app->cape_results_for('nope'), undef, 'cape_results_for is undef for an unknown instance' );
 }
 
 done_testing();

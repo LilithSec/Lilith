@@ -1,3 +1,15 @@
+# search -- the default command, and the one most used: query the annals and
+# print the matching alerts as a table or as JSON. A bare `lilith`, or one whose
+# first argument is an option, lands here.
+#
+# The filters are described in docs/usage.md. Most share a small grammar: an
+# integer option takes a comma separated list with each item negatable by a
+# leading !, a string option may match with SQL LIKE wildcards and negate the
+# same way, and positive values are ORed while negated ones are ANDed. Which
+# columns are shown is picked with --columns or a named --columnset.
+#
+#     lilith search -m 60 --ip 192.0.2.10 -p 22
+#     lilith search -c '!%scan%' --output json
 package Lilith::CLI::Command::Search;
 
 use strict;
@@ -10,6 +22,12 @@ sub abstract { 'search the database' }
 
 sub usage_desc { '%c search %o' }
 
+# The filters, in three groups: the paging and output options first, then the
+# ones common to the suricata/sagan/baphomet tables, then the cape-only ones at
+# the end. Nothing here restricts an option to its table -- search() drops a
+# filter naming a column the chosen table lacks, so --malscore against suricata
+# is ignored rather than an error, which is what lets the web UI hand its
+# suricata-shaped form at any table.
 sub opt_spec {
 	my ($class) = @_;
 	return (
@@ -52,6 +70,20 @@ sub opt_spec {
 	);
 } ## end sub opt_spec
 
+# Build the search from the options and render the results.
+#
+# Args:
+#
+#   - $opt :: the parsed options, as opt_spec above describes them -- the
+#     table, the window, paging, which columns to show, and the filters
+#     themselves.
+#   - $args :: array ref of leftover positional arguments. Unused; every
+#     filter is an option.
+#
+# Returns: whatever the chosen renderer returned. Prints the matching alerts as
+# an ANSI table or as JSON, and an empty table or array when nothing matched.
+# An unparseable time value or an unknown column dies out of Lilith with the
+# reason.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 

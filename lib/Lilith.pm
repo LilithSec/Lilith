@@ -420,6 +420,26 @@ sub parse_eve {
 # present, and cape_submit is always added on top by mojo_cape_submit. Both
 # origin blocks are read the same way, so lilith_cape_submit is folded into the
 # same fallbacks suricata_extract_submit already had.
+#
+# Args:
+#
+#   - $json :: the decoded CAPE record as a hash ref. Read for the origin
+#     blocks (cape_submit, suricata_extract_submit, lilith_cape_submit), the
+#     'row' block CAPE itself writes (id, started_on, completed_on, package,
+#     target), fileinfo, http, malscore, and the flow tuple.
+#   - $instance :: the instance name to record on the row, as configured for
+#     this [eves.*].
+#   - $host :: the host the instance runs on, stored as instance_host.
+#   - $raw :: the original undecoded EVE line, stored verbatim in the raw jsonb
+#     column.
+#
+# Returns: a hash ref keyed by cape_alerts column name, ready for
+# insert_alert. Any field the record did not carry is undef, which the insert
+# binds as SQL NULL. Never returns undef -- a record reaching here is already
+# known to be a cape one.
+#
+#     my $row = $self->_parse_cape( $json, 'cape', 'sensor1', $line );
+#     my $id  = $self->insert_alert( type => 'cape', row => $row );
 sub _parse_cape {
 	my ( $self, $json, $instance, $host, $raw ) = @_;
 
@@ -558,6 +578,16 @@ sub _parse_baphomet {
 # Coerce a Baphomet JSON boolean (a JSON::PP::Boolean, which stringifies to ''
 # for false and would not bind as a Postgres boolean) to 1/0, leaving undef as
 # SQL NULL. Plain function, not a method.
+#
+# Args:
+#
+#   - $value :: the decoded JSON value, normally a JSON::PP::Boolean object but
+#     tolerant of a plain 0/1 or undef.
+#
+# Returns: 1 for true, 0 for false, undef when the field was absent -- so a
+# record that never mentioned the flag stores NULL rather than false.
+#
+#     recidive => _baphomet_bool( $json->{recidive} ),
 sub _baphomet_bool {
 	my ($value) = @_;
 	return undef unless defined $value;
@@ -696,6 +726,19 @@ sub receiver_apikey_instance_ok {
 # wildcards is an exact match -- the same behavior a plain instance name had
 # before wildcards were supported. Anchoring is what keeps 'foo' from matching
 # 'barfoo'.
+#
+# Args:
+#
+#   - $pattern :: the instance pattern off a receiver key's allowed_instances,
+#     e.g. 'foo-pie' for an exact match or 'foo-*' for every instance whose
+#     name begins 'foo-'. '?' stands for exactly one character.
+#
+# Returns: a compiled Regexp anchored at both ends, ready to match an
+# instance name against.
+#
+#     my $re = $self->_instance_regex('foo-*');
+#     'foo-pie' =~ $re;    # true
+#     'barfoo'  =~ $re;    # false
 sub _instance_regex {
 	my ( $self, $pattern ) = @_;
 
@@ -863,6 +906,19 @@ sub receiver_apikey_delete {
 } ## end sub receiver_apikey_delete
 
 # Generate a fresh bearer token: 32 random bytes as 64 hex characters.
+#
+# Crypt::URandom is loaded at call time rather than up top because minting a
+# key is a rare administrative act, while this module is loaded by every daemon
+# and CLI run.
+#
+# Args: none.
+#
+# Returns: the token as a 64 character lowercase hex string. Only the caller
+# ever sees it in the clear -- receiver_apikey_create stores the SHA-256 and
+# hands the plaintext back once.
+#
+#     my $token = $self->_receiver_key_generate;
+#     # '3f9c...' , 64 hex characters
 sub _receiver_key_generate {
 	my ($self) = @_;
 
@@ -873,6 +929,20 @@ sub _receiver_key_generate {
 # Turn an array ref into a Postgres array literal for binding, or undef (=> SQL
 # NULL, meaning unrestricted) for an empty/undef list. Shared by the cidr[] and
 # varchar[] receiver columns -- both take the same {"a","b"} text form.
+#
+# Args:
+#
+#   - $list :: array ref of scope entries, or undef. For allowed_ips these are
+#     hosts or CIDR subnets ('10.0.0.0/8'); for allowed_instances, names or
+#     globs ('foo-*').
+#
+# Returns: the Postgres array literal as a string, or undef for an empty or
+# missing list. undef binds as SQL NULL, which on both columns means
+# unrestricted rather than "matches nothing" -- so clearing a scope widens the
+# key rather than locking it out.
+#
+#     $self->_receiver_array_or_null( [ '10.0.0.0/8' ] );    # '{"10.0.0.0/8"}'
+#     $self->_receiver_array_or_null( [] );                  # undef
 sub _receiver_array_or_null {
 	my ( $self, $list ) = @_;
 
@@ -1354,6 +1424,21 @@ and negated items are ANDed.
 # 'YYYY-MM-DD HH:MM:SS' string (a server-local wall clock, bound as a value and
 # cast by the DB in its session timezone). Accepts anything Time::Piece::Guess
 # parses -- including a datetime-local 'YYYY-MM-DDTHH:MM' value. Dies on garbage.
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $label :: which bound is being parsed, used only in the error message.
+#     'start' or 'end'.
+#   - $str :: the time as the user wrote it. Anything Time::Piece::Guess
+#     handles, e.g. '2026-08-05 13:00:00', '2026-08-05T13:00' from a
+#     datetime-local input, or '2026-08-05'.
+#
+# Returns: the time as a 'YYYY-MM-DD HH:MM:SS' string. Dies with '"$str" for
+# $label is not a parseable time' when it cannot be read.
+#
+#     _parse_search_time( 'start', '2026-08-05T13:00' );
+#     # '2026-08-05 13:00:00'
 sub _parse_search_time {
 	my ( $label, $str ) = @_;
 	my $t = eval { Time::Piece::Guess->guess_to_object( $str, 1 ) };
@@ -1361,7 +1446,21 @@ sub _parse_search_time {
 	return $t->strftime('%Y-%m-%d %H:%M:%S');
 }
 
-# Dies if the passed table name is not one of the known alert table types.
+# Dies if the passed table name is not one of the known alert table types. The
+# short type picks both the DBIx::Class result class and the real table name, so
+# this is the gate that keeps a request parameter from reaching either.
+#
+# Args:
+#
+#   - $table :: the short table type -- 'suricata', 'sagan', 'cape', or
+#     'baphomet'. Unlike Lilith::Stats::_table there is no defaulting here;
+#     callers that want one apply it themselves.
+#
+# Returns: the table type as a string, unchanged, so it can be used inline.
+# Dies with '"$table" is not a known table type' otherwise, naming 'undef' when
+# nothing was passed.
+#
+#     $self->_validate_table( $opts{table} ) if defined( $opts{table} );
 sub _validate_table {
 	my ( $self, $table ) = @_;
 
@@ -2542,8 +2641,62 @@ sub auto_escalate {
 	return \@summaries;
 } ## end sub auto_escalate
 
-# processes a single table for auto_escalate; see auto_escalate for the
-# option meanings
+# Processes a single table for auto_escalate: load the enabled rules scoped to
+# it, gather the alerts in the window that have not been considered yet, run the
+# two through Lilith::AutoEscalate, and escalate each match to the targets its
+# rule names. Split out of auto_escalate so that method is just the loop over
+# tables. See auto_escalate for what the options mean to a caller.
+#
+# Every scanned alert is stamped considered at the end (unless this is a dry
+# run), matched or not, so the next run does not weigh it again. That happens
+# even when there are no rules or no alerts, which is why the early return marks
+# too.
+#
+# Args:
+#
+#   - dbh :: the DBI handle to work on, so every table in one auto_escalate run
+#     shares a connection.
+#   - table :: the short table type being scanned -- 'suricata', 'sagan',
+#     'cape', or 'baphomet'.
+#   - minutes :: how far back to gather alerts, in minutes. Only bounds the
+#     scan; the per-alert auto_escalated stamp is what prevents a second look.
+#   - dry_run :: when true, work out what would be escalated, send nothing, and
+#     leave the alerts unstamped so a real run still sees them.
+#   - requested_by :: who to record as having asked, e.g. 'auto'. The matching
+#     rule's name is appended, giving 'auto:high malscore' in the audit trail.
+#   - target_id :: hash ref of target name to target ID, so a rule may name its
+#     targets rather than number them. Built once by auto_escalate.
+#
+# Returns: a summary hash ref for this table:
+#
+#     {
+#       table   => 'suricata',
+#       scanned => 41,           # alerts considered this run
+#       rules   => 3,            # enabled rules scoped to this table
+#       matched => 2,            # rule/alert pairs that matched
+#       dry_run => 0,
+#       escalations => [         # one entry per match, empty when none
+#         {
+#           rule_id   => 7,
+#           rule_name => 'high malscore',
+#           alert_id  => 1234,
+#           target_ids      => [ 3 ],    # resolved, deduped
+#           unknown_targets => [],       # names that resolved to nothing
+#           status    => 'escalated',    # or dry-run, no-targets, error
+#           results   => [ ... ],        # as escalate returns, when sent
+#           error     => '...',          # only when status is error
+#         },
+#       ],
+#     }
+#
+#     my $summary = $self->_auto_escalate_table(
+#         dbh          => $dbh,
+#         table        => 'suricata',
+#         minutes      => 60,
+#         dry_run      => 0,
+#         requested_by => 'auto',
+#         target_id    => { 'soc-hook' => 3 },
+#     );
 sub _auto_escalate_table {
 	my ( $self, %opts ) = @_;
 
@@ -2672,8 +2825,22 @@ sub _auto_escalate_table {
 	return $summary;
 } ## end sub _auto_escalate_table
 
-# stamps every scanned alert with auto_escalated = now() so it is not
-# reconsidered on the next run
+# Stamps every scanned alert with auto_escalated = now() so it is not
+# reconsidered on the next run. One update over an id array rather than a
+# statement per alert, since a busy window can hold thousands.
+#
+# Args:
+#
+#   - $events :: array ref of the alert rows just scanned, each a hash ref with
+#     at least an 'id'. Matched or not -- being looked at is what counts.
+#   - $dbh :: the DBI handle to run the update on.
+#   - $alert_table :: the real table name to update, e.g. 'suricata_alerts'.
+#     Built by the caller from the short type, never from user input.
+#
+# Returns: 1 once the update has run, or undef when $events was empty and there
+# was nothing to stamp.
+#
+#     $self->_auto_mark( \@events, $dbh, 'suricata_alerts' );
 sub _auto_mark {
 	my ( $self, $events, $dbh, $alert_table ) = @_;
 
@@ -2687,7 +2854,21 @@ sub _auto_mark {
 	return 1;
 } ## end sub _auto_mark
 
-# decodes a auto_escalations rule column into a hash ref
+# Decodes a auto_escalations rule column into a hash ref. The column is jsonb,
+# so DBD::Pg may hand it back already inflated or as JSON text depending on how
+# the row was fetched; both are accepted so callers need not care which.
+#
+# Args:
+#
+#   - $rule :: the rule column as read from the database -- a hash ref (already
+#     inflated), a JSON string, or undef.
+#
+# Returns: the rule as a hash ref, of the shape { match => ..., actions =>
+# [ ... ] }. Undecodable or missing JSON returns an empty hash ref rather than
+# dying, so one corrupt rule row cannot stop a whole auto escalation run; a
+# rule with no match tree simply never fires.
+#
+#     my $rule = $self->_auto_decode_rule( $row->{rule} );
 sub _auto_decode_rule {
 	my ( $self, $rule ) = @_;
 
@@ -2701,8 +2882,22 @@ sub _auto_decode_rule {
 	return ref($decoded) eq 'HASH' ? $decoded : {};
 } ## end sub _auto_decode_rule
 
-# decodes a tables column into a array ref, accepting either a expanded
-# array ref (DBD::Pg default) or a raw PostgreSQL array literal
+# Decodes a tables column into a array ref, accepting either a expanded array
+# ref (DBD::Pg default) or a raw PostgreSQL array literal. The literal form is
+# parsed by hand rather than with a JSON decode: Postgres writes {a,b} with
+# optional double quotes, which is not JSON.
+#
+# Args:
+#
+#   - $tables :: the tables column as read from the database -- an array ref
+#     (already expanded), a literal such as '{suricata,sagan}' or
+#     '{"suricata","sagan"}', or undef.
+#
+# Returns: an array ref of short table type names, e.g. [ 'suricata', 'sagan' ].
+# undef, an empty literal, or anything unrecognised gives an empty array ref;
+# _auto_check_tables is what turns that into the default set.
+#
+#     $self->_auto_decode_tables('{suricata,cape}');    # [ 'suricata', 'cape' ]
 sub _auto_decode_tables {
 	my ( $self, $tables ) = @_;
 
@@ -2729,6 +2924,19 @@ sub _auto_decode_tables {
 # array ref. baphomet is a valid table a rule may name, but it is deliberately
 # left out of the default (suricata/sagan/cape) returned when none are given, so
 # escalating baphomet stays opt-in: a rule must name it explicitly.
+#
+# Args:
+#
+#   - $tables :: array ref of short table type names a rule is scoped to, or
+#     undef/[] for none given.
+#
+# Returns: an array ref of checked table types with duplicates removed and the
+# caller's order kept. An empty or missing list returns the default
+# [ 'suricata', 'sagan', 'cape' ]. Dies with '"$table" is not a known table
+# type; valid: suricata, sagan, cape, baphomet' on the first bad entry.
+#
+#     $self->_auto_check_tables( [ 'cape', 'cape' ] );    # [ 'cape' ]
+#     $self->_auto_check_tables(undef);    # [ 'suricata', 'sagan', 'cape' ]
 sub _auto_check_tables {
 	my ( $self, $tables ) = @_;
 
@@ -2750,7 +2958,23 @@ sub _auto_check_tables {
 	return \@out;
 } ## end sub _auto_check_tables
 
-# builds a PostgreSQL array literal from a array ref, quoting each element
+# Builds a PostgreSQL array literal from a array ref, quoting each element.
+# Every element is quoted whether it needs it or not, and embedded quotes and
+# backslashes are escaped, so a value carrying a comma or a brace cannot break
+# out of its element. The result is bound as a single value and cast on the
+# Postgres side, e.g. ?::bigint[].
+#
+# Args:
+#
+#   - $list :: array ref of elements to render. Any scalar type -- callers pass
+#     row IDs, CIDR strings, and instance globs through the same routine. An
+#     undef element becomes an empty string rather than NULL.
+#
+# Returns: the array literal as a string, always braced, e.g. '{"1","2"}'. An
+# empty list gives '{}', which casts to an empty array rather than NULL.
+#
+#     $self->_pg_text_array( [ 1, 2 ] );    # '{"1","2"}'
+#     $sth->execute( $self->_pg_text_array( \@ids ) );
 sub _pg_text_array {
 	my ( $self, $list ) = @_;
 
@@ -2763,6 +2987,21 @@ sub _pg_text_array {
 	return '{' . join( ',', @items ) . '}';
 } ## end sub _pg_text_array
 
+# A raw DBI handle on this object's connection details, for the parts that talk
+# to the database directly rather than through DBIx::Class -- escalation, auto
+# escalation, the receiver keys, and the dashboards. Named for escalation
+# because that is what first needed it; it has since become the general handle
+# for the hand written SQL in here. Shared through connect_cached so the ingest
+# daemon does not open a connection per statement.
+#
+# Args: none.
+#
+# Returns: a DBI database handle with RaiseError set, so a failed statement
+# dies rather than returning undef. Dies with 'DBI->connect_cached failure... '
+# and the DBI error when the database cannot be reached.
+#
+#     my $dbh = $self->_escalation_dbh;
+#     $dbh->prepare('delete from receiver_apikeys where id = ?;')->execute($id);
 sub _escalation_dbh {
 	my ($self) = @_;
 
@@ -2775,6 +3014,23 @@ sub _escalation_dbh {
 	return $dbh;
 } ## end sub _escalation_dbh
 
+# Decodes an escalation target's config column into a hash ref. Same jsonb
+# situation as _auto_decode_rule: DBD::Pg may hand the column back inflated or
+# as JSON text, so both are taken.
+#
+# Args:
+#
+#   - $config :: the config column as read from the database -- a hash ref
+#     (already inflated), a JSON string, or undef.
+#
+# Returns: the per-type config as a hash ref, whose keys depend on the target's
+# type (a Webhook has url/apikey, an Email has server/to/from, and so on).
+# Undecodable or missing JSON gives an empty hash ref rather than dying, so a
+# target with a corrupt config fails at send time with a missing-field error
+# from its type instead of taking down whatever listed it.
+#
+#     my $config = $self->_escalation_decode_config( $row->{config} );
+#     my $url    = $config->{url};
 sub _escalation_decode_config {
 	my ( $self, $config ) = @_;
 

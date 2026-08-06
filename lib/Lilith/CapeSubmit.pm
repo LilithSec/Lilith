@@ -271,7 +271,22 @@ sub submit {
 
 # Pick the server hash for a name, or the sole server when no name is given.
 # Dies when the name is unknown, or when none is given but there is not exactly
-# one to fall back to.
+# one to fall back to. Guessing between several would mean a sample going
+# somewhere the operator did not choose, so it asks instead.
+#
+# Args:
+#
+#   - $name :: the server to use, as a [cape_servers.NAME] sub table name.
+#     undef or '' means fall back to the only configured server.
+#
+# Returns: the two-element list ( $name, $server ) -- the resolved name and its
+# config hash ref (url, and apikey_needed/apikey when it wants a key). Dies
+# with 'no cape servers are configured (cape_servers)' when none exist, 'no
+# cape server named "$name" is configured' for an unknown one, or 'more than
+# one cape server is configured (...); pick one with --server' when the choice
+# is ambiguous.
+#
+#     my ( $name, $server ) = $self->_resolve_server( $opts{server} );
 sub _resolve_server {
 	my ( $self, $name ) = @_;
 
@@ -291,7 +306,20 @@ sub _resolve_server {
 } ## end sub _resolve_server
 
 # md5/sha1/sha256 of a file, computed in a single streaming pass so a large
-# sample is never slurped whole into memory.
+# sample is never slurped whole into memory. All three digests are fed from the
+# same 64KB buffer, so the file is read once however many are wanted.
+#
+# Args:
+#
+#   - $file :: path to the sample to hash. Read as raw bytes, so the digests
+#     match what any other tool would compute.
+#
+# Returns: a hash ref of { md5, sha1, sha256 }, each a lowercase hex string.
+# Dies with 'cannot read "$file" for hashing... ' and the errno when the file
+# cannot be opened.
+#
+#     my $hashes = $self->_hashes('/tmp/putty.exe');
+#     # { md5 => '...', sha1 => '...', sha256 => '...' }
 sub _hashes {
 	my ( $self, $file ) = @_;
 
@@ -318,6 +346,22 @@ sub _hashes {
 # fileinfo.magic. Prefer File::LibMagic when it is installed; otherwise fall back
 # to the file(1) binary, invoked without a shell so a crafted filename cannot
 # inject. Returns undef when neither is available.
+#
+# The File::LibMagic API changed shape between releases, so both the newer
+# info_from_filename and the older describe_filename are tried before falling
+# back to the binary.
+#
+# Args:
+#
+#   - $file :: path to the sample to describe.
+#
+# Returns: the description as a string, e.g. 'PE32 executable (GUI) Intel
+# 80386, for MS Windows'. undef when neither File::LibMagic nor file(1) could
+# say anything -- the submission still goes out, just without a
+# fileinfo.magic.
+#
+#     $self->_magic('/tmp/putty.exe');
+#     # 'PE32 executable (GUI) Intel 80386, for MS Windows'
 sub _magic {
 	my ( $self, $file ) = @_;
 

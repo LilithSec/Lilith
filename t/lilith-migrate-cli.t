@@ -59,8 +59,8 @@ use warnings qw(redefine once);
 # Run a command's execute() capturing what it prints.
 sub run_cmd {
 	my ($class) = @_;
-	my $cmd = bless {}, $class;
-	my $out = '';
+	my $cmd     = bless {}, $class;
+	my $out     = '';
 	open( my $fh, '>', \$out ) or die $!;
 	my $old = select($fh);
 	eval { $cmd->execute( {}, [] ) };
@@ -68,7 +68,7 @@ sub run_cmd {
 	select($old);
 	close($fh);
 	return ( $out, $err );
-}
+} ## end sub run_cmd
 
 my $code = $Lilith::Schema::VERSION;
 
@@ -91,8 +91,7 @@ my $code = $Lilith::Schema::VERSION;
 	my ( $out, $err ) = run_cmd('Lilith::CLI::Command::Deploy');
 	is( $err, '', 'deploy execute lives' );
 	is_deeply( \@FakeMigration::CALLS, ['install'], 'deploy calls ->install' );
-	is( $FakeMigration::NEW_ARGS[0]{schema_class},
-		'Lilith::Schema', 'deploy builds the migration for Lilith::Schema' );
+	is( $FakeMigration::NEW_ARGS[0]{schema_class}, 'Lilith::Schema', 'deploy builds the migration for Lilith::Schema' );
 	is_deeply(
 		$FakeMigration::NEW_ARGS[0]{schema_args},
 		[ $toml{dsn}, $toml{user}, $toml{pass} ],

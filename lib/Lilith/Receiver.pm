@@ -110,6 +110,16 @@ my %TABLE_TYPE = (
 # escalation subsystem. Kept as a name set for O(1) rejection.
 my %FORBIDDEN = map { $_ => 1 } qw( id escalations auto_escalated );
 
+# Mojolicious calls this once per worker at boot. Far smaller than
+# Lilith::Web's: the receiver has no UI and no optional features, so it reads
+# the same TOML only for the database credentials, then puts up the bearer-auth
+# bridge and the two ingest routes under it.
+#
+# Args: none beyond the app object Mojolicious passes.
+#
+# Returns: nothing meaningful. Called for its effect on the app: the 'lilith'
+# helper and the routes. Dies when the config file is missing, empty, or not
+# parseable as TOML.
 sub startup {
 	my $self = shift;
 
@@ -168,7 +178,30 @@ sub startup {
 # where $status is the HTTP status the POST path renders (and a rough severity
 # hint for the WebSocket path) and $body is the JSON response hash. This is the
 # single place a row is checked and stored, so the POST and WebSocket transports
-# cannot drift in what they accept.
+# cannot drift in what they accept. Plain function, not a method.
+#
+# Args:
+#
+#   - $c :: the Mojolicious controller for the request. Read for the stashed
+#     'apikey' row (to check the instance scope) and the 'lilith' helper.
+#   - $type :: the parse_eve type the route resolved -- 'suricata', 'sagan',
+#     'cape', or 'baphomet'. Decides which column set the body is checked
+#     against.
+#   - $body :: the pushed row as a decoded hash ref, keyed by column name. Must
+#     be a hash ref; anything else is rejected rather than dying.
+#
+# Returns: the two-element list ( $status, $body ) -- the HTTP status the POST
+# path renders (and a severity hint for the WebSocket path) and the response as
+# a hash ref:
+#
+#     ( 201, { status => 'ok', id => 1234 } )
+#     ( 400, { status => 'error', error => 'rejected columns', forbidden => [...] } )
+#     ( 400, { status => 'error', error => 'unknown columns',  unknown   => [...] } )
+#     ( 403, { status => 'error', error => 'instance not permitted for this key' } )
+#     ( 500, { status => 'error', error => 'insert failed: ...' } )
+#
+#     my ( $status, $resp ) = _process_row( $c, 'suricata', $c->req->json );
+#     $c->render( json => $resp, status => $status );
 sub _process_row {
 	my ( $c, $type, $body ) = @_;
 
@@ -209,7 +242,20 @@ sub _process_row {
 	return ( 201, { status => 'ok', id => $id } );
 } ## end sub _process_row
 
-# POST /eve/:table -- validate the pushed row and insert it.
+# POST /eve/:table -- validate the pushed row and insert it. Thin: the table
+# name is resolved to a parse_eve type and everything else is _process_row's
+# work. Reached only through the bearer-auth bridge, so the key and its IP
+# scope have already been checked. Plain function used as a route callback, not
+# a method.
+#
+# Args:
+#
+#   - $c :: the Mojolicious controller. The table comes from its 'table' stash
+#     value and the row from the JSON request body.
+#
+# Returns: nothing meaningful; renders the JSON response. A body that is not
+# valid JSON reaches _process_row as undef and comes back a 400, and an unknown
+# table is a 404 before that.
 sub _ingest {
 	my $c     = shift;
 	my $table = $c->stash('table');
@@ -228,6 +274,18 @@ sub _ingest {
 # sent back per row. Bad rows are reported but do not tear the stream down, so
 # one malformed alert does not cost the rest of the batch; an unroutable table
 # refuses the handshake with a 404 (like the POST) so no dead-end socket opens.
+# Plain function used as a route callback, not a method.
+#
+# Args:
+#
+#   - $c :: the Mojolicious controller for the handshake. The table comes from
+#     its 'table' stash value; each alert arrives later as a frame rather than
+#     in the request.
+#
+# Returns: nothing meaningful. Returns as soon as the frame handlers are
+# subscribed, leaving the socket open for Mojolicious to drive; every reply
+# after that is a frame sent from the handler. An unknown table renders a 404
+# and never upgrades.
 sub _ingest_ws {
 	my $c     = shift;
 	my $table = $c->stash('table');

@@ -1,3 +1,10 @@
+# esc_types -- list the installed escalation types and the config fields each
+# takes, which is what esc_target_create's --set items are checked against. The
+# list comes from the modules actually installed under Lilith::Escalate::Type
+# plus any escalation_type_namespaces, so a site-local type shows up here
+# without anything being registered.
+#
+#     lilith esc_types
 package Lilith::CLI::Command::EscTypes;
 
 use strict;
@@ -15,6 +22,19 @@ sub opt_spec {
 	return $class->output_opt_spec;
 }
 
+# List the installed escalation types and the config fields each takes.
+#
+# The table output is a block per type rather than one flat table, since the
+# fields belong to their type and a single table would need the type repeated
+# on every row. Each field's name, label, kind, whether it is required, and its
+# default is what esc_target_create's --set items are checked against.
+#
+# Args:
+#
+#   - $opt :: the parsed options -- just the shared --output/--pretty pair.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: whatever the chosen renderer returned.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 

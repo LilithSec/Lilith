@@ -241,6 +241,31 @@ sub search {
 # The interleaved http view: a UNION ALL of http_access and http_error onto the
 # normalized HTTP_ALL_HEADERS, ordered by the shared receive time. The same
 # filter set is applied to each half; all values are bound.
+#
+# This is the one query Lilith authors itself rather than reusing from
+# Allani::Sources, since Allani has no combined http source. Each half selects
+# its own columns under the shared header names, with a literal discriminator
+# so a row knows which selector key it came from and can link back to the right
+# record view.
+#
+# Args:
+#
+#   - $opts :: the caller's option hash ref, passed on to _time_clause for the
+#     window.
+#   - $dir :: the sort direction for the shared time column, 'ASC' or 'DESC'.
+#     Already checked by the caller.
+#   - $limit :: how many rows to return, already clamped.
+#   - $off :: how many rows to skip, for paging.
+#   - $filt :: hash ref of filter column to value, restricted to
+#     %HTTP_ALL_FILTER (host, vhost, client_ip, message). Values may carry
+#     several whitespace-separated entries, as _multi_clause allows.
+#
+# Returns: a hash ref of the same shape search() gives for a real source:
+# { source => 'http_all', headers => \@HTTP_ALL_HEADERS, rows => [ ... ] }.
+# Each row is keyed by those headers, and its 'source' says which half it came
+# from ('http' or 'http_error').
+#
+#     my $out = $self->_search_http_all( $opts, 'DESC', 100, 0, { host => 'www1' } );
 sub _search_http_all {
 	my ( $self, $opts, $dir, $limit, $off, $filt ) = @_;
 
@@ -527,6 +552,28 @@ sub bucket {
 #
 
 # Run a prepared query and zip each result row against $headers into a hashref.
+# Rows are fetched as array refs and named here rather than with
+# fetchrow_hashref, so a UNION that projects two tables onto one header list
+# (_search_http_all) names its columns the same way an ordinary select does.
+#
+# Args:
+#
+#   - $sql :: the statement to run. Every value in it must be a placeholder --
+#     table and column names are the only things interpolated by callers, and
+#     those come from Allani::Sources rather than the request.
+#   - $binds :: array ref of bind values, in placeholder order.
+#   - $headers :: array ref of names to give the selected columns, in select
+#     order. Becomes the keys of each returned row.
+#
+# Returns: an array ref of hash refs, one per row, keyed by $headers. Empty
+# array ref when nothing matched.
+#
+#     my $rows = $self->_run(
+#         'SELECT id, host FROM syslog WHERE host = ? LIMIT ?',
+#         [ 'db1', 10 ],
+#         [ 'id', 'host' ],
+#     );
+#     # [ { id => 12, host => 'db1' }, ... ]
 sub _run {
 	my ( $self, $sql, $binds, $headers ) = @_;
 
@@ -543,6 +590,18 @@ sub _run {
 	return \@rows;
 } ## end sub _run
 
+# The DBI handle for the Allani store. This is Allani's own connection, quite
+# separate from Lilith's -- the two need not share a database -- and it is only
+# ever read from. Shared through connect_cached, with the class name as the
+# error prefix so a failure names Lilith::Allani and not the shared helper.
+#
+# Args: none.
+#
+# Returns: a DBI database handle with RaiseError set. Dies with
+# 'Lilith::Allani: DBI->connect_cached failure... ' and the DBI error when the
+# store cannot be reached.
+#
+#     my $sth = $self->_dbh->prepare($sql);
 sub _dbh {
 	my ($self) = @_;
 	return connect_cached_dbh( ref($self), $self->{dsn}, $self->{user}, $self->{pass} );
@@ -555,6 +614,25 @@ sub _dbh {
 #   1. explicit absolute bounds -- start and/or end;
 #   2. event-anchored window -- BETWEEN around +/- window_minutes (default 60);
 #   3. now-relative over go_back_minutes.
+#
+# Args:
+#
+#   - $tscol :: the timestamp column to window on, from _ts_col.
+#   - $opts :: the caller's option hash ref. Read for 'start'/'end' (absolute
+#     bounds), 'around' (a timestamp to centre on) with 'window_minutes' (how
+#     far either side, default 60), and 'go_back_minutes' (the relative
+#     fallback). All optional; the precedence above decides which is used.
+#   - $binds :: array ref the timestamp binds are pushed onto, in WHERE order.
+#     Modified in place, so the caller passes the same array it will execute
+#     with.
+#
+# Returns: a SQL boolean expression as a string, with '?' placeholders for
+# every timestamp. Unlike the fragment Lilith::Stats builds, this one carries
+# binds, so it cannot be reused in a second query without the matching values.
+#
+#     my @binds;
+#     my $tc = $self->_time_clause( 'r_isodate', $opts, \@binds );
+#     $sth->execute( @binds, $limit );
 sub _time_clause {
 	my ( $self, $tscol, $opts, $binds ) = @_;
 
@@ -572,6 +650,28 @@ sub _time_clause {
 # aggregate descending (ties broken by value), with the limit bound last. Backs
 # both top() (a validated dimension, any measure) and top_ips() (the source's
 # IP column, count(*)).
+#
+# Args:
+#
+#   - $meta :: the Allani::Sources metadata for the source, whose 'table' says
+#     where to read.
+#   - $tscol :: the timestamp column to window on, from _ts_col.
+#   - $opts :: the caller's option hash ref, passed on to _time_clause for the
+#     window.
+#   - $col :: the column to group by. Already checked -- by _dim for top(), or
+#     taken from the source metadata for top_ips().
+#   - $measure_aggregate :: the aggregate as SQL, from _measure_expr. 'count(*)'
+#     for a plain tally.
+#   - $limit :: how many rows to return, already clamped by the caller.
+#
+# Returns: an array ref of { value, count } hash refs, ordered by count
+# descending with ties broken by value ascending. 'value' is the column as
+# text (an inet comes back without its mask); 'count' is whatever the measure
+# worked out, so it is not always a row tally. Rows whose column is NULL are
+# left out. Empty array ref when nothing matched.
+#
+#     my $rows = $self->_top_values( $meta, 'r_isodate', $opts, 'host', 'count(*)', 10 );
+#     # [ { value => 'db1', count => 402 }, ... ]
 sub _top_values {
 	my ( $self, $meta, $tscol, $opts, $col, $measure_aggregate, $limit ) = @_;
 
@@ -590,6 +690,21 @@ sub _top_values {
 # Resolve an aggregate source to ( $meta, $timestamp_column, $source_name ).
 # Aggregation is over a single real table, so http_all (a view) and unknown
 # sources die.
+#
+# Args:
+#
+#   - $key :: the selector key as it appears on /logs -- 'syslog', 'http', or
+#     'http_error'. 'http_all' is a known key but has no table to aggregate
+#     over, so it dies here rather than further down.
+#
+# Returns: the three-element list ( $meta, $timestamp_column, $source_name ):
+# the Allani::Sources metadata hash ref, the column to window and bucket on,
+# and the underlying Allani source name ('http_access' for the 'http' key).
+# Dies with '"$key" is not a known log source', 'http_all has no aggregate
+# view', or 'unknown source' when Allani itself does not recognise it.
+#
+#     my ( $meta, $tscol, $src ) = $self->_agg_meta('http');
+#     # $src is 'http_access'
 sub _agg_meta {
 	my ( $self, $key ) = @_;
 	$key = '' unless defined $key;
@@ -606,6 +721,17 @@ sub _agg_meta {
 # no-op for the http sources (already default_ts => r_isodate) and flips syslog
 # off its host-stamped s_isodate. The original stamp survives in raw and the
 # single-record view, so nothing is hidden.
+#
+# Args:
+#
+#   - $meta :: the Allani::Sources metadata for a source. Read for its 'ts' map
+#     of available timestamp columns and its 'default_ts'.
+#
+# Returns: the column name to use, as a string -- 'r_isodate' where the source
+# records the aggregator's receive time, otherwise whatever that source calls
+# its default.
+#
+#     my $tscol = $self->_ts_col($meta);    # 'r_isodate'
 sub _ts_col {
 	my ( $self, $meta ) = @_;
 	return $meta->{ts}{r_isodate} ? 'r_isodate' : $meta->{default_ts};
@@ -613,6 +739,20 @@ sub _ts_col {
 
 # The SQL aggregate a measure resolves to (count(*) by default), from the
 # server-defined per-source catalog. Never takes a column from the request.
+#
+# Args:
+#
+#   - $src :: the underlying Allani source name, as _agg_meta returns it --
+#     'syslog', 'http_access', or 'http_error'. A source with no catalog entry
+#     of its own falls back to the shared @DEFAULT_MEASURE.
+#   - $name :: the measure name, e.g. 'count' or http's 'sum_bytes'. undef or
+#     '' is taken as 'count'.
+#
+# Returns: the aggregate as a SQL expression string for a select list, e.g.
+# 'count(*)'. Dies with '"$name" is not a known measure for $src' when the
+# source has no such measure.
+#
+#     my $agg = $self->_measure_expr( 'http_access', 'sum_bytes' );
 sub _measure_expr {
 	my ( $self, $src, $name ) = @_;
 	return measure_expr(
@@ -627,6 +767,23 @@ sub _measure_expr {
 # wildcard is matched with LIKE; otherwise = (as build_where does for a single
 # value). Several values are ORed in one parenthesized group. Every value is
 # bound. Returns an empty list when $raw holds no non-blank tokens.
+#
+# Args:
+#
+#   - $col :: the column to match, already known to be a filter column for this
+#     source. Whether it takes LIKE is decided by %LIKEABLE, not by the caller.
+#   - $raw :: the filter value as typed on /logs. Whitespace separates several
+#     values, e.g. 'db1 db2'. A value may carry % wildcards when the column is
+#     likeable. undef or blank means no filter.
+#
+# Returns: the two-or-more element list ( $fragment, @binds ) -- a SQL boolean
+# expression with one placeholder per value, parenthesized when there is more
+# than one, plus the values in placeholder order. Returns the empty list when
+# there is nothing to match, so a caller can push straight onto its clause and
+# bind lists and have a blank filter add nothing.
+#
+#     my ( $frag, @binds ) = $self->_multi_clause( 'host', 'db1 db2' );
+#     # $frag is '(host = ? OR host = ?)', @binds is ( 'db1', 'db2' )
 sub _multi_clause {
 	my ( $self, $col, $raw ) = @_;
 
@@ -642,7 +799,23 @@ sub _multi_clause {
 	return ( $frag, @binds );
 } ## end sub _multi_clause
 
-# A group/count dimension, checked against the source's Allani::Sources dims (dies otherwise).
+# A group/count dimension, checked against the source's Allani::Sources dims
+# (dies otherwise). Lilith keeps no dimension list of its own for log sources --
+# Allani's is authoritative -- but the check still has to happen here, since the
+# name is spliced into the SQL.
+#
+# Args:
+#
+#   - $meta :: the Allani::Sources metadata for the source, whose 'dims' names
+#     the columns that may be grouped by.
+#   - $col :: the column a widget wants to group or count by, e.g. 'host' or
+#     'program' for syslog, 'vhost' for http.
+#
+# Returns: the checked column name as a string, unchanged. Dies with 'a column
+# is required' when undef or empty, or '"$col" is not an aggregatable column'
+# when that source does not offer it.
+#
+#     my $col = $self->_dim( $meta, 'program' );
 sub _dim {
 	my ( $self, $meta, $col ) = @_;
 	die("a column is required\n")                            unless defined $col && $col ne '';
@@ -659,11 +832,38 @@ package Lilith::Allani::_Opt;
 
 our $AUTOLOAD;
 
+# Wrap a plain hash of filters in something build_where can call accessors on.
+#
+# Args:
+#
+#   - %h :: the filters as column name to value, e.g. ( host => 'db1' ). Any
+#     key is accepted; AUTOLOAD answers for all of them and undef for the rest,
+#     so only the filters actually set need be passed.
+#
+# Returns: a blessed Lilith::Allani::_Opt object.
+#
+#     my $opt = Lilith::Allani::_Opt->new( host => 'db1', program => 'sshd' );
 sub new {
 	my ( $class, %h ) = @_;
 	return bless {%h}, $class;
 }
 
+# Stands in for whatever accessor build_where reaches for. Allani::Sources
+# reads its filters as $opt->some_column, so rather than declaring an accessor
+# per filter column of every source, any method call is answered from the hash
+# the object was built with.
+#
+# Args: whatever the caller passed, all ignored -- the method name is the only
+# input, and it is taken from $AUTOLOAD.
+#
+# Returns: the stored value for the called method's name, or undef when that
+# filter was not set (which build_where reads as "no filter"). DESTROY is
+# special-cased to return nothing, so object teardown does not go looking for a
+# filter named DESTROY.
+#
+#     my $opt = Lilith::Allani::_Opt->new( host => 'db1' );
+#     $opt->host;       # 'db1'
+#     $opt->program;    # undef
 sub AUTOLOAD {
 	my $self = shift;
 	( my $name = $AUTOLOAD ) =~ s/.*:://;

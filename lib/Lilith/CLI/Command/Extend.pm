@@ -1,3 +1,14 @@
+# extend -- print a LibreNMS style extend of recent alert counts, for wiring
+# into snmpd:
+#
+#     extend lilith /usr/local/bin/lilith extend
+#
+# -Z applies the gzip+base64 compression LibreNMS accepts, which matters
+# because an SNMP response is size-limited and a busy sensor's counts are not
+# small. The class_ignore/sid_ignore config keys trim what is counted here
+# without keeping anything out of the database.
+#
+#     lilith extend -m 5 -Z
 package Lilith::CLI::Command::Extend;
 
 use strict;
@@ -19,6 +30,21 @@ sub opt_spec {
 	);
 }
 
+# Build the extend data and print it, compressed when asked.
+#
+# The gzip+base64 form exists because an SNMP response is size limited and a
+# busy sensor's counts are not small. The newline is stripped from the base64
+# and a single one added back, since the extend protocol wants exactly one
+# line.
+#
+# Args:
+#
+#   - $opt :: the parsed options. -m is the window in minutes, -Z asks for the
+#     compressed form, --pretty indents the plain JSON.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: nothing meaningful. Prints the extend, as one line of base64 with
+# -Z, otherwise as JSON.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 

@@ -323,6 +323,21 @@ sub measures {
 # window, and an absolute start/end range as a (possibly empty) list of pairs the
 # caller spreads into the reader. The source is validated by the reader (a bad
 # one dies -> 400 via _ljson), so it is passed through as-is.
+#
+# The counterpart to Lilith::Web::Controller::Dashboard's _params, for the log
+# sources rather than the alert tables. There is no GPCD exclude here -- log
+# lines have no classification -- so the extra pairs are only ever the absolute
+# range.
+#
+# Args: none beyond the controller. Everything comes off the query string:
+# 'source', 'go_back_minutes', and the optional 'start'/'end' bounds.
+#
+# Returns: the list ( $source, $minutes, %range ) -- the selector key, the
+# relative window, and the absolute bounds to spread into the reader call when
+# they were given.
+#
+#     my ( $source, $mins, @range ) = $self->_dparams;
+#     $reader->top( source => $source, go_back_minutes => $mins, @range );
 sub _dparams {
 	my $self   = shift;
 	my $source = $self->param('source') // 'syslog';
@@ -342,6 +357,21 @@ sub _dparams {
 # source/column, unreachable database) into a 400 with the message, and a
 # missing [allani] into a 400 rather than a 500. The shared die-to-400 logic
 # lives in the render_json_or_400 helper in Lilith::Web.
+#
+# The reader is passed to $code rather than fetched inside it, so the
+# not-configured check happens once, here, ahead of every endpoint.
+#
+# Args:
+#
+#   - $code :: code ref taking the Lilith::Allani reader and returning
+#     something JSON encodable.
+#
+# Returns: nothing meaningful; renders the JSON response -- $code's return
+# value on success, { error => 'Allani is not configured' } with a 400 when
+# there is no [allani] block, or { error => $message } with a 400 when the
+# reader died.
+#
+#     return $self->_ljson( sub { $_[0]->sources } );
 sub _ljson {
 	my ( $self, $code ) = @_;
 	return $self->render( json => { error => 'Allani is not configured' }, status => 400 )

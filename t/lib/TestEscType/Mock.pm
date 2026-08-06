@@ -20,7 +20,7 @@ sub config_fields {
 sub check_config {
 	my ( $class, $config ) = @_;
 	die "config is not a hash ref\n" unless ref $config eq 'HASH';
-	die "\"flag\" is required\n" unless defined $config->{flag} && $config->{flag} ne '';
+	die "\"flag\" is required\n"     unless defined $config->{flag} && $config->{flag} ne '';
 	return 1;
 }
 
@@ -33,6 +33,6 @@ sub escalate {
 		id    => $args{event}{id},
 		note  => $args{note},
 	};
-}
+} ## end sub escalate
 
 1;

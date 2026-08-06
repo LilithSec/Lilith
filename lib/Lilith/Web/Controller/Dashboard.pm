@@ -36,6 +36,20 @@ comes back as a 400 rather than reaching SQL.
 # Shared parameter parsing: the table type (defaulted/sanitized like Search) and
 # the go_back_minutes window (Lilith::Stats re-validates, but keep the shell and
 # the API consistent).
+#
+# Args: none beyond the controller. Everything comes off the query string:
+# 'table', 'go_back_minutes', 'show_gpcd', and the optional absolute
+# 'start'/'end' bounds.
+#
+# Returns: the list ( $table, $minutes, %filter ) -- the short table type, the
+# relative window, and the filter pairs to spread into every Lilith::Stats
+# call. The filter carries exclude_classification unless GPCD was asked for,
+# plus start and/or end when an absolute range was given (Stats prefers those
+# over the relative window). Bad values are replaced with the defaults rather
+# than refused, since this also serves the page shell.
+#
+#     my ( $table, $mins, @filter ) = $self->_params;
+#     $stats->total( table => $table, go_back_minutes => $mins, @filter );
 sub _params {
 	my $self = shift;
 
@@ -65,6 +79,20 @@ sub _params {
 # Render whatever $code returns as JSON, turning a Lilith::Stats die (bad
 # column, unreachable database, ...) into a 400 with the message. The shared
 # logic lives in the render_json_or_400 helper in Lilith::Web.
+#
+# This is what lets every endpoint here pass request parameters straight to
+# Lilith::Stats: an unaccepted table, column, measure, or bucket dies there and
+# arrives at the browser as a 400 naming the problem, rather than as a 500.
+#
+# Args:
+#
+#   - $code :: code ref doing the work and returning something JSON encodable,
+#     normally the array or hash ref a Lilith::Stats method gave back.
+#
+# Returns: nothing meaningful; renders the JSON response -- $code's return
+# value on success, or { error => $message } with a 400 status when it died.
+#
+#     return $self->_json( sub { $self->lilith->stats->top( %args ) } );
 sub _json {
 	my ( $self, $code ) = @_;
 
@@ -74,6 +102,22 @@ sub _json {
 # A dashboard name a user may create: trimmed, 1-64 chars of a conservative set,
 # so a board name is safe to show and to round-trip. Returns the cleaned name or
 # undef when it does not qualify. Plain function, not a method.
+#
+# The accepted set is deliberately narrower than what would merely be safe: a
+# board name goes in a URL, a menu, and a delete confirmation, so letters,
+# digits, space, dot, underscore, and dash are all it needs.
+#
+# Args:
+#
+#   - $name :: the name as posted, e.g. ' SOC overview '. undef is accepted and
+#     simply does not qualify.
+#
+# Returns: the trimmed name as a string, or undef when it is empty, longer than
+# 64 characters, or carries anything outside the accepted set. Callers treat
+# undef as a 400 rather than silently storing a name the user did not type.
+#
+#     _clean_name(' SOC overview ');    # 'SOC overview'
+#     _clean_name('rm -rf /');          # undef
 sub _clean_name {
 	my ($name) = @_;
 	return undef unless defined $name;
@@ -87,7 +131,26 @@ sub _clean_name {
 # The view state a board may carry, cleaned the same way widget config is:
 # the table type, the go_back_minutes window, and the show_gpcd flag. Unknown
 # keys and bad values are dropped, so a posted settings blob cannot smuggle
-# anything into storage.
+# anything into storage. Plain function, not a method.
+#
+# Dropping rather than refusing is deliberate here: settings are saved as a side
+# effect of ordinary editing, so a board written by a newer Lilith that carries
+# a setting this one does not know about still saves, minus the setting it
+# cannot honour.
+#
+# Args:
+#
+#   - $settings :: the view state as posted, a hash ref. Read for 'table' (an
+#     alert table or an Allani log source), 'go_back_minutes' (a positive
+#     integer), 'show_gpcd' (a flag), and 'bucket' (a date_trunc unit or
+#     'auto'). Anything else is dropped.
+#
+# Returns: a hash ref holding only the keys that were present and valid, ready
+# to store as jsonb. Something that is not a hash ref at all gives an empty
+# hash ref.
+#
+#     _clean_settings( { table => 'sagan', go_back_minutes => 60, nope => 1 } );
+#     # { table => 'sagan', go_back_minutes => 60 }
 sub _clean_settings {
 	my ($settings) = @_;
 	return {} unless ref $settings eq 'HASH';

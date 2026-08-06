@@ -1,3 +1,13 @@
+# cape_submit -- hand one or more local files to a CAPEv2 box
+# (mojo_cape_submit) for detonation. Needs cape_enable set and at least one
+# [cape_servers.NAME] configured; --server may be left off when exactly one
+# exists. Each file's hashes, size, and libmagic description are computed and
+# sent alongside it.
+#
+# Exits non-zero if any file failed, so a shell loop notices.
+#
+#     lilith cape_submit /tmp/sample.exe
+#     lilith cape_submit --server main --slug hunt /tmp/a.exe /tmp/b.dll
 package Lilith::CLI::Command::CapeSubmit;
 
 use strict;
@@ -29,6 +39,19 @@ sub opt_spec {
 	);
 }
 
+# Refuse the run when no file was named at all. Only that a file was named is
+# checked here -- whether it can actually be read is left to the submit itself,
+# which reports it per file, so one bad path among several does not stop the
+# rest going out.
+#
+# Args:
+#
+#   - $opt :: the parsed options. --file is looked at, which is repeatable.
+#   - $args :: array ref of the file paths given positionally. Files may come
+#     either way, and the two are pooled.
+#
+# Returns: nothing meaningful when the run may proceed; otherwise calls
+# usage_error, which prints the usage and exits non-zero.
 sub validate_args {
 	my ( $self, $opt, $args ) = @_;
 
@@ -41,6 +64,23 @@ sub validate_args {
 	return;
 } ## end sub validate_args
 
+# Submit each named file and report how each went.
+#
+# A file that fails is recorded as a failed result and the rest still go, so
+# one unreadable path or one rejection does not cost the whole batch.
+#
+# Args:
+#
+#   - $opt :: the parsed options. --server picks the CAPE box (optional when
+#     only one is configured), --slug overrides the default cape_slug, and
+#     --file names files alongside any given positionally.
+#   - $args :: array ref of the file paths given positionally, pooled with
+#     --file.
+#
+# Returns: does not return. Renders a row per file -- the path, the server, the
+# name it was uploaded under, whether it succeeded, its sha256, and any error
+# -- then exits 1 when any file failed and 0 otherwise, so a shell loop notices
+# a partial failure rather than reading the zero from the last success.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 

@@ -1,3 +1,17 @@
+# run -- follow the configured EVE files into PostgreSQL. The ingest daemon;
+# not expected to return.
+#
+# The startup banner (dsn, user, whether a password is set, and the instances
+# resolved out of [eves.*]) goes to both stdout and syslog, so the same detail
+# is there whether it was started by hand or by an init system. The password is
+# only ever reported as defined or not.
+#
+# With --daemonize it forks into the background and optionally drops to --user
+# and --group, which need read access to the EVE files. Under systemd it is
+# usually left in the foreground for the supervisor to watch.
+#
+#     lilith run
+#     lilith run --daemonize --user lilith --group lilith
 package Lilith::CLI::Command::Run;
 
 use strict;
@@ -20,6 +34,25 @@ sub opt_spec {
 	);
 }
 
+# Print the startup banner, then hand off to Lilith::run. Does not return.
+#
+# The banner goes to stdout and syslog both, so the same detail is available
+# whether this was started by hand or by an init system that captured neither.
+# The password is only ever reported as defined or not.
+#
+# Daemonizing happens after the banner and after the instances are resolved, so
+# a configuration problem is reported to the terminal that started it rather
+# than disappearing into the background.
+#
+# Args:
+#
+#   - $opt :: the parsed options. --daemonize forks into the background;
+#     --user and --group are dropped to when it does, and need read access to
+#     the EVE files.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: does not return under normal operation -- Lilith::run is the ingest
+# loop. Dies when the config names no usable instances.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 

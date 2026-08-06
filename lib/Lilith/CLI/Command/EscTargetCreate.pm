@@ -1,3 +1,13 @@
+# esc_target_create -- create an escalation target: a name, a type
+# (Webhook/Email/Syslog, or a site-local one), and the per-type config as
+# repeated --set key=value items. esc_types lists the types and the fields each
+# takes.
+#
+# A target created with --disable is stored but refuses sends until enabled,
+# which is a way to stage one before it is live.
+#
+#     lilith esc_target_create --name soc-hook --type Webhook \
+#         --set url=https://soc.example.net/hook --set apikey=xyz
 package Lilith::CLI::Command::EscTargetCreate;
 
 use strict;
@@ -21,6 +31,21 @@ sub opt_spec {
 	);
 }
 
+# Parse the --set items into a config and create the target.
+#
+# An empty value is dropped rather than stored: on create there is nothing to
+# remove, so an empty --set item can only have meant "leave it alone", and
+# storing the empty string would shadow the type's own default.
+#
+# Args:
+#
+#   - $opt :: the parsed options, as opt_spec above describes them. --set is
+#     repeatable, each item a key=value pair.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: nothing meaningful. Prints 'created escalation target <id>'. A
+# malformed --set item, an unknown type, or a duplicate name dies out of
+# Lilith.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 

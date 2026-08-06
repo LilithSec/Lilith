@@ -14,6 +14,21 @@ Handles the search form and results for Suricata, Sagan, and CAPE alerts.
 
 =cut
 
+# GET /search -- the filter form and its results. Reads every filter off the
+# query string, sanitizes the few that are spliced rather than passed to
+# Lilith::search (the table, sort column, and direction), and renders. Running
+# with no parameters at all is the landing page: the defaults are a day of
+# suricata alerts, newest first.
+#
+# The same action serves the auto-refresh: with partial=1 only the results
+# fragment is rendered, without the layout or the filter form, so a refreshing
+# page pulls a fraction of the bytes.
+#
+# Args: none beyond the controller. Everything comes off the query string.
+#
+# Returns: nothing meaningful; renders the page (or the results fragment).
+# A search that dies -- a bad time value, an unreachable database -- is caught
+# and shown as an error on the page rather than becoming a 500.
 sub index {
 	my $self = shift;
 
@@ -135,6 +150,22 @@ sub index {
 	}
 } ## end sub index
 
+# Split a comma separated form field into the list Lilith::search wants for a
+# repeatable filter. Whitespace either side of a comma is dropped, so the
+# spacing someone typed does not become part of a value. Plain function, not a
+# method.
+#
+# Args:
+#
+#   - $str :: the field as submitted, e.g. '22,80' or 'attempted-recon, trojan'.
+#     undef or empty means the filter was left blank.
+#
+# Returns: the values as a list, or the empty list for a blank field -- so the
+# caller can assign straight into a filter hash and have a blank field add
+# nothing rather than an empty-string filter that would match nothing.
+#
+#     _split_list('22, 80');    # ( '22', '80' )
+#     _split_list('');          # ()
 sub _split_list {
 	my $str = shift;
 	return () unless defined $str && $str ne '';

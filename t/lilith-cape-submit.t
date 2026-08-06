@@ -4,8 +4,8 @@ use strict;
 use warnings;
 use Test::More;
 use Test::Exception;
-use JSON          qw( decode_json );
-use File::Temp    qw( tempfile );
+use JSON           qw( decode_json );
+use File::Temp     qw( tempfile );
 use HTTP::Response ();
 
 use_ok('Lilith::CapeSubmit') or BAIL_OUT('Lilith::CapeSubmit failed to load');
@@ -29,7 +29,7 @@ my $NEXT_RESPONSE = HTTP::Response->new( 200, 'OK' );
 
 sub payload_of {
 	my ($request) = @_;
-	my ($json) = $request->content =~ /name="json"\r?\n\r?\n(\{.*?\})\r?\n--/s;
+	my ($json)    = $request->content =~ /name="json"\r?\n\r?\n(\{.*?\})\r?\n--/s;
 	return decode_json($json);
 }
 
@@ -84,16 +84,15 @@ qr/does not exist/, 'submit dies for an unreadable file';
 
 	is( $result->{status}, 'ok',   'a 2xx response yields status ok' );
 	is( $result->{server}, 'main', 'the server name is reported' );
-	like( $result->{sha256}, qr/^[0-9a-f]{64}$/, 'sha256 computed' );
-	like( $result->{name}, qr/^hunt-[0-9]+-\Q$sample_basename\E$/,
-		'upload name is slug-unixtime-basename' );
+	like( $result->{sha256}, qr/^[0-9a-f]{64}$/,                     'sha256 computed' );
+	like( $result->{name},   qr/^hunt-[0-9]+-\Q$sample_basename\E$/, 'upload name is slug-unixtime-basename' );
 
 	# the key rides the Authorization header, not the JSON
 	is( $LAST_REQUEST->header('Authorization'), 'Bearer SECRET123', 'API key sent as bearer token' );
 
 	my $payload = payload_of($LAST_REQUEST);
-	ok( exists $payload->{lilith_cape_submit}, 'lilith_cape_submit block present' );
-	ok( exists $payload->{fileinfo},           'fileinfo is a top-level sibling, not nested' );
+	ok( exists $payload->{lilith_cape_submit},            'lilith_cape_submit block present' );
+	ok( exists $payload->{fileinfo},                      'fileinfo is a top-level sibling, not nested' );
 	ok( !exists $payload->{lilith_cape_submit}{fileinfo}, 'fileinfo is NOT under lilith_cape_submit' );
 	ok( !exists $payload->{lilith_cape_submit}{apikey},   'the API key is not in the submission block' );
 
@@ -101,7 +100,7 @@ qr/does not exist/, 'submit dies for an unreadable file';
 		qr/SECRET123/, 'the API key never appears in the json payload' );
 
 	my $lcs = $payload->{lilith_cape_submit};
-	is( $lcs->{slug}, 'hunt',              'slug carried in the block' );
+	is( $lcs->{slug}, 'hunt',                'slug carried in the block' );
 	is( $lcs->{to},   'http://127.0.0.1:9/', 'to is the server url' );
 	like( $lcs->{time}, qr/^[0-9]+$/, 'time is a bare epoch' );
 	is( $lcs->{filename}, $result->{name}, 'block filename is the upload name' );
@@ -146,7 +145,7 @@ qr/does not exist/, 'submit dies for an unreadable file';
 	);
 	my $result = $submitter->submit( file => $sample );
 	is( $result->{status}, 'error', 'a 5xx response yields status error' );
-	like( $result->{error}, qr/500/, 'the error carries the status' );
+	like( $result->{error},       qr/500/, 'the error carries the status' );
 	like( $result->{http_status}, qr/500/, 'the http_status is recorded' );
 }
 

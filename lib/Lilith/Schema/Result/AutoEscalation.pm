@@ -1,4 +1,5 @@
 use utf8;
+
 package Lilith::Schema::Result::AutoEscalation;
 
 =head1 NAME
@@ -92,33 +93,33 @@ __PACKAGE__->table("auto_escalations");
 =cut
 
 __PACKAGE__->add_columns(
-  "id",
-  {
-    data_type         => "bigint",
-    is_auto_increment => 1,
-    is_nullable       => 0,
-    sequence          => "auto_escalations_id_seq",
-  },
-  "name",
-  { data_type => "varchar", is_nullable => 0, size => 255 },
-  "enabled",
-  { data_type => "boolean", is_nullable => 0 },
-  "priority",
-  { data_type => "integer", is_nullable => 0 },
-  "tables",
-  { data_type => "varchar[]", is_nullable => 0 },
-  "rule",
-  { data_type => "jsonb", is_nullable => 0 },
-  "stop_on_match",
-  { data_type => "boolean", is_nullable => 0 },
-  "description",
-  { data_type => "varchar", is_nullable => 1, size => 2048 },
-  "last_matched",
-  { data_type => "timestamp with time zone", is_nullable => 1 },
-  "match_count",
-  { data_type => "bigint", is_nullable => 0 },
-  "updated",
-  { data_type => "timestamp with time zone", is_nullable => 0 },
+	"id",
+	{
+		data_type         => "bigint",
+		is_auto_increment => 1,
+		is_nullable       => 0,
+		sequence          => "auto_escalations_id_seq",
+	},
+	"name",
+	{ data_type => "varchar", is_nullable => 0, size => 255 },
+	"enabled",
+	{ data_type => "boolean", is_nullable => 0 },
+	"priority",
+	{ data_type => "integer", is_nullable => 0 },
+	"tables",
+	{ data_type => "varchar[]", is_nullable => 0 },
+	"rule",
+	{ data_type => "jsonb", is_nullable => 0 },
+	"stop_on_match",
+	{ data_type => "boolean", is_nullable => 0 },
+	"description",
+	{ data_type => "varchar", is_nullable => 1, size => 2048 },
+	"last_matched",
+	{ data_type => "timestamp with time zone", is_nullable => 1 },
+	"match_count",
+	{ data_type => "bigint", is_nullable => 0 },
+	"updated",
+	{ data_type => "timestamp with time zone", is_nullable => 0 },
 );
 
 =head1 PRIMARY KEY

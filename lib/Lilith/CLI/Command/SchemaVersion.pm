@@ -1,3 +1,8 @@
+# schema_version -- report the schema version the database carries against the
+# one this release expects, and whether a deploy or upgrade is pending. Reads
+# only; it changes nothing, so it is safe to run against a live database.
+#
+#     lilith schema_version
 package Lilith::CLI::Command::SchemaVersion;
 
 use strict;
@@ -18,6 +23,17 @@ sub description {
 		. "dsn/user/pass from the config file and changes nothing.";
 }
 
+# Compare the deployed schema version against this release's and report.
+#
+# Args:
+#
+#   - $opt :: the parsed options. This command has none; the connection details
+#     come from the config file.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: nothing meaningful. Prints this release's version, what the database
+# carries, and which of current / upgrade pending / never deployed / newer than
+# this release applies. Changes nothing, so it is safe against a live database.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 

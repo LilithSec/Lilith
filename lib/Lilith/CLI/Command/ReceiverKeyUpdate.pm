@@ -1,3 +1,13 @@
+# receiver_key_update -- change a receiver API key, found by --id or --name:
+# rename it, enable or disable it, or re-scope it. The key itself cannot be
+# changed; delete and create instead.
+#
+# --ip and --instance replace an axis outright rather than adding to it, and
+# --clear-ips/--clear-instances widen an axis back to unrestricted. Disabling
+# is the gentler alternative to deleting, since it can be undone.
+#
+#     lilith receiver_key_update --name sensor1 --ip 10.1.0.0/16
+#     lilith receiver_key_update --name sensor1 --disable
 package Lilith::CLI::Command::ReceiverKeyUpdate;
 
 use strict;
@@ -26,6 +36,16 @@ sub opt_spec {
 	);
 } ## end sub opt_spec
 
+# Refuse the run when --enable and --disable were both given.
+#
+# Args:
+#
+#   - $opt :: the parsed options. Only the --enable/--disable pair is looked
+#     at; the key is identified in execute.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: nothing meaningful when the run may proceed; otherwise calls
+# usage_error, which prints the usage and exits non-zero.
 sub validate_args {
 	my ( $self, $opt, $args ) = @_;
 
@@ -36,6 +56,22 @@ sub validate_args {
 	return;
 }
 
+# Look the key up, build the update from whichever options were given, and
+# apply it.
+#
+# A scope axis is replaced outright rather than added to, so re-scoping a key
+# means stating the whole list. --clear-* wins over --ip/--instance for the
+# same axis: clearing is the more drastic of the two, so asking for both is
+# read as meaning it.
+#
+# Args:
+#
+#   - $opt :: the parsed options, as opt_spec above describes them. --id or
+#     --name identifies the key; --rename is what changes it.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: nothing meaningful. Prints the ID and name of the key it updated.
+# Dies out of the lookup when nothing matched.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 

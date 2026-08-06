@@ -1,3 +1,9 @@
+# migrate -- move an already-deployed database to the schema this release
+# expects. A no-op when it is already current; use deploy for an empty
+# database. See docs/install.md for the upgrade notes, in particular that the
+# 4 -> 5 step builds indexes and blocks writes while it does.
+#
+#     lilith migrate
 package Lilith::CLI::Command::Migrate;
 
 use strict;
@@ -22,6 +28,18 @@ sub description {
 		. "reads keep working, so run it during a quiet window on a busy sensor.";
 } ## end sub description
 
+# Upgrade the database to the current schema.
+#
+# Args:
+#
+#   - $opt :: the parsed options. This command has none; the connection details
+#     come from the config file.
+#   - $args :: array ref of leftover positional arguments. Unused.
+#
+# Returns: nothing meaningful. Prints the version the database now carries. A
+# no-op when it was already current. Dies with 'Failed to upgrade the
+# schema... ' and the underlying error otherwise, which is what running it
+# against a database that was never deployed gives.
 sub execute {
 	my ( $self, $opt, $args ) = @_;
 
