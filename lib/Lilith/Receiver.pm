@@ -29,15 +29,11 @@ central database is populated without every sensor needing DB credentials.
 The same C</eve/:table> endpoint is offered over two transports, which validate
 and insert identically (the shared C<_process_row>); a sensor picks one:
 
-=over 4
+- HTTP POST :: One request per alert. Simple and stateless.
 
-=item * B<HTTP POST> -- one request per alert. Simple and stateless.
-
-=item * B<WebSocket> -- the client opens one connection per table and streams
-each alert as a JSON frame, avoiding a fresh request per alert for a high-volume
-sensor. This is what L<App::Lilu> uses when its C<lilith_websocket> is set.
-
-=back
+- WebSocket :: The client opens one connection per table and streams each alert
+as a JSON frame, sparing a high-volume sensor a fresh request per alert. This is
+what L<App::Lilu> uses when its C<lilith_websocket> is set.
 
 =head2 REQUEST
 
