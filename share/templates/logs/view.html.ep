@@ -14,7 +14,7 @@
 % } else {
 
 %= include 'partials/_card', title => 'Columns', body => begin
-    <table class="table table-dark table-sm table-bordered mb-0">
+    <table class="table table-dark table-sm table-bordered mb-0 log-record-table">
       <tbody>
         % for my $col (sort keys %$row) {
           % next if $col eq 'raw';

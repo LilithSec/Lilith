@@ -3,6 +3,40 @@
 body { padding-top: 56px; font-size: 0.9rem; }
 .navbar-brand { color: #dc3545 !important; font-weight: 700; letter-spacing: 2px; font-size: 1.1rem; }
 .table-sm td, .table-sm th { white-space: nowrap; font-size: 0.82rem; }
+
+/* The free-text column of each /logs source -- message for syslog and
+   http_error, request for http_access, detail and message for http_all. The
+   .table-sm rule above holds every cell to a single line, which is what the
+   short columns want and the wrong answer here: one long unbroken message, a
+   JSON blob or a base64 string, stretches its column until the table runs off
+   the screen.
+
+   The width claims the row's leftover rather than capping the cell. Bootstrap
+   lays the table out at full width, so asking one column for all of it leaves
+   the others to shrink to their contents -- which, being held to one line, is
+   exactly as wide as they need and no wider. A message then wraps at whatever
+   the short columns did not want, and one that fits does not wrap at all.
+
+   overflow-wrap is what puts a break inside a run of text offering none of its
+   own; break-word comes first as the fallback for engines that do not know the
+   anywhere keyword and drop the declaration. */
+.logs-table td.log-wrap {
+  width: 100%;
+  white-space: normal;
+  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* The one-record view's Columns table, where the same long message has the same
+   problem and worse: that table has no scrolling wrapper, so instead of running
+   off the table it runs off the page. The name column is pinned in the template
+   and a fixed layout leaves the value column the rest of the row to wrap in. */
+.log-record-table { table-layout: fixed; }
+.log-record-table td {
+  white-space: normal;
+  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
+}
 pre.raw-json { max-height: 600px; overflow-y: auto; font-size: 0.78em; background: #1a1a2e; border-radius: 4px; padding: 1rem; }
 .event-link { color: #dc3545; text-decoration: none; }
 .event-link:hover { text-decoration: underline; }

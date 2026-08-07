@@ -3,12 +3,15 @@
 % my $headers = $result->{headers} || [];
 % my $rows    = $result->{rows}    || [];
 % my $count   = scalar @$rows;
+% # The free-text columns, which wrap rather than run the table off the screen.
+% # .log-wrap in lilith.css hands them the width the other columns did not take.
+% my %wrap_col = map { $_ => 1 } qw( message detail request );
 <div id="log-results">
   %= include 'partials/_results_pager', count => $count, noun => 'row', offset => $offset, limit => $limit
 
   % if ($count > 0) {
   <div class="table-responsive">
-    <table class="table table-dark table-sm table-hover table-bordered mb-0">
+    <table class="table table-dark table-sm table-hover table-bordered mb-0 logs-table">
       <thead class="table-secondary">
         <tr>
           % for my $h (@$headers) {
@@ -23,6 +26,8 @@
             % if ($h eq 'id') {
               % my $src = $row->{source} // $result->{source};
           <td><a href="/logs/<%= $src %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
+            % } elsif ($wrap_col{$h}) {
+          <td class="log-wrap"><%= defined $row->{$h} ? $row->{$h} : '' %></td>
             % } else {
           <td><%= defined $row->{$h} ? $row->{$h} : '' %></td>
             % }
