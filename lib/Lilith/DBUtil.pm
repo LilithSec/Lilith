@@ -10,6 +10,7 @@ our @EXPORT_OK = qw(
 	connect_cached_dbh
 	host_or_text_expr
 	measure_expr
+	skip_scan_viable
 	time_window_clause
 	validate_bucket
 );
@@ -100,6 +101,34 @@ The SQL aggregate a named measure resolves to, from a server-defined catalog
 
 Resolves to C<count(*)>, C<count(distinct ...)>, a zero-defaulted rounded
 average, or C<< agg(expr) >>.
+
+=head2 skip_scan_viable( %args )
+
+Whether counting a column's distinct values is better done by walking an index
+than by reading the rows, for a windowed count. True only when both conditions
+hold, because either alone makes it slower than what it replaces. Args:
+
+    - dbh :: the handle to ask the catalog through. Required.
+    - table :: the table the column belongs to. Required.
+    - column :: the column being counted. Required.
+    - time_column :: the column the window is on. Required.
+    - max_distinct :: the most values worth walking. Required.
+    - cache :: hash ref the answer is remembered in, per table and column.
+        Required, and owned by the caller -- the two readers talk to
+        different databases, so one shared cache would confuse them.
+
+The first condition is a btree index whose first key is the column and whose
+second is the timestamp. Walking distinct values costs one index descent each,
+but each value then has to be checked for a row inside the window, and only the
+timestamp as second key makes that a descent too. With a C<< (column, id) >>
+index -- which orders a value's rows by insertion -- that check walks every
+older entry first, and the whole thing measured ten times slower than the plain
+count over a day's window.
+
+The second is the estimated number of distinct values. The walk is capped in any
+case, but reaching the cap means paying for thousands of descents before falling
+back, so a column already known to be wide is not started. The estimate comes
+from C<pg_stats> and is only a sample, hence the cap staying as the backstop.
 
 =head2 clamped_int( $value, $default, $min, $max )
 
@@ -202,6 +231,46 @@ sub measure_expr {
 	# the measure is always numeric, matching avg above.
 	return 'coalesce(' . $aggregate . '(' . $operand . '), 0)';    # sum / max / min
 } ## end sub measure_expr
+
+sub skip_scan_viable {
+	my (%args) = @_;
+
+	my ( $table, $column ) = ( $args{table}, $args{column} );
+	my $cached = $args{cache}{$table}{$column};
+	return $cached if defined $cached;
+
+	my $viable = eval {
+		my $sth = $args{dbh}->prepare(<<'SQL');
+SELECT 1
+FROM pg_index x
+JOIN pg_class i ON i.oid = x.indexrelid
+JOIN pg_class t ON t.oid = x.indrelid
+JOIN pg_am    m ON m.oid = i.relam
+JOIN pg_attribute first  ON first.attrelid  = t.oid AND first.attnum  = x.indkey[0]
+JOIN pg_attribute second ON second.attrelid = t.oid AND second.attnum = x.indkey[1]
+WHERE t.relname = ? AND first.attname = ? AND second.attname = ? AND m.amname = 'btree'
+LIMIT 1
+SQL
+		$sth->execute( $table, $column, $args{time_column} );
+		my $indexed = $sth->fetchrow_arrayref ? 1 : 0;
+		$sth->finish;
+		return 0 unless $indexed;
+
+		# n_distinct is negative when Postgres expresses it as a fraction of the
+		# table, which only happens for columns distinct enough that it gave up
+		# on a fixed count -- exactly the ones not worth walking.
+		my ($n_distinct)
+			= $args{dbh}->selectrow_array( 'SELECT n_distinct FROM pg_stats WHERE tablename = ? AND attname = ?',
+				undef, $table, $column );
+		return 0 unless defined $n_distinct;
+		return 0 if $n_distinct < 0;
+		return $n_distinct <= $args{max_distinct} ? 1 : 0;
+	};
+	$viable = 0 unless defined $viable;
+
+	$args{cache}{$table}{$column} = $viable;
+	return $viable;
+} ## end sub skip_scan_viable
 
 sub clamped_int {
 	my ( $value, $default, $min, $max ) = @_;

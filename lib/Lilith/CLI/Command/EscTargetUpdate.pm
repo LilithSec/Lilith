@@ -16,7 +16,7 @@ use Lilith::CLI::Util qw( esc_lookup_target esc_parse_set );
 
 sub command_names { 'esc_target_update' }
 
-sub abstract { 'update a escalation target' }
+sub abstract { 'update an escalation target' }
 
 sub usage_desc { '%c esc_target_update %o' }
 
@@ -25,7 +25,7 @@ sub opt_spec {
 		[ 'tid=s',   'the escalation target ID' ],
 		[ 'name=s',  'the target name (or, with --tid, the new name)' ],
 		[ 'set=s@',  'a config item, key=value (empty value removes the key)' ],
-		[ 'desc=s',  'a optional description' ],
+		[ 'desc=s',  'an optional description' ],
 		[ 'enable',  'enable the target' ],
 		[ 'disable', 'disable the target' ],
 	);
@@ -76,7 +76,7 @@ sub execute {
 
 	my %update = ( id => $existing->{id} );
 
-	# --set items are merged over the current config; a empty value removes
+	# --set items are merged over the current config; an empty value removes
 	# that key so the type default applies again
 	if ( $opt->{set} && @{ $opt->{set} } ) {
 		my $set    = esc_parse_set( @{ $opt->{set} } );

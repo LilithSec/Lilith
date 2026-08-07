@@ -13,18 +13,54 @@ plan skip_all => 'Allani (Allani::Sources) is not installed'
 
 # A mock DB handle that records the SQL it is asked to prepare and hands back a
 # canned row, so search()/row() can be exercised without a live database.
+#
+# distinct() first asks the catalog whether a (column, timestamp) index exists,
+# and takes a different path for each answer. $MockDbh::HAS_COMPOSITE decides
+# what that probe returns, so both branches are reachable.
 {
 
 	package MockSth;
-	sub execute           { 1 }
-	sub fetchrow_arrayref { undef }
+	sub new { return bless { sql => $_[1], drained => 0 }, $_[0] }
+
+	sub execute { 1 }
+
+	# Rows are handed back once and then exhausted: _run reads with
+	# "while ( my $row = $sth->fetchrow_arrayref )", so a statement that always
+	# had a row would never finish.
+	sub fetchrow_arrayref {
+		my $self = shift;
+		return undef if $self->{drained}++;
+
+		return ( $MockDbh::HAS_COMPOSITE ? [1] : undef ) if $self->{sql} =~ /FROM pg_index/;
+
+		# the skip scan asks for ( values walked, values in window )
+		return [ 3, 3 ] if $self->{sql} =~ /WITH RECURSIVE walk/;
+
+		return undef;
+	} ## end sub fetchrow_arrayref
 	sub fetchrow_hashref  { return { id => 5, host => 'w1' } }
 	sub fetchall_arrayref { return [] }
 	sub finish            { 1 }
 
 	package MockDbh;
 	our @SQL;
-	sub prepare { push @SQL, $_[1]; return bless {}, 'MockSth' }
+	our $HAS_COMPOSITE = 0;
+
+	# how many distinct values pg_stats claims for the column, which
+	# skip_scan_viable checks after the index probe
+	our $N_DISTINCT = 9;
+
+	sub prepare {
+		my ( $self, $sql ) = @_;
+		push( @SQL, $sql );
+		return MockSth->new($sql);
+	}
+
+	sub selectrow_array {
+		my ( $self, $sql ) = @_;
+		push( @SQL, $sql );
+		return $sql =~ /n_distinct/ ? $N_DISTINCT : undef;
+	}
 }
 no warnings qw(redefine once);
 local *Lilith::Allani::_dbh = sub { bless {}, 'MockDbh' };
@@ -163,13 +199,46 @@ my $reader = Lilith::Allani->new( dsn => 'dbi:Pg:dbname=bogus' );
 	eval { $reader->total( source => 'http_all' ) };
 	like( $@, qr/no aggregate view/, 'aggregation rejects http_all' );
 
-	@MockDbh::SQL = ();
-	$reader->distinct( source => 'syslog', column => 'host' );
-	like(
-		$MockDbh::SQL[0],
-		qr/SELECT count\(distinct host\) FROM syslog WHERE/,
-		'distinct counts distinct dimension values'
-	);
+	# distinct() has two paths. Without a (column, timestamp) index it counts the
+	# rows; with one it walks the index instead. The wrong index is worse than
+	# none -- a (column, id) index makes the walk slower than the count it
+	# replaces -- so what is really being guarded here is that the probe asks for
+	# the timestamp as the second key, and that a "no" means falling back.
+	{
+		local $MockDbh::HAS_COMPOSITE = 0;
+		@MockDbh::SQL = ();
+		$reader->distinct( source => 'syslog', column => 'host' );
+		like( $MockDbh::SQL[0], qr/FROM pg_index/, 'distinct asks whether a usable index exists' );
+		like(
+			$MockDbh::SQL[0],
+			qr/first\.attname = \?.*second\.attname = \?/s,
+			'the probe pins both the column and the timestamp position'
+		);
+		like(
+			$MockDbh::SQL[-1],
+			qr/SELECT count\(distinct host\) FROM syslog WHERE/,
+			'distinct counts the rows when no such index exists'
+		);
+		is( scalar @MockDbh::SQL, 2, 'and issues nothing else -- no pg_stats lookup once the index rules it out' );
+	}
+
+	{
+		# a fresh reader, because the probe's answer is cached per object for its
+		# lifetime and the block above has already cached "no" for syslog/host
+		local $MockDbh::HAS_COMPOSITE = 1;
+		my $indexed = Lilith::Allani->new( dsn => 'dbi:Pg:dbname=bogus' );
+
+		@MockDbh::SQL = ();
+		my $count = $indexed->distinct( source => 'syslog', column => 'host' );
+		like( $MockDbh::SQL[-1], qr/WITH RECURSIVE walk/, 'distinct walks the index when one exists' );
+		unlike( $MockDbh::SQL[-1], qr/count\(distinct/, 'and does not count the rows as well' );
+		is( $count, 3, 'the walked value count is what comes back' );
+
+		# the catalog answer is cached: a second call must not probe again
+		@MockDbh::SQL = ();
+		$indexed->distinct( source => 'syslog', column => 'host' );
+		is( scalar( grep { /FROM pg_index/ } @MockDbh::SQL ), 0, 'the index probe is cached, not repeated' );
+	}
 
 	# auto bucket sizes to the window; an explicit unit passes through
 	is( $reader->bucket( 'auto', 60 ),      'minute', 'auto: <=3h window -> minute' );
@@ -209,13 +278,23 @@ my $reader = Lilith::Allani->new( dsn => 'dbi:Pg:dbname=bogus' );
 	eval { $reader->top( source => 'syslog', column => 'program', measure => 'bytes' ) };
 	like( $@, qr/not a known measure/, 'bytes is not a measure for syslog' );
 
-	# stacked split: a per-group query restricted to the top-k groups
+	# Stacked split: bucket every group once, then keep the busiest k. The
+	# busiest are ranked from the bucketed counts rather than by a second look at
+	# the table, so the window is only walked once -- the whole point of the
+	# shape, and what these assertions are really guarding.
 	@MockDbh::SQL = ();
 	$reader->timeseries( source => 'syslog', group_by => 'program', top_groups => 3 );
 	my $sql = $MockDbh::SQL[0];
-	like( $sql, qr/\(program\)::text AS "group"/,            'grouped timeseries carries the group value' );
-	like( $sql, qr/program IN \(SELECT program FROM syslog/, 'grouped timeseries restricts to top-k groups' );
-	like( $sql, qr/GROUP BY 1, 2/,                           'grouped timeseries groups by bucket and group' );
+	like( $sql, qr/\(program\)::text AS grp/,   'grouped timeseries carries the group value' );
+	like( $sql, qr/AS "group"/,                 'grouped timeseries projects it as group' );
+	like( $sql, qr/GROUP BY 1, 2/,              'grouped timeseries groups by bucket and group' );
+	like( $sql, qr/ORDER BY sum\(count\) DESC/, 'grouped timeseries ranks groups by their totals' );
+	like( $sql, qr/JOIN busiest USING \(grp\)/, 'grouped timeseries restricts to top-k groups' );
+
+	# the window clause must appear once: twice would mean the table is being
+	# read a second time just to find the busiest groups
+	my $window_count = () = $sql =~ /r_isodate >= now\(\)/g;
+	is( $window_count, 1, 'grouped timeseries walks the window once, not twice' );
 
 	# top_ips reads the source's IP column, not a dimension
 	@MockDbh::SQL = ();

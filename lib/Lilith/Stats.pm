@@ -2,7 +2,8 @@ package Lilith::Stats;
 
 use strict;
 use warnings;
-use Lilith::DBUtil qw( connect_cached_dbh host_or_text_expr measure_expr time_window_clause validate_bucket );
+use Lilith::DBUtil
+	qw( connect_cached_dbh host_or_text_expr measure_expr skip_scan_viable time_window_clause validate_bucket );
 
 =head1 NAME
 
@@ -30,9 +31,15 @@ Lilith::Stats - aggregation queries over the alert tables for the dashboard.
 Read-only aggregation helpers over C<suricata_alerts>, C<sagan_alerts>,
 C<cape_alerts>, and C<baphomet_alerts> for the web dashboard. Each method takes
 a short table type (C<suricata>, C<sagan>, C<cape>, or C<baphomet>) and a
-C<go_back_minutes> window (default
-1440) and runs a single grouped query, leaning on the version-5 indexes so a
-time-windowed C<GROUP BY> range-scans rather than reading the whole table.
+C<go_back_minutes> window (default 1440) and runs a single grouped query,
+leaning on the C<< (column, timestamp) >> indexes so a time-windowed
+C<GROUP BY> range-scans rather than reading the whole table.
+
+The Suricata severity and MITRE fields live in the raw EVE record. From schema
+13 they are also stored generated columns, which is what those queries read
+when the database has them -- digging them out of raw instead means fetching a
+15KB document back per row. A database still on an older schema falls back to
+the expression automatically.
 
 Every table name, column name, and time bucket a caller passes is checked
 against a fixed set of accepted names before it reaches SQL; the only
@@ -69,6 +76,11 @@ my %TIME_COL = (
 	baphomet => 'timestamp',
 );
 
+# How many distinct values a skip scan will walk before it stops being worth it.
+# Each value costs one index descent, so a few thousand is still quick, while a
+# column with far more than this is one where reading the rows outright wins.
+my $SKIP_SCAN_CAP = 5000;
+
 # Columns that may be grouped/counted by, per table. Deliberately excludes raw,
 # event_id, and the flow byte/packet counters -- the dimensions a dashboard cuts
 # on, not every column.
@@ -95,12 +107,20 @@ my %DIMENSION = (
 	},
 );
 
-# Virtual (computed) dimensions: pseudo-column names that map to a SQL expression
-# rather than a real column, so a widget can group by a field kept only in the
-# raw EVE record. Each entry has an 'expr' (the value it groups/filters by) and
-# an optional 'label' expression giving the display value. 'severity' is the
-# Suricata alert severity (raw->alert->severity), which is not promoted to a
-# column; its label maps the 1-4 numbers to names. mitre_tactic/mitre_technique
+# Dimensions that are not plain columns: fields of the raw EVE record a widget
+# can still group by. Each entry carries
+#
+#   - column :: the generated column holding the value from schema 13, which is
+#     preferred when the database has it. See _virtual_base for why, and for
+#     what happens on an older database.
+#   - expr :: the expression digging the value out of raw, used before 13.
+#   - label :: optional code ref taking whichever of those is in play and
+#     returning the display expression.
+#   - order :: optional code ref, likewise, giving a natural rank to sort series
+#     by instead of the label.
+#
+# severity is the Suricata alert severity, whose label maps the 1-4 numbers to
+# names and whose rank sorts High before Low. mitre_tactic and mitre_technique
 # read the ATT&CK annotations rulesets (e.g. Emerging Threats) put in
 # alert.metadata as single-element arrays of underscored names; the label spaces
 # them out. Sagan is not listed: it does not populate alert.severity or MITRE
@@ -108,22 +128,28 @@ my %DIMENSION = (
 my %VIRTUAL = (
 	suricata => {
 		severity => {
-			expr  => "raw->'alert'->>'severity'",
-			label => "case (raw->'alert'->>'severity')"
-				. " when '1' then 'High' when '2' then 'Medium'"
-				. " when '3' then 'Low' when '4' then 'Informational'"
-				. " else (raw->'alert'->>'severity') end",
+			column => 'severity',
+			expr   => "raw->'alert'->>'severity'",
+			label  => sub {
+				return
+					  "case $_[0] when '1' then 'High' when '2' then 'Medium'"
+					. " when '3' then 'Low' when '4' then 'Informational'"
+					. " else $_[0] end";
+			},
 			# natural rank so top() orders High -> Low rather than by count
-			order => "case (raw->'alert'->>'severity')"
-				. " when '1' then 1 when '2' then 2 when '3' then 3 when '4' then 4 else 99 end",
+			order => sub {
+				return "case $_[0] when '1' then 1 when '2' then 2 when '3' then 3 when '4' then 4 else 99 end";
+			},
 		},
 		mitre_tactic => {
-			expr  => "raw->'alert'->'metadata'->'mitre_tactic_name'->>0",
-			label => "replace(raw->'alert'->'metadata'->'mitre_tactic_name'->>0, '_', ' ')",
+			column => 'mitre_tactic',
+			expr   => "raw->'alert'->'metadata'->'mitre_tactic_name'->>0",
+			label  => sub { return "replace($_[0], '_', ' ')" },
 		},
 		mitre_technique => {
-			expr  => "raw->'alert'->'metadata'->'mitre_technique_name'->>0",
-			label => "replace(raw->'alert'->'metadata'->'mitre_technique_name'->>0, '_', ' ')",
+			column => 'mitre_technique',
+			expr   => "raw->'alert'->'metadata'->'mitre_technique_name'->>0",
+			label  => sub { return "replace($_[0], '_', ' ')" },
 		},
 	},
 );
@@ -284,8 +310,16 @@ sub distinct {
 	my $exf     = $self->_exclude_frag( $dbh, $type, \%opts );
 	my $win     = $self->_window_frag( $dbh, $tc, \%opts, $mins );
 	my $colexpr = $self->_col_expr( $type, $col );
-	my $sql     = "select count(distinct $colexpr) from $tbl where $win$exf";
-	my ($n)     = $dbh->selectrow_array($sql);
+
+	# A virtual column is an expression dug out of raw, so there is no column for
+	# an index to lead with and nothing to walk.
+	if ( $colexpr eq $col ) {
+		my $walked = $self->_distinct_by_skip_scan( $tbl, $col, $tc, $win . $exf );
+		return $walked if defined $walked;
+	}
+
+	my $sql = "select count(distinct $colexpr) from $tbl where $win$exf";
+	my ($n) = $dbh->selectrow_array($sql);
 
 	return ( $n // 0 ) + 0;
 } ## end sub distinct
@@ -321,7 +355,7 @@ sub top {
 	# measure (which is what everything else orders by, descending).
 	my $ord
 		= ( $VIRTUAL{$type} && $VIRTUAL{$type}{$col} && $VIRTUAL{$type}{$col}{order} )
-		? 'min(' . $VIRTUAL{$type}{$col}{order} . ') asc'
+		? 'min(' . $VIRTUAL{$type}{$col}{order}->( $self->_virtual_base( $type, $col ) ) . ') asc'
 		: '2 desc, 1 asc';
 
 	my $sql
@@ -372,24 +406,39 @@ sub timeseries {
 		my $gexpr = $self->_value_expr( $type, $g );
 		my $where = "$window and $gcol is not null";
 
-		if ( defined $opts{top_groups} ) {
-			my $k = $self->_limit( $opts{top_groups}, 5 );
-			$where
-				.= " and $gcol in (select $gcol from $tbl where $window and $gcol is not null "
-				. "group by 1 order by $magg desc, 1 asc limit $k)";
-		}
-
 		# A virtual group with a natural rank (e.g. severity) orders its series by
 		# that rank via min() rather than alphabetically by the label, so the
 		# stack reads High -> Low.
-		my $gord
-			= ( $VIRTUAL{$type} && $VIRTUAL{$type}{$g} && $VIRTUAL{$type}{$g}{order} )
-			? 'min(' . $VIRTUAL{$type}{$g}{order} . ') asc'
-			: '2 asc';
+		my $ordered = ( $VIRTUAL{$type} && $VIRTUAL{$type}{$g} && $VIRTUAL{$type}{$g}{order} );
+		my $gord    = $ordered ? 'min(' . $VIRTUAL{$type}{$g}{order}->($gcol) . ') asc' : '2 asc';
 
-		my $sql
-			= "select $epoch as bucket, $gexpr as \"group\", $magg as count "
-			. "from $tbl where $where group by 1, 2 order by 1 asc, $gord";
+		my $sql;
+		if ( defined $opts{top_groups} ) {
+			my $k = $self->_limit( $opts{top_groups}, 5 );
+
+			# Bucket every group once, then rank the busiest from that result. The
+			# obvious form -- naming the top groups in a subquery and joining it
+			# against a second pass -- spells the window clause twice and so walks
+			# the window twice, and the window is the expensive part. What gets
+			# ranked here is already aggregated, a few hundred rows however wide
+			# the window. Measured 1.6x quicker at a day and at a month.
+			#
+			# The rank column travels through the CTE so a virtual group can still
+			# order by it rather than by its label.
+			my $rank = $ordered ? ', min(' . $VIRTUAL{$type}{$g}{order}->($gcol) . ') as rank' : '';
+			my $sort = $ordered ? 'per_bucket.rank asc'                                        : '2 asc';
+			$sql
+				= "with per_bucket as ("
+				. "select $epoch as bucket, $gexpr as grp, $magg as count$rank "
+				. "from $tbl where $where group by 1, 2"
+				. "), busiest as ("
+				. "select grp from per_bucket group by grp order by sum(count) desc, grp asc limit $k"
+				. ") select per_bucket.bucket, per_bucket.grp as \"group\", per_bucket.count "
+				. "from per_bucket join busiest using (grp) order by 1 asc, $sort";
+		} else {
+			$sql = "select $epoch as bucket, $gexpr as \"group\", $magg as count "
+				. "from $tbl where $where group by 1, 2 order by 1 asc, $gord";
+		}
 		my $rows = $dbh->selectall_arrayref( $sql, { Slice => {} } );
 
 		return [ map { { bucket => $_->{bucket} + 0, group => $_->{group}, count => ( $_->{count} // 0 ) + 0 } }
@@ -573,6 +622,61 @@ sub _measure_expr {
 	);
 }
 
+# What a virtual dimension is read from: the generated column when the database
+# has one, otherwise the expression that digs it out of raw.
+#
+# Schema 13 promoted the Suricata severity and MITRE annotations into stored
+# generated columns, because reading them from raw is far more expensive than it
+# looks. raw averages around 15KB on a real store and is held out of line, so
+# every read of a one character severity fetches the whole document back. Over
+# thirty days that measured 11.5 seconds against 90 milliseconds for an ordinary
+# column, and an index on the expression does not help: Postgres will use one to
+# filter by a value but will not hand the value back to satisfy a grouping.
+#
+# Detected rather than assumed, because nothing stops Lilith running against a
+# database still on 12 -- schema_version reports the mismatch but does not
+# refuse. On an older database this keeps the previous behaviour.
+#
+# The answer is cached for the life of the object, since it changes only when
+# the schema is migrated.
+#
+# Args:
+#
+#   - $type :: the short table type, already through _table.
+#   - $col :: the virtual dimension name, already through _dimension. The
+#     caller has established it is in %VIRTUAL.
+#
+# Returns: the SQL to read the value, as a string -- a bare column name on
+# schema 13 and later, the raw-digging expression before that. Also the
+# expression when the catalog cannot be read, so a database that will not answer
+# keeps working rather than failing on what is only a speed-up.
+#
+#     $self->_virtual_base( 'suricata', 'severity' );
+#     # 'severity' on schema 13, "raw->'alert'->>'severity'" on 12
+sub _virtual_base {
+	my ( $self, $type, $col ) = @_;
+
+	my $virtual = $VIRTUAL{$type}{$col};
+	my $column  = $virtual->{column};
+	return $virtual->{expr} unless defined $column;
+
+	my $cached = $self->{_generated_column_cache}{$type}{$col};
+	return ( $cached ? $column : $virtual->{expr} ) if defined $cached;
+
+	my $present = eval {
+		my ($found) = $self->_dbh->selectrow_array(
+			'SELECT 1 FROM pg_attribute WHERE attrelid = ?::regclass'
+				. ' AND attname = ? AND attnum > 0 AND NOT attisdropped',
+			undef, $TABLE{$type}, $column
+		);
+		return $found ? 1 : 0;
+	};
+	$present = 0 unless defined $present;
+
+	$self->{_generated_column_cache}{$type}{$col} = $present;
+	return $present ? $column : $virtual->{expr};
+} ## end sub _virtual_base
+
 # The raw SQL reference for an already-validated column: a virtual column's grouping
 # expression, or the bare column name. This is what null checks, distinct, and
 # the timeseries top-groups subquery reference.
@@ -590,7 +694,7 @@ sub _measure_expr {
 #     $self->_col_expr( 'suricata', 'severity' );    # "raw->'alert'->>'severity'"
 sub _col_expr {
 	my ( $self, $type, $col ) = @_;
-	return $VIRTUAL{$type}{$col}{expr} if $VIRTUAL{$type} && $VIRTUAL{$type}{$col};
+	return $self->_virtual_base( $type, $col ) if $VIRTUAL{$type} && $VIRTUAL{$type}{$col};
 	return $col;
 }
 
@@ -615,11 +719,90 @@ sub _col_expr {
 sub _value_expr {
 	my ( $self, $type, $col ) = @_;
 	if ( $VIRTUAL{$type} && $VIRTUAL{$type}{$col} ) {
-		my $v = $VIRTUAL{$type}{$col};
-		return $v->{label} // '(' . $v->{expr} . ')';
+		my $base = $self->_virtual_base( $type, $col );
+		my $v    = $VIRTUAL{$type}{$col};
+		return $v->{label} ? $v->{label}->($base) : '(' . $base . ')';
 	}
 	return host_or_text_expr($col);
 }
+
+# Count a column's distinct values in the window by walking an index rather than
+# reading the rows, when that is the better trade.
+#
+# The recursive term is the trick: having found one value, ask for the smallest
+# value greater than it. Against a btree that is a single descent, so the walk
+# visits one index entry per distinct value and never touches the table. Each
+# value found is then checked for a row inside the window, which the timestamp
+# as the index's second key answers with another descent.
+#
+# Whether that is worth doing is decided by skip_scan_viable, which wants both
+# an index of the right shape and few enough values to be worth walking. Getting
+# either wrong is worse than not trying: over a day's window a walk with only a
+# (column, id) index measured ten times slower than the count it replaces.
+#
+# The walk is capped even so, because the cardinality figure is an estimate from
+# a sample. Hitting the cap gives undef rather than an undercount, and the caller
+# counts the rows instead.
+#
+# Args:
+#
+#   - $tbl :: the real table name, out of %TABLE.
+#   - $col :: the column to count. A real column only -- a virtual one is an
+#     expression with no index to lead with, which the caller checks.
+#   - $tc :: the column the window is on, out of %TIME_COL.
+#   - $where :: the window fragment plus any exclusion, already rendered with
+#     quoted literals so it can be spliced into the subquery as-is.
+#
+# Returns: the number of distinct non-null values with at least one row in the
+# window, as an integer. undef when a skip scan is not the right choice for this
+# column, when the walk hit the cap, or when the query failed -- in every case
+# meaning the caller should count the rows instead. An optimization must not
+# turn a working dashboard into an error.
+#
+#     $self->_distinct_by_skip_scan( 'suricata_alerts', 'classification',
+#         'timestamp', $win . $exf );
+#     # 16
+sub _distinct_by_skip_scan {
+	my ( $self, $tbl, $col, $tc, $where ) = @_;
+
+	my $dbh = $self->_dbh;
+	return undef
+		unless skip_scan_viable(
+			dbh          => $dbh,
+			table        => $tbl,
+			column       => $col,
+			time_column  => $tc,
+			max_distinct => $SKIP_SCAN_CAP,
+			cache        => ( $self->{_skip_scan_cache} ||= {} ),
+		);
+
+	# one over the cap, so a full result set is recognisable as "too many"
+	my $walk_limit = $SKIP_SCAN_CAP + 1;
+
+	my $sql = <<"SQL";
+with recursive walk as (
+    (select $col as value from $tbl where $col is not null order by $col limit 1)
+    union all
+    select (select nxt.$col from $tbl nxt where nxt.$col > walk.value order by nxt.$col limit 1)
+    from walk where walk.value is not null
+),
+values_found as (
+    select value from walk where value is not null limit $walk_limit
+)
+select
+    (select count(*) from values_found) as walked,
+    (select count(*) from values_found v
+     where exists (select 1 from $tbl s where s.$col = v.value and $where)) as in_window
+SQL
+
+	my ( $walked, $in_window ) = eval { $dbh->selectrow_array($sql) };
+	return undef unless defined $walked && defined $in_window;
+
+	# the walk was truncated, so in_window is an undercount rather than an answer
+	return undef if $walked > $SKIP_SCAN_CAP;
+
+	return $in_window + 0;
+} ## end sub _distinct_by_skip_scan
 
 # Optional "and classification <> ..." fragment for the exclude_classification
 # option (the dashboard's "hide Generic Protocol Command Decode" toggle). The

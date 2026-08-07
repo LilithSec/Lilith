@@ -17,7 +17,7 @@ use Lilith::CLI::Util qw( esc_parse_set );
 
 sub command_names { 'esc_target_create' }
 
-sub abstract { 'create a escalation target' }
+sub abstract { 'create an escalation target' }
 
 sub usage_desc { '%c esc_target_create %o' }
 
@@ -26,7 +26,7 @@ sub opt_spec {
 		[ 'name=s',  'the name for the new target', { required => 1 } ],
 		[ 'type=s',  'the escalation type',         { required => 1 } ],
 		[ 'set=s@',  'a config item, key=value' ],
-		[ 'desc=s',  'a optional description' ],
+		[ 'desc=s',  'an optional description' ],
 		[ 'disable', 'create the target disabled' ],
 	);
 }

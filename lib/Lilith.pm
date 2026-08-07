@@ -71,8 +71,8 @@ our %alert_columns = (
 # so a new classification means one edit here rather than one per consumer.
 #
 # The empty-string key is deliberate: a record whose classification is missing
-# or empty still needs a label, and gets 'blankC'. Anything listing these for a
-# human to pick from wants to skip it.
+# or empty still needs a label, and gets 'blankC'. Anything offering these for a
+# human to pick from should skip it.
 our %class_map = (
 	'Not Suspicious Traffic'                                      => '!SusT',
 	'Unknown Traffic'                                             => 'UnknownT',
@@ -519,28 +519,51 @@ sub _parse_cape {
 	};
 } ## end sub _parse_cape
 
-=head2 _parse_baphomet
-
-Pull a Baphomet judgment record (top-level C<eve_type> "baphomet") apart into a
-C<baphomet_alerts> row. Kept out of L</parse_eve> for the same reason as
-L</_parse_cape>. Returns undef for an C<event_type> outside the six Baphomet
-emits (found/banish/noted/alert/sighting/sighted) or one listed in this
-instance's C<baphomet_event_ignore>.
-
-Baphomet's offender IP maps to C<src_ip> so the existing top-talker /
-escalation / C<%INET> machinery reuse it; its C<subject> (a non-IP offender,
-e.g. a username) gets its own column. As with the suricata/sagan/cape sources,
-only the scalar fields worth filtering / sorting / grouping by are promoted to
-columns; the nested detail (C<attack>, C<rule>, C<found>, C<marks_set>,
-C<references>, ...) is left in C<raw> and reached via C<< raw->'...' >>.
-
-Baphomet has no flow identity, so C<event_id> is the SHA256 (base64) of
-hostname + kur + timestamp + event_type + rule name + offender (the ip, or the
-subject when there is no ip). The rule name is read from the C<raw> record even
-though C<rule> itself is not promoted to a column.
-
-=cut
-
+# Pull a Baphomet judgment record (top-level eve_type "baphomet") apart into a
+# baphomet_alerts row. Kept out of parse_eve for the same reason as _parse_cape:
+# the shape has nothing in common with an IDS alert.
+#
+# Baphomet's offender IP maps to src_ip so the existing top talker / escalation
+# / %INET machinery reuse it; its subject (a non-IP offender, e.g. a username)
+# gets its own column. As with the suricata/sagan/cape sources, only the scalar
+# fields worth filtering, sorting, or grouping by are promoted to columns. The
+# nested detail (attack, rule, found, marks_set, references, ...) stays in raw
+# and is reached with raw->'...'.
+#
+# Baphomet has no flow identity, so event_id is derived rather than read: the
+# base64 SHA256 of hostname + kur + timestamp + event_type + rule name +
+# offender, where offender is the ip, or the subject when there is no ip. The
+# rule name comes out of the record even though rule itself is not a column.
+#
+# Args:
+#
+#   - $json :: the decoded EVE record as a hash ref, whose eve_type the caller
+#     has already established is "baphomet". The keys read are event_type,
+#     kur, hostname, timestamp, msg, classtype, severity, score, path, ip,
+#     dest_ip, subject, ban_time, recidive, country, and the rule block.
+#   - $opts :: a hash ref of what the record cannot supply on its own:
+#       - instance :: the instance name to record, as configured for this
+#         [eves.*]. Falls back to the record's kur when undef.
+#       - host :: the host the instance runs on, used only when the record
+#         carries no hostname of its own.
+#       - raw :: the original undecoded EVE line, stored verbatim in the raw
+#         jsonb column.
+#
+# Returns: a hash ref keyed by baphomet_alerts column name, ready for
+# insert_alert. A field the record did not carry is undef, which the insert
+# binds as SQL NULL.
+#
+# Returns undef instead, meaning "do not store this", for an event_type outside
+# the six Baphomet emits (found, banish, noted, alert, sighting, sighted) or one
+# this instance lists in baphomet_event_ignore.
+#
+#     my $row = $self->_parse_baphomet( $json,
+#         { instance => 'baphomet', host => 'gate1', raw => $line } );
+#     my $id = $self->insert_alert( type => 'baphomet', row => $row );
+#
+#     # an event type Baphomet does not emit is skipped rather than stored
+#     $self->_parse_baphomet( { event_type => 'muttering' }, {} );
+#     # undef
 sub _parse_baphomet {
 	my ( $self, $json, $opts ) = @_;
 
@@ -1299,7 +1322,7 @@ sub get_short_class_snmp_list {
 
 =head2 search
 
-Searches the specified table and returns a array of found rows. This is a wrapper around
+Searches the specified table and returns an array of found rows. This is a wrapper around
 Lilith::Schema. If you are looking for something more complex, read L<DBIx::Class>,
 L<SQL::Abstract::Classic>, and L<Lilith::Schema>.
 
@@ -1349,7 +1372,7 @@ Below are simple search items that if given will be matched via a basic equality
     # will become "and src_ip = '192.168.1.2'"
     src_ip => '192.168.1.2',
 
-Below are a list of numeric items. The value taken is a array and anything
+Below are a list of numeric items. The value taken is an array and anything
 prefixed '!' with add as a and not equal.
 
     - src_port
@@ -1388,7 +1411,7 @@ Below are a list of string items.
     # will become "and instance like '%foo'"
     instance => '%foo',
 
-class may also be a array. Positive items are ORed together while
+class may also be an array. Positive items are ORed together while
 negated items are ANDed.
 
     # will become "and class in ( 'foo', 'bar' )"
@@ -1820,7 +1843,7 @@ sub search {
 
 =head2 escalation_types
 
-Returns a array ref of the names of the available escalation types,
+Returns an array ref of the names of the available escalation types,
 including any found under the additional namespaces passed to new.
 
     my $types = $lilith->escalation_types;
@@ -1835,7 +1858,7 @@ sub escalation_types {
 
 =head2 escalation_type_info
 
-Returns a hash ref describing a escalation type; its name, description,
+Returns a hash ref describing an escalation type; its name, description,
 and config fields. Dies if the type can not be resolved.
 
     my $info = $lilith->escalation_type_info('Webhook');
@@ -1850,7 +1873,7 @@ sub escalation_type_info {
 
 =head2 escalation_targets
 
-Returns a array ref of every escalation target, sorted by name, with
+Returns an array ref of every escalation target, sorted by name, with
 the config decoded into a hash ref.
 
     my $targets = $lilith->escalation_targets;
@@ -1908,7 +1931,7 @@ sub escalation_target_get {
 =head2 escalation_target_create
 
 Creates a new escalation target and returns its ID. The type must
-resolve to a escalation type module and the config must pass that
+resolve to an escalation type module and the config must pass that
 module's check_config.
 
     my $id = $lilith->escalation_target_create(
@@ -1953,7 +1976,7 @@ sub escalation_target_create {
 
 =head2 escalation_target_update
 
-Updates a escalation target. Any of name, type, config, description,
+Updates an escalation target. Any of name, type, config, description,
 or enabled may be given; unspecified items keep their current value.
 The resulting type/config combination is revalidated.
 
@@ -1992,7 +2015,7 @@ sub escalation_target_update {
 
 =head2 escalation_target_delete
 
-Deletes a escalation target by ID. Past escalations to it are kept,
+Deletes an escalation target by ID. Past escalations to it are kept,
 with their target_id nulled via the FK.
 
     $lilith->escalation_target_delete(3);
@@ -2016,7 +2039,7 @@ sub escalation_target_delete {
 
 =head2 escalate
 
-Escalates a event to one or more escalation targets, recording each
+Escalates an event to one or more escalation targets, recording each
 attempt in the escalations table along with the payload the type
 actually sent. Attempts refused before a send (a unknown or disabled
 target) are recorded as failed too, with target_id null when there is
@@ -2026,7 +2049,7 @@ is deleted. Each recorded escalation ID is also appended to the alert
 row's escalations array, in the same transaction as the insert, so
 anything reading the alert tables can see whether/how many times a
 alert has been escalated without querying the escalations table.
-Returns a array ref with one hash ref per target, each having the
+Returns an array ref with one hash ref per target, each having the
 keys target_id, target_name, escalation_id, status, and error.
 
     my $results = $lilith->escalate(
@@ -2079,7 +2102,7 @@ sub escalate {
 
 	# Records one escalation attempt: inserts the escalations row and appends
 	# its ID to the alert row's escalations array in one transaction, so the
-	# two can not drift. Committed before any send happens so a alert row
+	# two can not drift. Committed before any send happens so an alert row
 	# lock is never held across a slow outbound send.
 	my $record = sub {
 		my ( $row_target_id, $target_name, $status, $error ) = @_;
@@ -2186,7 +2209,7 @@ sub escalate {
 
 =head2 escalation_test
 
-Sends a synthetic test event to a escalation target without recording
+Sends a synthetic test event to an escalation target without recording
 anything in the escalations table. Returns the payload the type sent.
 Dies on failure.
 
@@ -2229,7 +2252,7 @@ sub escalation_test {
 
 =head2 escalations_for
 
-Returns the escalations recorded for a event as a array ref of hash
+Returns the escalations recorded for an event as an array ref of hash
 refs, newest first, each joined with the target's current type as
 target_type. target_name is the name snapshotted at attempt time,
 falling back to the target's current name for rows predating the
@@ -2276,9 +2299,9 @@ sub escalations_for {
 
 =head2 auto_escalations
 
-Returns a array ref of every auto escalation rule, ordered by priority
+Returns an array ref of every auto escalation rule, ordered by priority
 then name, with each row's C<rule> decoded to a hash ref and C<tables>
-to a array ref.
+to an array ref.
 
     my $rules = $lilith->auto_escalations;
 
@@ -2305,7 +2328,7 @@ sub auto_escalations {
 =head2 auto_escalation_get
 
 Fetches a single auto escalation rule by ID, with C<rule> decoded to a
-hash ref and C<tables> to a array ref. Dies if the ID is not numeric or
+hash ref and C<tables> to an array ref. Dies if the ID is not numeric or
 no such rule exists.
 
     my $rule = $lilith->auto_escalation_get(3);
@@ -2478,7 +2501,7 @@ C<table> selects the alert table (default suricata), C<go_back_minutes>
 the window (default 60), and C<limit> caps how many recent alerts are
 fetched (default 500). Returns a hash ref with C<table>,
 C<go_back_minutes>, C<scanned>, C<matched>, the resolved C<targets> and
-any C<unknown_targets> the rule's actions name, and C<matches> (a array
+any C<unknown_targets> the rule's actions name, and C<matches> (an array
 ref of light weight per alert summaries).
 
     my $preview = $lilith->auto_escalation_preview(
@@ -2596,9 +2619,9 @@ sent and nothing is stamped; the returned summary shows what would have
 happened. C<requested_by> is prefixed onto the rule name when recording
 each escalation (default "auto").
 
-Returns a array ref with one summary hash ref per table processed, each
+Returns an array ref with one summary hash ref per table processed, each
 having the keys C<table>, C<scanned>, C<rules>, C<matched>, C<dry_run>,
-and C<escalations> (a array ref of per-match details).
+and C<escalations> (an array ref of per-match details).
 
     my $summaries = $lilith->auto_escalate(
                                             go_back_minutes => 5,
@@ -2895,7 +2918,7 @@ sub _auto_decode_rule {
 	return ref($decoded) eq 'HASH' ? $decoded : {};
 } ## end sub _auto_decode_rule
 
-# Decodes a tables column into a array ref, accepting either a expanded array
+# Decodes a tables column into an array ref, accepting either a expanded array
 # ref (DBD::Pg default) or a raw PostgreSQL array literal. The literal form is
 # parsed by hand rather than with a JSON decode: Postgres writes {a,b} with
 # optional double quotes, which is not JSON.
@@ -2971,7 +2994,7 @@ sub _auto_check_tables {
 	return \@out;
 } ## end sub _auto_check_tables
 
-# Builds a PostgreSQL array literal from a array ref, quoting each element.
+# Builds a PostgreSQL array literal from an array ref, quoting each element.
 # Every element is quoted whether it needs it or not, and embedded quotes and
 # backslashes are escaped, so a value carrying a comma or a brace cannot break
 # out of its element. The result is bound as a single value and cast on the
@@ -3285,9 +3308,6 @@ L<https://cpanratings.perl.org/d/Lilith>
 L<https://metacpan.org/release/Lilith>
 
 =back
-
-
-=head1 ACKNOWLEDGEMENTS
 
 
 =head1 LICENSE AND COPYRIGHT

@@ -4,20 +4,20 @@
 % #   ...markup...
 % #   % end
 % #
-% # title        - header text
-% # body         - required content block
-% # header_extra - optional block rendered to the right of the title, which also
-% #                turns the header into a spaced flex row (for action buttons
-% #                and status spans)
-% # footer       - optional content block, rendered in a .card-footer; a block
-% #                that renders blank leaves the card without a footer at all
-% # title_span   - wrap the title in a <span>; on by default when header_extra
-% #                is given, since the flex row needs it as a child
-% # card_id      - optional id for the outer card element
-% # body_id      - optional id for the body wrapper, for bodies filled by JS
-% # card_class   - classes after .card        (default 'border-secondary mb-3')
-% # header_class - extra .card-header classes (default 'py-1 small text-muted')
-% # body_class   - wrapper around the body    (default 'card-body py-2')
+% # - title :: header text
+% # - body :: required content block
+% # - header_extra :: optional block rendered to the right of the title, which
+% #   also turns the header into a spaced flex row (for action buttons and
+% #   status spans)
+% # - footer :: optional content block, rendered in a .card-footer; a block that
+% #   renders blank leaves the card without a footer at all
+% # - title_span :: wrap the title in a <span>; on by default when header_extra
+% #   is given, since the flex row needs it as a child
+% # - card_id :: optional id for the outer card element
+% # - body_id :: optional id for the body wrapper, for bodies filled by JS
+% # - card_class :: classes after .card (default 'border-secondary mb-3')
+% # - header_class :: extra .card-header classes (default 'py-1 small text-muted')
+% # - body_class :: wrapper around the body (default 'card-body py-2')
 % #
 % # Parameters are named so they cannot collide with a page's own stash keys —
 % # an unpassed 'id' would otherwise fall through to the event/record id.

@@ -2,10 +2,10 @@
 % # table is one edit rather than one per picker. Use:
 % #   %= include 'partials/_table_options', selected => $table
 % #
-% # selected - the table key to mark selected; omit for none
-% # lc       - true to label each option with its bare key (suricata) rather
-% #            than its display name (Suricata), matching the lowercase
-% #            pickers on the auto escalation page
+% # - selected :: the table key to mark selected; omit for none
+% # - lc :: true to label each option with its bare key (suricata) rather than
+% #   its display name (Suricata), matching the lowercase pickers on the auto
+% #   escalation page
 % my $selected = stash('selected') // '';
 % my $bare     = stash('lc');
 % for my $alert_table (@{ $self->alert_tables }) {

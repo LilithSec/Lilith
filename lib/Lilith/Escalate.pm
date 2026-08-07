@@ -43,7 +43,7 @@ methods.
 
     - description :: A one line description of the type.
 
-    - config_fields :: A array ref of hash refs describing the config
+    - config_fields :: An array ref of hash refs describing the config
       items the type takes. Each item has the keys 'name', 'label',
       'type', and optionally 'required' and 'default'. The web UI
       renders the config form for a target from this, so new types
@@ -51,12 +51,12 @@ methods.
 
         - string  :: a single line of text.
         - secret  :: like string, but write only; never returned to
-          the browser and kept as stored when left blank on a update.
+          the browser and kept as stored when left blank on an update.
         - integer :: a string constrained to digits in the UI.
         - boolean :: a checkbox, stored as 1 or 0.
         - enum    :: a drop down. The item also carries an 'options'
           array ref of the allowed string values.
-        - list    :: a repeatable set of rows, stored as a array ref.
+        - list    :: a repeatable set of rows, stored as an array ref.
           With no 'columns' it is a list of strings; with a 'columns'
           array ref of { name, placeholder, pattern } descriptors each
           row is a hash ref keyed by the column names.
@@ -79,8 +79,8 @@ allowing sites to ship their own types outside of the dist.
 
 =head2 namespaces
 
-Returns the namespaces to search for type modules as a array ref. The
-optional arg is a array ref of additional namespaces, searched after
+Returns the namespaces to search for type modules as an array ref. The
+optional arg is an array ref of additional namespaces, searched after
 the default C<Lilith::Escalate::Type>.
 
     my $namespaces = Lilith::Escalate->namespaces( ['My::Escalate'] );
@@ -148,8 +148,8 @@ sub type_module {
 
 =head2 types
 
-Returns a array ref of the names of every type module found under the
-searched namespaces, sorted. The optional arg is a array ref of
+Returns an array ref of the names of every type module found under the
+searched namespaces, sorted. The optional arg is an array ref of
 additional namespaces to search.
 
     my $types = Lilith::Escalate->types;
@@ -186,7 +186,7 @@ sub types {
 =head2 type_info
 
 Returns a hash ref describing a type: its name, description, and
-config fields. The optional second arg is a array ref of additional
+config fields. The optional second arg is an array ref of additional
 namespaces to search. Dies if the type can not be resolved.
 
     my $info = Lilith::Escalate->type_info('Webhook');

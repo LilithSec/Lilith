@@ -2,8 +2,8 @@ package Lilith::Allani;
 
 use strict;
 use warnings;
-use Lilith::DBUtil
-	qw( clamped_int connect_cached_dbh host_or_text_expr measure_expr time_window_clause validate_bucket );
+use Lilith::DBUtil qw( clamped_int connect_cached_dbh host_or_text_expr measure_expr skip_scan_viable time_window_clause
+	validate_bucket );
 
 =head1 NAME
 
@@ -430,12 +430,32 @@ sub total {
 The number of distinct non-null values of a dimension in the window. C<column>
 must be one of the source's C<dims>. Aggregate sources only.
 
+Counting the rows means reading every one in the window to arrive at a single
+small number, which over a wide window is most of the table however few distinct
+values there turn out to be. Where a C<< (column, timestamp) >> index exists
+this instead walks the column's distinct values through it and asks whether each
+has a row in the window, so the cost follows the number of values rather than
+the number of rows. Allani ships those indexes from schema version 9; without
+one the rows are counted as before.
+
+The pairing matters, and a C<< (column, id) >> index will not do. It orders a
+value's rows by insertion, so asking whether a host appears in the last day
+walks every older entry for that host first -- measured at ten times slower than
+simply counting the rows. Ordering each value's entries by time makes the same
+question one index descent, and about seventy times faster than counting.
+
 =cut
 
 sub distinct {
 	my ( $self, %opts )  = @_;
 	my ( $meta, $tscol ) = $self->_agg_meta( $opts{source} );
 	my $col = $self->_dim( $meta, $opts{column} );
+
+	if ( $self->_skip_scan_ok( $meta->{table}, $col, $tscol ) ) {
+		my $count = $self->_distinct_by_skip_scan( $meta->{table}, $tscol, \%opts, $col );
+		return $count if defined $count;
+	}
+
 	my @binds;
 	my $tc  = $self->_time_clause( $tscol, \%opts, \@binds );
 	my $sth = $self->_dbh->prepare("SELECT count(distinct $col) FROM $meta->{table} WHERE $tc");
@@ -478,7 +498,9 @@ in L</top>.
 
 With C<group_by> (a dimension) the counts are split per value and each row also
 carries C<group>; C<top_groups> (default 5) restricts the split to that many
-busiest values, so a stacked chart stays to a handful of series.
+busiest values, so a stacked chart stays to a handful of series. The busiest are
+picked from the bucketed counts rather than by a second look at the table, so a
+grouped series costs one pass over the window rather than two.
 
 =cut
 
@@ -488,7 +510,15 @@ sub timeseries {
 	my $bucket = $self->bucket( $opts{bucket}, $opts{go_back_minutes} );
 	my $magg   = $self->_measure_expr( $src, $opts{measure} );
 	my $tbl    = $meta->{table};
-	my $bexpr  = "to_char(date_trunc('$bucket', $tscol), 'YYYY-MM-DD\"T\"HH24:MI:SS')";
+
+	# Bucket by the truncated timestamp and label it only on the way out. The
+	# label is what the caller wants, but formatting it before the grouping means
+	# running to_char once per row and then grouping on the resulting string --
+	# eight million formats and string comparisons to produce a hundred or so
+	# rows. Grouping on the timestamp and formatting the result instead measured
+	# 3.9x quicker over a day and 2.2x over a month.
+	my $trunc  = "date_trunc('$bucket', $tscol)";
+	my $format = q{'YYYY-MM-DD"T"HH24:MI:SS'};
 
 	my @wbinds;
 	my $tc = $self->_time_clause( $tscol, \%opts, \@wbinds );
@@ -498,22 +528,40 @@ sub timeseries {
 		my $gexpr = host_or_text_expr($g);
 		my $k     = clamped_int( $opts{top_groups}, 5, 1, 20 );
 
-		# Restrict the split to the top-k group values in the window (its own copy
-		# of the window clause, so its binds repeat), then bucket per group.
-		my $sql
-			= "SELECT $bexpr AS bucket, $gexpr AS \"group\", $magg AS count FROM $tbl"
-			. " WHERE $tc AND $g IS NOT NULL AND $g IN ("
-			. "SELECT $g FROM $tbl WHERE $tc AND $g IS NOT NULL GROUP BY $g ORDER BY $magg DESC, $g ASC LIMIT ?)"
-			. " GROUP BY 1, 2 ORDER BY 1 ASC, 2 ASC";
+		# Bucket every group once, then pick the busiest k from that result
+		# rather than going back to the table for them. The obvious way round --
+		# a subquery naming the top groups, joined against a second pass -- reads
+		# the window twice, and the window is the expensive part: over 30 days of
+		# an 8 million row store the two-pass form took 7.9 seconds against 5.5
+		# for this one. What is ranked here is already aggregated, so it is a few
+		# hundred rows however wide the window is.
+		my $sql = <<"SQL";
+WITH per_bucket AS (
+    SELECT $trunc AS bucket_ts, $gexpr AS grp, $magg AS count
+    FROM $tbl WHERE $tc AND $g IS NOT NULL
+    GROUP BY 1, 2
+),
+busiest AS (
+    SELECT grp FROM per_bucket GROUP BY grp ORDER BY sum(count) DESC, grp ASC LIMIT ?
+)
+SELECT to_char(per_bucket.bucket_ts, $format) AS bucket, per_bucket.grp AS "group", per_bucket.count
+FROM per_bucket JOIN busiest USING (grp)
+ORDER BY per_bucket.bucket_ts ASC, 2 ASC
+SQL
 		my $sth = $self->_dbh->prepare($sql);
-		$sth->execute( @wbinds, @wbinds, $k );
+		$sth->execute( @wbinds, $k );
 		my $rows = $sth->fetchall_arrayref( {} );
 		$sth->finish;
 		return $rows || [];
 	} ## end if ( defined $opts{group_by} && $opts{group_by...})
 
-	my $sth
-		= $self->_dbh->prepare("SELECT $bexpr AS bucket, $magg AS count FROM $tbl WHERE $tc GROUP BY 1 ORDER BY 1 ASC");
+	# same reasoning as the grouped branch: bucket on the timestamp, label after
+	my $sql = <<"SQL";
+SELECT to_char(bucket_ts, $format) AS bucket, count
+FROM (SELECT $trunc AS bucket_ts, $magg AS count FROM $tbl WHERE $tc GROUP BY 1) bucketed
+ORDER BY bucket_ts ASC
+SQL
+	my $sth = $self->_dbh->prepare($sql);
 	$sth->execute(@wbinds);
 	my $rows = $sth->fetchall_arrayref( {} );
 	$sth->finish;
@@ -686,6 +734,119 @@ sub _top_values {
 	$sth->finish;
 	return $rows || [];
 } ## end sub _top_values
+
+# How many distinct values a skip scan walks before giving up and letting the
+# caller count rows instead. Each value costs one index descent, so a few
+# thousand is still quick, while a column with far more than this is one where
+# reading the rows outright wins.
+my $SKIP_SCAN_CAP = 5000;
+
+# Whether a skip scan is worth attempting for $column on $table. The decision
+# itself -- an index leading with the column and the timestamp as its second
+# key, and few enough distinct values to be worth walking -- lives in
+# Lilith::DBUtil, since Lilith::Stats asks the same question of the alert
+# tables. The cache belongs to this object because the two readers are pointed
+# at different databases.
+#
+# Args:
+#
+#   - $table :: the table to look at, from the source metadata.
+#   - $column :: the column being counted, already validated by _dim.
+#   - $tscol :: the timestamp column the window is on, from _ts_col.
+#
+# Returns: 1 when a skip scan should be tried, 0 otherwise.
+#
+#     $self->_skip_scan_ok( 'syslog', 'host', 'r_isodate' );      # 1
+#     $self->_skip_scan_ok( 'syslog', 'facility', 'r_isodate' );  # 0, no index
+sub _skip_scan_ok {
+	my ( $self, $table, $column, $tscol ) = @_;
+
+	return skip_scan_viable(
+		dbh          => $self->_dbh,
+		table        => $table,
+		column       => $column,
+		time_column  => $tscol,
+		max_distinct => $SKIP_SCAN_CAP,
+		cache        => ( $self->{_skip_scan_cache} ||= {} ),
+	);
+} ## end sub _skip_scan_ok
+
+# Count the distinct values of a column in the window by walking the index
+# rather than reading the rows.
+#
+# The recursive term is the trick: having found one value, ask for the smallest
+# value greater than it. Against a btree that is a single descent, so the walk
+# visits one index entry per distinct value and never touches the table. Each
+# value found is then checked for a row inside the window, which the second key
+# of the same index answers with another descent.
+#
+# The walk is capped so a column with far more values than expected cannot turn
+# a cheap query into thousands of descents. Hitting the cap gives undef rather
+# than a wrong answer, and the caller counts rows instead. The cap earns its
+# keep even behind the index check, because pg_stats estimates cardinality from
+# a sample and can be badly wrong -- on the store this was written against it
+# put pid at 6731 distinct values where the real figure was 227442.
+#
+# Args:
+#
+#   - $table :: the table to read, from the source metadata.
+#   - $tscol :: the timestamp column to window on, from _ts_col.
+#   - $opts :: the caller's option hash ref, passed to _time_clause.
+#   - $column :: the column to count. Must be the first key of a btree index
+#     whose second key is $tscol -- see _skip_scan_ok, which the caller
+#     checks first.
+#
+# Returns: the number of distinct non-null values with at least one row in the
+# window, as an integer. undef when the column has more than $SKIP_SCAN_CAP
+# distinct values, meaning the caller should count rows instead, or when the
+# query failed -- an optimization must not turn a working page into an error.
+#
+#     $self->_distinct_by_skip_scan( 'syslog', 'r_isodate', \%opts, 'host' );
+#     # 9
+#
+#     # more values than the cap
+#     $self->_distinct_by_skip_scan( 'syslog', 'r_isodate', \%opts, 'pid' );
+#     # undef
+sub _distinct_by_skip_scan {
+	my ( $self, $table, $tscol, $opts, $column ) = @_;
+
+	my @binds;
+	my $tc = $self->_time_clause( $tscol, $opts, \@binds );
+
+	# one over the cap, so a full result set is recognisable as "too many"
+	my $walk_limit = $SKIP_SCAN_CAP + 1;
+
+	my $sql = <<"SQL";
+WITH RECURSIVE walk AS (
+    (SELECT $column AS value FROM $table WHERE $column IS NOT NULL ORDER BY $column LIMIT 1)
+    UNION ALL
+    SELECT (SELECT next_row.$column FROM $table next_row
+            WHERE next_row.$column > walk.value ORDER BY next_row.$column LIMIT 1)
+    FROM walk WHERE walk.value IS NOT NULL
+),
+values_found AS (
+    SELECT value FROM walk WHERE value IS NOT NULL LIMIT $walk_limit
+)
+SELECT
+    (SELECT count(*) FROM values_found) AS walked,
+    (SELECT count(*) FROM values_found v
+     WHERE EXISTS (SELECT 1 FROM $table s WHERE s.$column = v.value AND $tc)) AS in_window
+SQL
+
+	my ( $walked, $in_window ) = eval {
+		my $sth = $self->_dbh->prepare($sql);
+		$sth->execute(@binds);
+		my $row = $sth->fetchrow_arrayref;
+		$sth->finish;
+		return $row ? ( $row->[0], $row->[1] ) : ( undef, undef );
+	};
+	return undef unless defined $walked && defined $in_window;
+
+	# the walk was truncated, so in_window is an undercount rather than an answer
+	return undef if $walked > $SKIP_SCAN_CAP;
+
+	return $in_window + 0;
+} ## end sub _distinct_by_skip_scan
 
 # Resolve an aggregate source to ( $meta, $timestamp_column, $source_name ).
 # Aggregation is over a single real table, so http_all (a view) and unknown

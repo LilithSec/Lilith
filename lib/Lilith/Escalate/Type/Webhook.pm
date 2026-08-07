@@ -8,7 +8,7 @@ use Lilith::Escalate ();
 
 =head1 NAME
 
-Lilith::Escalate::Type::Webhook - Escalate a event via a HTTP POST of JSON.
+Lilith::Escalate::Type::Webhook - Escalate an event via a HTTP POST of JSON.
 
 =head1 VERSION
 
@@ -21,7 +21,7 @@ our $VERSION = '0.0.1';
 =head1 DESCRIPTION
 
 POSTs the event as JSON to a configured URL. When a apikey is set it
-is sent as a C<Authorization: Bearer> header. See L<Lilith::Escalate>
+is sent as an C<Authorization: Bearer> header. See L<Lilith::Escalate>
 for the type interface.
 
 =head1 METHODS

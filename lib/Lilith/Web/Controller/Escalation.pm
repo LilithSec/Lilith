@@ -22,8 +22,8 @@ letting the web UI change where alerts are sent.
 
 Secret config fields (per the type's config_fields spec) are never
 sent to the browser; they are returned masked as empty strings with
-the field name listed in secrets_set, and a empty secret submitted on
-a update means "keep the current value".
+the field name listed in secrets_set, and an empty secret submitted on
+an update means "keep the current value".
 
 =cut
 
@@ -150,9 +150,9 @@ sub targets {
 
 =head2 target_save
 
-Creates or updates a escalation target from a JSON body with the keys
+Creates or updates an escalation target from a JSON body with the keys
 name, type, config, description, enabled, and optionally id (update
-when present). On a update, empty secret fields keep their stored
+when present). On an update, empty secret fields keep their stored
 value.
 
 =cut
@@ -219,7 +219,7 @@ sub target_save {
 
 =head2 target_delete
 
-Deletes a escalation target by ID.
+Deletes an escalation target by ID.
 
 =cut
 
@@ -244,7 +244,7 @@ sub target_delete {
 
 =head2 target_test
 
-Sends a synthetic test event to a escalation target. The blocking
+Sends a synthetic test event to an escalation target. The blocking
 send runs in a subprocess so the event loop stays responsive.
 
 =cut
@@ -283,7 +283,7 @@ sub target_test {
 
 =head2 escalate
 
-Escalates a event to one or more targets from a JSON body with the
+Escalates an event to one or more targets from a JSON body with the
 keys table, id, target_ids, and optionally note and requested_by. The
 blocking sends run in a subprocess so the event loop stays responsive.
 
@@ -355,7 +355,7 @@ sub escalate {
 
 =head2 history
 
-Returns the escalations recorded for a event as JSON, newest first,
+Returns the escalations recorded for an event as JSON, newest first,
 with the raw payload decoded.
 
 =cut
@@ -393,14 +393,34 @@ sub history {
 	$self->render( json => { escalations => $escalations } );
 } ## end sub history
 
-=head2 _masked_targets
-
-Fetches every escalation target with secret config values (per the
-type's config_fields) replaced by empty strings and listed under
-secrets_set.
-
-=cut
-
+# Every escalation target, safe to hand to the browser: each config value the
+# target's type declares as a secret is blanked, and the names of the ones that
+# were set are listed separately.
+#
+# The frontend needs both halves. Blanking alone would make a configured
+# password indistinguishable from an empty one, so the edit form could not show
+# that a secret is already in place, and saving the form back would silently
+# wipe it. secrets_set is what lets the form say "set, leave blank to keep".
+#
+# A type whose module will not load is left alone rather than skipped: its
+# fields cannot be read, so nothing is known to be a secret. That errs toward
+# showing a target that cannot be edited rather than leaking a value.
+#
+# Args: none beyond the controller.
+#
+# Returns: an array ref of target hash refs, as escalation_targets returns them
+# but with two changes -- every secret in config is now the empty string, and
+# secrets_set holds the names of those that had a value. enabled is forced to
+# 1 or 0 so it encodes as a JSON number rather than whatever the database gave.
+#
+#     my $targets = $self->_masked_targets;
+#     # [ {
+#     #     name        => 'soc-webhook',
+#     #     type        => 'webhook',
+#     #     enabled     => 1,
+#     #     config      => { url => 'https://soc.example.org/hook', token => '' },
+#     #     secrets_set => [ 'token' ],
+#     # } ]
 sub _masked_targets {
 	my $self = shift;
 
@@ -426,13 +446,28 @@ sub _masked_targets {
 	return $targets;
 } ## end sub _masked_targets
 
-=head2 _type_infos
-
-Returns the type_info for every available escalation type, skipping
-any that fail to load.
-
-=cut
-
+# What the escalation type picker and its per-type config form are built from:
+# the type_info of every escalation type that can be loaded.
+#
+# A type that dies on load is dropped rather than fatal. The type list comes
+# from scanning namespaces, so a half-installed or third-party module is a
+# normal thing to meet, and one bad module must not cost the page every other
+# type.
+#
+# Args: none beyond the controller.
+#
+# Returns: an array ref of type_info hash refs, in the order escalation_types
+# gave them. Each carries at least the type name and its fields -- the config
+# the type accepts, which the form renders from. Empty when nothing loads.
+#
+#     my $infos = $self->_type_infos;
+#     # [ {
+#     #     type   => 'webhook',
+#     #     fields => [
+#     #         { name => 'url',   type => 'string' },
+#     #         { name => 'token', type => 'secret' },
+#     #     ],
+#     # }, { type => 'email', fields => [ ... ] } ]
 sub _type_infos {
 	my $self = shift;
 

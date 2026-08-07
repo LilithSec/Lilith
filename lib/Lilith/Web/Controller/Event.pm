@@ -158,14 +158,45 @@ sub pcap {
 	);
 } ## end sub pcap
 
-=head2 _virani_fetch_args
-
-Builds the ( BPF filter, start Time::Piece, end Time::Piece ) for a Virani PCAP
-fetch from a Suricata event, widening the window by $buffer seconds on each end.
-Dies if the event lacks the fields needed to build the query.
-
-=cut
-
+# Turn an event into the arguments a Virani PCAP fetch wants: a BPF filter for
+# the flow and the window to look for it in.
+#
+# The filter matches both endpoints rather than a direction, so the reply
+# traffic comes back with the request. Ports are added only when both are
+# present and numeric -- an event without them (ICMP, say) still gets a usable
+# host-pair filter rather than a broken expression.
+#
+# The window is widened by $buffer on each end because flow_start and timestamp
+# bound the flow as the sensor saw it, and the capture on disk is rotated on its
+# own schedule. Without the slack the handshake or the tail of the conversation
+# routinely falls outside the query.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $event :: the event as a hash ref, straight off the alerts table. Needs
+#     src_ip and dest_ip, plus flow_start and timestamp as anything
+#     Time::Piece::Guess can read. src_port and dest_port are used when both
+#     are set and numeric.
+#   - $buffer :: seconds to widen the window by at each end. Optional, 60 when
+#     undef.
+#
+# Returns: a three element list -- the BPF filter as a string, and the start
+# and end as Time::Piece objects.
+#
+# Dies rather than returning something unusable when the event cannot describe
+# a flow: "event has no source/destination IP\n" without both addresses,
+# "could not parse flow_start\n" or "could not parse timestamp\n" when a bound
+# will not parse. The caller turns these into the error shown on the page.
+#
+#     my ( $filter, $start, $end ) = _virani_fetch_args( $event );
+#     # 'host 192.0.2.10 and host 198.51.100.7 and ( port 44321 or port 443 )'
+#     # start and end are the flow bounds, each 60 seconds wider
+#
+#     # no ports on the event, so the flow is matched by address alone
+#     my ( $filter ) = _virani_fetch_args( { src_ip => '192.0.2.10', dest_ip => '198.51.100.7', ... } );
+#     # 'host 192.0.2.10 and host 198.51.100.7'
 sub _virani_fetch_args {
 	my ( $event, $buffer ) = @_;
 	$buffer = 60 unless defined $buffer;
@@ -193,26 +224,51 @@ sub _virani_fetch_args {
 	return ( $filter, $start, $end );
 } ## end sub _virani_fetch_args
 
-=head2 _log_links
-
-Builds the "logs around this event" deep-links into the Allani C</logs> page,
-as an array ref of C<< { label, url } >>. One link keys off the event's host
-(syslog on that host, matching both the FQDN and its short first-label form
-unless the host is an IP); then, for each endpoint IP the event carries (source and
-destination), two more: that IP as the client of the interleaved http
-(access+error) logs, and that IP as a substring of the syslog messages -- so the
-dropdown offers searching for either address either way. A blank or duplicated
-field is skipped. When the event time parses, the links anchor C</logs> on it
-(C<around>) with a C<window> of C<$LOG_WINDOW> minutes either side, so the view
-shows the log lines around the alert rather than merely those since it;
-otherwise they fall back to the default now-relative window. Returns an empty
-list for no event.
-
-=cut
-
 # minutes on each side of an event the "logs around this event" links span.
 my $LOG_WINDOW = 60;
 
+# The Logs dropdown on the event view: deep links into the Allani /logs page,
+# each already filtered and windowed so it lands on the log lines that go with
+# this alert.
+#
+# One link comes off the event's host, and two off each endpoint IP -- that
+# address as the client of the interleaved http logs, and that address as a
+# substring of the syslog messages. Both angles are offered for both endpoints
+# because which one holds the answer is not known in advance: an attacker may
+# appear as the client of a request or only as a string in something a daemon
+# logged.
+#
+# The host link matches the FQDN and its first label together, since a syslog
+# store may record either. That is skipped when the host is an IP, where a
+# leading label means nothing.
+#
+# Links anchor on the event's own time (around) with a window either side, so
+# the view opens on what surrounded the alert rather than everything since. An
+# unparseable time falls back to /logs' default now-relative window rather than
+# dropping the link.
+#
+# Args:
+#
+#   - $event :: the event as a hash ref, straight off the alerts table. host,
+#     src_ip, and dest_ip are what links are built from; the timestamp comes
+#     from timestamp, stop, or start, whichever the table has. undef is
+#     allowed and yields no links.
+#
+# Returns: an array ref of { label, url } hash refs, in menu order: the host
+# link first, then source and destination. label is what the menu shows, url is
+# an absolute path with its query already built. A blank or repeated address is
+# skipped, so a flow whose source and destination match yields one pair, and an
+# event with neither a host nor an address yields [].
+#
+#     my $links = $self->_log_links($event);
+#     # [ { label => 'syslog · host gate1.example.org / gate1',
+#     #     url   => '/logs?source=syslog&host=gate1.example.org+gate1&around=...&window=60' },
+#     #   { label => 'http · client (src) 192.0.2.10',
+#     #     url   => '/logs?source=http_all&client_ip=192.0.2.10&around=...&window=60' },
+#     #   { label => 'syslog · message (src) 192.0.2.10', url => '...' } ]
+#
+#     $self->_log_links(undef);
+#     # []
 sub _log_links {
 	my ( $self, $event ) = @_;
 	return [] unless $event;
@@ -504,13 +560,42 @@ sub cape_result {
 	return;
 } ## end sub cape_result
 
-=head2 _load_event
-
-Fetches a single event by table and id, decoding its raw JSON into a hashref
-when possible. Returns C<($event, $error)>.
-
-=cut
-
+# Fetch one event by table and id, with its raw EVE record decoded so the page
+# can walk it. Every action on this controller that needs an event goes through
+# here, so they all agree on what an event looks like and on how a failure to
+# fetch one is reported.
+#
+# The search is run with a year of go_back_minutes. An id is unique on its own,
+# so the time window is only in the way -- without this an event older than the
+# default window would 404 rather than open.
+#
+# Decoding is best effort at two levels. raw is promoted from its JSON text to
+# a hash ref, and for a baphomet row the EVE record it judged, nested under
+# raw->{raw}, is promoted too when it arrived as a string -- that is what lets
+# the protocol cards render a Baphomet verdict the same as the alert behind it.
+# Either promotion silently leaves the value alone when it will not decode,
+# since an event with unreadable raw is still worth showing.
+#
+# Args:
+#
+#   - $table :: which alert table to read, one of suricata, sagan, cape, or
+#     baphomet. Passed through to Lilith::search, which rejects anything else.
+#   - $id :: the row id, as it appears in the URL.
+#
+# Returns: a two element list, ( $event, $error ).
+#
+# $event is the row as a hash ref keyed by column name, with raw decoded, or
+# undef when no row has that id. $error is undef on success, or the message
+# search died with -- an unreachable database, an unknown table. Both undef
+# means the query worked and matched nothing, which the caller shows as a
+# missing event rather than an error.
+#
+#     my ( $event, $error ) = $self->_load_event( 'suricata', 4211 );
+#     # $event->{signature} is 'ET SCAN Potential SSH Scan'
+#     # $event->{raw} is the decoded EVE record as a hash ref
+#
+#     my ( $event, $error ) = $self->_load_event( 'suricata', 999999999 );
+#     # ( undef, undef ) -- no such event, but nothing went wrong
 sub _load_event {
 	my ( $self, $table, $id ) = @_;
 
@@ -558,14 +643,38 @@ sub _load_event {
 	return ( $event, $error );
 } ## end sub _load_event
 
-=head2 _zip_with_password
-
-Given a member name and raw bytes, returns the bytes of a zip archive
-containing the data under that member name, encrypted with the "infected"
-password via the system C<zip> command. Dies on failure.
-
-=cut
-
+# Wrap a request or response body in a password protected zip before it is
+# served, so a browser, a mail gateway, or an antivirus scanner does not open or
+# quarantine what may be a live sample on the way past.
+#
+# The password is the conventional "infected". It is not a secret and is not
+# meant to be one -- it only stops the archive being unpacked by accident, which
+# is why it is written here in the clear rather than configured.
+#
+# Done by shelling out to zip rather than with a Perl module because the
+# encryption formats the archive modules produce are not the one every
+# desktop unzip tool reads without complaint. Everything happens under a
+# File::Temp directory that is removed when it goes out of scope.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $member :: the name the data gets inside the archive, e.g.
+#     'event-4211-response.bin'. Also the temp file name, so it must be a bare
+#     filename rather than a path.
+#   - $bytes :: the body itself, as raw bytes. Written and read back binary, so
+#     it survives whatever encoding the body was in.
+#
+# Returns: the zip archive as a string of raw bytes, ready to be handed
+# straight to render( data => ... ).
+#
+# Dies on any failure rather than returning a partial archive: "zip command
+# failed\n" when zip is missing or exits non-zero, or the errno message when
+# the temp files cannot be written or read back.
+#
+#     my $zipdata = _zip_with_password( 'event-4211-response.bin', $body );
+#     $self->render( data => $zipdata, format => 'zip' );
 sub _zip_with_password {
 	my ( $member, $bytes ) = @_;
 

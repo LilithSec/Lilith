@@ -3,8 +3,8 @@
 % # the URLs, so each chip is a plain link. Use:
 % #   %= include 'partials/_filter_chips', active => $self->filter_chips(\@filter_fields)
 % #
-% # active - the hash ref filter_chips returned. Nothing renders when it holds
-% #          no chips, so a page can include this unconditionally.
+% # - active :: the hash ref filter_chips returned. Nothing renders when it
+% #   holds no chips, so a page can include this unconditionally.
 % my $active = stash('active');
 % if ( @{ $active->{chips} } ) {
 <div class="d-flex flex-wrap align-items-center gap-1 mb-2">

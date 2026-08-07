@@ -2,9 +2,9 @@
 % # modal and lookup live in the layout; the page JS only binds the class. Use:
 % #   %= include 'partials/_info_btn', kind => 'domain', value => $http->{hostname}
 % #
-% # kind        - 'ip' or 'domain', picking the data attribute and bound class
-% # value       - the IP or domain to look up
-% # extra_class - extra classes, e.g. the 'ms-1' the inline uses want
+% # - kind :: 'ip' or 'domain', picking the data attribute and bound class
+% # - value :: the IP or domain to look up
+% # - extra_class :: extra classes, e.g. the 'ms-1' the inline uses want
 % my $kind        = stash('kind');
 % my $extra_class = stash('extra_class') // '';
 % my $data_attr   = $kind eq 'ip' ? 'data-ip' : 'data-domain';

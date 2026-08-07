@@ -13,7 +13,7 @@ use Lilith::CLI::Util qw( esc_lookup_target );
 
 sub command_names { 'esc_target_delete' }
 
-sub abstract { 'delete a escalation target' }
+sub abstract { 'delete an escalation target' }
 
 sub usage_desc { '%c esc_target_delete %o' }
 

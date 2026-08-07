@@ -6,12 +6,12 @@
 % #   ...markup...
 % #   % end
 % #
-% # id       - modal element id
-% # title    - header text
-% # dialog   - extra .modal-dialog classes (size / scrollable); none by default
-% # title_id - id for the <h6>, for modals whose title is rewritten by JS
-% # body     - required content block
-% # footer   - optional content block, rendered in a .modal-footer
+% # - id :: modal element id
+% # - title :: header text
+% # - dialog :: extra .modal-dialog classes (size / scrollable); none by default
+% # - title_id :: id for the <h6>, for modals whose title is rewritten by JS
+% # - body :: required content block
+% # - footer :: optional content block, rendered in a .modal-footer
 % my $dialog   = stash('dialog') // '';
 % my $title_id = stash('title_id');
 % my $footer   = stash('footer');

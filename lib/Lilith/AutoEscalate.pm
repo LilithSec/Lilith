@@ -87,7 +87,7 @@ sub check_rule {
 	my ( $class, $rule ) = @_;
 
 	if ( ref($rule) ne 'HASH' ) {
-		die("rule must be a object\n");
+		die("rule must be an object\n");
 	}
 
 	if ( ref( $rule->{match} ) ne 'HASH' ) {
@@ -102,7 +102,7 @@ sub check_rule {
 	foreach my $action ( @{ $rule->{actions} } ) {
 		my $where = 'actions[' . $i . ']';
 		if ( ref($action) ne 'HASH' ) {
-			die( $where . " must be a object\n" );
+			die( $where . " must be an object\n" );
 		}
 		if ( ref( $action->{escalate_to} ) ne 'ARRAY' || !@{ $action->{escalate_to} } ) {
 			die( $where . " is missing a non-empty 'escalate_to' array\n" );
@@ -144,7 +144,7 @@ sub _check_node {
 	my ( $class, $node, $where ) = @_;
 
 	if ( ref($node) ne 'HASH' ) {
-		die( $where . " must be a object\n" );
+		die( $where . " must be an object\n" );
 	}
 
 	my @combinators = grep { exists $node->{$_} } ( 'all', 'any', 'not' );
@@ -235,7 +235,7 @@ sub _check_node {
 
 =head2 compile
 
-Compiles a rule's match into a coderef that takes a alert row hash ref
+Compiles a rule's match into a coderef that takes an alert row hash ref
 and returns true when it matches. Used by evaluate; exposed so the
 match can be tested against a single event without Rule::Engine.
 
@@ -442,7 +442,7 @@ sub _eq {
 	return ( $a eq $b ) ? 1 : 0;
 } ## end sub _eq
 
-# Resolves a dotted field path against a alert row, decoding the raw JSON
+# Resolves a dotted field path against an alert row, decoding the raw JSON
 # column when a path descends into it. This is what lets a rule reach a field
 # that was never promoted to a column, without every rule having to decode raw
 # for itself.
@@ -496,7 +496,7 @@ sub _field_value {
 =head2 evaluate
 
 Compiles the given rules and runs them against the given events as a
-L<Rule::Engine> ruleset. Returns a array ref with one hash ref per
+L<Rule::Engine> ruleset. Returns an array ref with one hash ref per
 match, each having the keys C<rule> (the rule row that matched) and
 C<event> (the alert row it matched). Rules are evaluated in C<priority>
 order (lower first, ties broken by id); a match on a rule with

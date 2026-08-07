@@ -8,7 +8,7 @@ use Lilith::Escalate ();
 
 =head1 NAME
 
-Lilith::Escalate::Type::Email - Escalate a event via email.
+Lilith::Escalate::Type::Email - Escalate an event via email.
 
 =head1 VERSION
 
@@ -235,17 +235,38 @@ sub escalate {
 	};
 } ## end sub escalate
 
-=head2 _peer_cert_names
-
-Best effort diagnostic helper. Connects to the given host/port, performs
-STARTTLS with certificate verification disabled, and returns the presented
-certificate's common name followed by its subjectAltName entries. The
-optional third arg is the connection timeout in seconds, defaulting to 10.
-Returns an empty list if it cannot connect or negotiate TLS. Only used to
-make a verification failure legible in the escalation error.
-
-=cut
-
+# The names a mail server's certificate actually presents, so a verification
+# failure can say what was found rather than only that it did not match.
+# Connects, runs STARTTLS with verification deliberately off -- the point is to
+# read a certificate that has already been rejected -- and reports the common
+# name and every subjectAltName.
+#
+# Diagnostic only, and best effort: the caller is already on an error path, so
+# a failure here must not replace the real error with one of its own. That is
+# why every failure is an empty list rather than a die.
+#
+# Called as a class method, so the first arg is the class.
+#
+# Args:
+#
+#   - $host :: the mail server to connect to, as a hostname or IP.
+#   - $port :: the SMTP port, e.g. 25 or 587.
+#   - $timeout :: connection timeout in seconds. Optional, 10 when undef.
+#
+# Returns: a list -- the certificate's common name followed by its
+# subjectAltName entries, each an iPAddress prefixed with 'IP:' to tell it
+# apart from a dNSName. The common name is undef when the certificate has none,
+# so the list can begin with undef and still carry names after it.
+#
+# Returns the empty list when the host cannot be reached or STARTTLS does not
+# negotiate.
+#
+#     my ( $cn, @sans ) = Lilith::Escalate::Type::Email->_peer_cert_names( 'mail.example.org', 587 );
+#     # ( 'mail.example.org', 'mx1.example.org', 'IP:192.0.2.25' )
+#
+#     # unreachable, so the caller's own error stands
+#     my @names = Lilith::Escalate::Type::Email->_peer_cert_names( 'nowhere.invalid', 587, 2 );
+#     # ()
 sub _peer_cert_names {
 	my ( $class, $host, $port, $timeout ) = @_;
 

@@ -19,7 +19,7 @@ use parent 'Lilith::CLI::Command';
 use JSON               qw( decode_json );
 use Time::Piece::Guess ();
 
-sub abstract { 'fetch a event' }
+sub abstract { 'fetch an event' }
 
 sub usage_desc { '%c event %o' }
 
@@ -56,7 +56,7 @@ sub validate_args {
 	my ( $self, $opt, $args ) = @_;
 
 	if ( !defined( $opt->{id} ) && !defined( $opt->{event} ) ) {
-		$self->usage_error('either --id or --event is required for fetching a event');
+		$self->usage_error('either --id or --event is required for fetching an event');
 	}
 
 	if ( $opt->{buffer} !~ /^\d+$/ ) {

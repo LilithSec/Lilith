@@ -12,7 +12,7 @@ use Lilith::CLI::Util qw( esc_lookup_target );
 
 sub command_names { 'esc_target_test' }
 
-sub abstract { 'send a synthetic test event to a escalation target' }
+sub abstract { 'send a synthetic test event to an escalation target' }
 
 sub usage_desc { '%c esc_target_test %o' }
 

@@ -17,7 +17,7 @@ use warnings;
 use parent 'Lilith::CLI::Command';
 use Lilith::CLI::Util qw( esc_resolve_targets );
 
-sub abstract { 'escalate a event to one or more escalation targets' }
+sub abstract { 'escalate an event to one or more escalation targets' }
 
 sub usage_desc { '%c esc %o' }
 
@@ -27,7 +27,7 @@ sub opt_spec {
 		[ 't=s',    'table to operate on', { default => 'suricata' } ],
 		[ 'id=s',   'the row ID of the event to escalate' ],
 		[ 'to=s',   'comma separated escalation target IDs or names' ],
-		[ 'note=s', 'a optional note to record with the escalation' ],
+		[ 'note=s', 'an optional note to record with the escalation' ],
 		[ 'by=s',   'who requested the escalation' ],
 		$class->output_opt_spec,
 	);
@@ -50,7 +50,7 @@ sub validate_args {
 	my ( $self, $opt, $args ) = @_;
 
 	if ( !defined( $opt->{id} ) ) {
-		$self->usage_error('--id is required for escalating a event');
+		$self->usage_error('--id is required for escalating an event');
 	}
 
 	return;

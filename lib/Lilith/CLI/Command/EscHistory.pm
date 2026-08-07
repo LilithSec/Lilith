@@ -16,7 +16,7 @@ use JSON qw( decode_json );
 
 sub command_names { 'esc_history' }
 
-sub abstract { 'print the escalations recorded for a event' }
+sub abstract { 'print the escalations recorded for an event' }
 
 sub usage_desc { '%c esc_history %o' }
 
@@ -43,7 +43,7 @@ sub validate_args {
 	my ( $self, $opt, $args ) = @_;
 
 	if ( !defined( $opt->{id} ) ) {
-		$self->usage_error('--id is required for fetching the escalations for a event');
+		$self->usage_error('--id is required for fetching the escalations for an event');
 	}
 
 	return;

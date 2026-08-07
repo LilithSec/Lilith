@@ -3,8 +3,8 @@
 % # stay in step with each other and with the rest of Lilith. Use:
 % #   %= include 'partials/_class_options', selected => \%selected
 % #
-% # selected - hash ref keyed by classification; a true value marks that option
-% #            selected. Omit for none.
+% # - selected :: hash ref keyed by classification; a true value marks that
+% #   option selected. Omit for none.
 % my $selected = stash('selected') // {};
 % for my $classification (@{ $self->classifications }) {
 <option value="<%= $classification %>"<%= $selected->{$classification} ? ' selected' : '' %>><%= $classification %></option>

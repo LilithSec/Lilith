@@ -27,7 +27,7 @@ sub opt_spec {
 		[ 'priority=s', 'evaluation order, lower first' ],
 		[ 'stop',       'set stop_on_match' ],
 		[ 'no-stop',    'clear stop_on_match' ],
-		[ 'desc=s',     'a optional description' ],
+		[ 'desc=s',     'an optional description' ],
 		[ 'enable',     'enable the rule' ],
 		[ 'disable',    'disable the rule' ],
 	);

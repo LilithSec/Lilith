@@ -85,7 +85,7 @@ and `lilith migrate` commands that wrap it).
 | `receiver_apikeys`   | the EVE receiver's bearer keys — the SHA-256 of each key, its IP and instance scopes, enabled flag, last use |
 | `dashboards`         | saved dashboard boards — the widget layout and view settings as jsonb, and which board is the default |
 
-Each alert table also carries a `escalations bigint[]` column (the IDs of
+Each alert table also carries an `escalations bigint[]` column (the IDs of
 escalations recorded for that row, appended in the same transaction as the
 `escalations` insert) and an `auto_escalated` timestamp (when the auto
 escalation run last considered the row, so each alert is evaluated exactly
@@ -163,19 +163,19 @@ units and a cron entry ship under `rc/`. See
 
 ## Where Lilith sits in the pantheon
 
-- **[Baphomet](https://github.com/LilithSec/Baphomet)** reads logs and
-  *accuses*: consigns repeat offenders to Ereshkigal.
-- **[Ereshkigal](https://github.com/LilithSec/Ereshkigal)** works the
-  firewall and *punishes*: holds the banned below and releases them when
+- **[Baphomet](https://github.com/LilithSec/Baphomet)** *accuses* :: reads
+  the logs and consigns repeat offenders to Ereshkigal.
+- **[Ereshkigal](https://github.com/LilithSec/Ereshkigal)** *punishes* ::
+  works the firewall, holding the banned below and releasing them when
   their time is served.
-- **[Lamashtu](https://github.com/LilithSec/Lamashtu)** *remembers*: hoards
-  the raw packets in rotating pcaps.
-- **[Virani](https://github.com/LilithSec/Virani)** *reads*: given a window
-  and a filter, carves the matching packets back out of the hoard.
-- **[Lilu](https://github.com/LilithSec/App-Lilu)** *carries*: a cut down
+- **[Lamashtu](https://github.com/LilithSec/Lamashtu)** *remembers* ::
+  hoards the raw packets in rotating pcaps.
+- **[Virani](https://github.com/LilithSec/Virani)** *reads* :: given a
+  window and a filter, carves the matching packets back out of the hoard.
+- **[Lilu](https://github.com/LilithSec/App-Lilu)** *carries* :: a cut down
   Lilith — only the ingest daemon and the extend — for sensor boxes that
   just feed the annals.
-- **Lilith** *knows*: the alerts of the watchers — Suricata, Sagan,
+- **Lilith** *knows* :: the alerts of the watchers — Suricata, Sagan,
   CAPEv2 — are written into her annals to be searched, examined, and sent
   onward.
 

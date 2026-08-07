@@ -249,18 +249,43 @@ sub virani_cached_meta {
 	return;
 } ## end sub virani_cached_meta
 
-=head2 _run_capture
-
-Runs an external command (list form, no shell) and returns its stdout, giving
-up after $timeout seconds. The read timeout is enforced with IO::Select rather
-than alarm()/SIGALRM: under Mojo's EV reactor a SIGALRM can interrupt the read,
-but the child process keeps running and the subsequent close()/waitpid then
-blocks forever. Here the child is killed on timeout so cleanup never blocks.
-
-    my $out = _run_capture( 10, 'whois', $domain );
-
-=cut
-
+# Run an external command and hand back what it wrote to stdout, giving up
+# after a deadline. Used for the lookups that have no usable Perl equivalent --
+# whois, mostly -- where a slow or wedged registrar must not hold a worker.
+#
+# The command is passed as a list, so no shell sees it and nothing in a domain
+# or an address can turn into shell syntax.
+#
+# The timeout is enforced with IO::Select rather than alarm()/SIGALRM, which is
+# the obvious approach and the wrong one here. Under Mojo's EV reactor a
+# SIGALRM does interrupt the read, but the child keeps running, and the
+# close()/waitpid that follows then blocks forever waiting on it. So the
+# deadline is checked around the read instead, and the child is killed when it
+# passes, leaving nothing for close() to wait on.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $timeout :: seconds to wait for output before giving up and killing the
+#     child. Counted from the call, not reset per read, so it caps the whole
+#     command rather than each chunk.
+#   - @cmd :: the command and its arguments as separate elements, e.g.
+#     ( 'whois', 'example.org' ). The first element is the program to run.
+#
+# Returns: whatever the command wrote to stdout, as a single string. stderr is
+# not captured and the exit status is not checked.
+#
+# Never dies and never returns undef. A command that cannot be started, that
+# fails, or that runs past the deadline gives the empty string, or whatever it
+# managed to write before being killed -- callers treat a lookup that produced
+# nothing as a lookup with no answer, which is the same thing to a reader.
+#
+#     my $out = _run_capture( 10, 'whois', 'example.org' );
+#     # the whois response as text
+#
+#     _run_capture( 10, 'whois', 'nowhere.invalid' );
+#     # '' -- no answer, no exception
 sub _run_capture {
 	my ( $timeout, @cmd ) = @_;
 
@@ -324,13 +349,40 @@ sub ipinfo {
 	return;
 } ## end sub ipinfo
 
-=head2 _ipinfo_gather
-
-Performs the blocking reverse-DNS, whois, and GeoIP lookups for an IP and
-returns the result hashref. Intended to be run inside a subprocess.
-
-=cut
-
+# Everything the IP info modal shows, gathered in one go: reverse DNS, whois,
+# and whatever the configured GeoIP databases know.
+#
+# All three block, which is why this is only ever called inside a
+# Mojo::IOLoop->subprocess -- run on the worker itself a slow resolver or
+# registrar would stall every other request. Nothing here dies: each lookup
+# reports its own failure in its own field, so one unreachable service still
+# leaves the other two on the page.
+#
+# Args:
+#
+#   - $ip :: the address to look up, v4 or v6. The caller has already checked
+#     it against /^[0-9a-fA-F:.]+$/, so it is safe to hand to a resolver and to
+#     an external command.
+#
+# Returns: a hash ref, rendered to the browser as-is:
+#
+#     {
+#       ip         => '192.0.2.10',
+#       ptr_name   => '10.2.0.192.in-addr.arpa',  # the name queried, '' if not built
+#       rdns       => 'gate1.example.org',        # comma joined for several PTRs
+#       rdns_error => '',                         # resolver error, '' on success
+#       whois      => "...",                      # the whois response as text
+#       geo        => { 'country' => 'US', 'city' => 'Austin', ... },
+#       geo_error  => '',                         # database error, '' on success
+#     }
+#
+# Every key is always present. A lookup that found nothing gives an empty
+# string or an empty hash rather than undef, so the template never has to
+# distinguish "not asked" from "no answer".
+#
+#     my $info = $self->_ipinfo_gather('192.0.2.10');
+#     # $info->{rdns} is 'gate1.example.org'
+#     # $info->{geo}{country} is 'US' when a GeoIP database is configured
 sub _ipinfo_gather {
 	my ( $self, $ip ) = @_;
 
@@ -393,14 +445,40 @@ sub _ipinfo_gather {
 	};
 } ## end sub _ipinfo_gather
 
-=head2 _flatten_geo
-
-Recursively flattens an MMDB record into C<$out> as dotted key => scalar pairs.
-Localized C<names> hashes are collapsed onto their parent key, preferring the
-English name, so C<< {country}{names}{en} >> becomes C<country>.
-
-=cut
-
+# Flatten a GeoIP record into plain dotted key => value pairs, so the modal can
+# list whatever a database happens to carry without knowing its shape. MMDB
+# records nest differently between the City, Country, and ASN databases, and
+# between vendors, so anything that walked a fixed path would only work for the
+# databases it was written against.
+#
+# Localized names collapse onto their parent: a record's {country}{names}{en}
+# becomes simply country, since a modal listing country.names.en beside
+# country.names.de beside country.names.ja is noise. English is preferred, and
+# whichever language sorts first is used when there is no English.
+#
+# Plain function, not a method. Fills a hash the caller owns rather than
+# returning one, so several databases can be merged into a single set of pairs.
+#
+# Args:
+#
+#   - $data :: the value to flatten. A hash ref, an array ref, or a scalar --
+#     it recurses into the first two and stores the third. The top level call
+#     passes the whole record as returned by record_for_address.
+#   - $prefix :: the dotted key reached so far, '' at the top level. Array
+#     elements get their index appended, so a list becomes prefix.0, prefix.1.
+#   - $out :: the hash ref to fill. Written into, not replaced, so calling this
+#     for each database merges them.
+#
+# Returns: nothing. The result is in $out.
+#
+#     my %geo;
+#     _flatten_geo( $db->record_for_address('192.0.2.10'), '', \%geo );
+#     # %geo is (
+#     #   'country'            => 'United States',
+#     #   'country.iso_code'   => 'US',
+#     #   'city'               => 'Austin',
+#     #   'location.latitude'  => 30.2672,
+#     # )
 sub _flatten_geo {
 	my ( $data, $prefix, $out ) = @_;
 
@@ -427,13 +505,34 @@ sub _flatten_geo {
 	return;
 } ## end sub _flatten_geo
 
-=head2 _dns_records
-
-Formats the answer records of one type from a Net::DNS reply into an arrayref
-of display strings.
-
-=cut
-
+# Render the answers of one record type from a DNS reply as strings a person
+# can read, since Net::DNS returns objects whose interesting fields differ per
+# type. Each type is formatted the way it is conventionally written, so an MX
+# reads "10 mx1.example.org" and an SOA carries its timers.
+#
+# A type with no special case falls through to the record's address, which
+# covers A and AAAA. That means an unhandled type either renders sensibly or
+# dies rather than silently rendering a stringified object.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $reply :: the Net::DNS::Packet a query returned. Only its answer section
+#     is read.
+#   - $type :: which record type to pull out, as the string Net::DNS uses --
+#     'A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'PTR', 'SOA', 'CAA', or 'SRV'.
+#     Records of other types in the same reply are skipped.
+#
+# Returns: an array ref of strings, in the order the reply listed them. Empty
+# when the reply carries no answer of that type, which is the normal result for
+# a domain that simply has no such record.
+#
+#     _dns_records( $reply, 'MX' );
+#     # [ '10 mx1.example.org', '20 mx2.example.org' ]
+#
+#     _dns_records( $reply, 'SOA' );
+#     # [ 'ns1.example.org hostmaster.example.org serial=2026080601 refresh=7200 ...' ]
 sub _dns_records {
 	my ( $reply, $type ) = @_;
 	my @recs;
@@ -468,14 +567,32 @@ sub _dns_records {
 	return \@recs;
 } ## end sub _dns_records
 
-=head2 _whois_domain
-
-Reduces a hostname to the registrable/base domain used for the WHOIS query,
-using Mozilla::PublicSuffix when available and a small known-two-level-TLD
-heuristic as a fallback.
-
-=cut
-
+# Reduce a hostname to the domain actually worth asking whois about. A registry
+# holds a record for the registrable domain, not for every name under it, so
+# querying www.example.co.uk returns nothing useful while example.co.uk returns
+# the registration.
+#
+# Where that boundary falls cannot be worked out from the number of labels:
+# example.co.uk is registrable but example.com.au and example.com are too, at
+# different depths. Mozilla::PublicSuffix knows the real list and is used when
+# installed. Without it a short list of common two level suffixes is the
+# fallback -- wrong for the long tail, right for most of what is met in
+# practice, and better than not offering the lookup at all.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $domain :: the hostname to reduce, e.g. 'www.example.co.uk'. Something
+#     already registrable, or with two labels or fewer, comes back untouched.
+#
+# Returns: the registrable domain as a string. Never undef -- a name that
+# cannot be reduced is returned as it came in, so the caller always has
+# something to query.
+#
+#     _whois_domain('www.example.com');       # 'example.com'
+#     _whois_domain('mail.www.example.co.uk') # 'example.co.uk'
+#     _whois_domain('example.org');           # 'example.org'
 sub _whois_domain {
 	my ($domain) = @_;
 	my @labels   = split /\./, $domain;
@@ -558,13 +675,51 @@ sub domaininfo {
 	return;
 } ## end sub domaininfo
 
-=head2 _domaininfo_gather
-
-Performs the blocking DNS/whois/dnstracer gather for a domain and returns the
-result hashref. Intended to be run inside a subprocess.
-
-=cut
-
+# Everything the domain info panel shows, gathered in one pass: ten kinds of DNS
+# record, whois, and optionally a dnstracer delegation walk.
+#
+# Done all at once rather than in sequence. The DNS queries go out with bgsend
+# and the external commands are opened as pipes, then a single IO::Select loop
+# waits on all of them together, so the whole gather costs about as long as its
+# slowest part instead of the sum. With ten record types against a slow resolver
+# that is the difference between a panel that opens and one that does not.
+#
+# Everything carries its own deadline, and anything still outstanding when its
+# deadline passes is abandoned with whatever it had -- a domain with no CAA
+# record must not hold up the answers that did arrive. Nothing here dies.
+#
+# Blocking throughout, so it is only ever called inside a
+# Mojo::IOLoop->subprocess.
+#
+# Args:
+#
+#   - $domain :: the domain to look up. The caller has already checked it
+#     against /^[A-Za-z0-9._-]+$/, so it is safe to hand to a resolver and to
+#     an external command.
+#
+# Returns: a hash ref, rendered to the browser as-is:
+#
+#     {
+#       domain          => 'www.example.org',
+#       whois_domain    => 'example.org',   # what was actually queried
+#       dns             => {                # only types that answered
+#         A   => [ '192.0.2.10' ],
+#         MX  => [ '10 mx1.example.org' ],
+#         TXT => [ 'v=spf1 include:_spf.example.org -all' ],
+#       },
+#       dns_error       => '',              # resolver error, '' on success
+#       whois           => "...",           # the whois response as text
+#       dnstracer       => '',              # empty unless dnstracer_enable
+#       dnstracer_error => '',
+#       cached          => 0,               # set by the caller on a cache hit
+#     }
+#
+# Every key is always present. A record type with no answer is simply absent
+# from dns rather than an empty list, so the template renders only what exists.
+#
+#     my $info = $self->_domaininfo_gather('www.example.org');
+#     # $info->{dns}{A} is [ '192.0.2.10' ]
+#     # $info->{whois_domain} is 'example.org' -- the registrable domain
 sub _domaininfo_gather {
 	my ( $self, $domain ) = @_;
 
@@ -710,33 +865,112 @@ sub httpsinfo {
 	return;
 } ## end sub httpsinfo
 
-=head2 _ms_since
-
-Milliseconds elapsed since a Time::HiRes timestamp, to one decimal.
-
-=cut
-
+# Milliseconds elapsed since a high resolution timestamp, for the per-phase
+# timings the HTTPS panel reports. One decimal is enough to compare a handshake
+# against a connect without pretending to more precision than a network
+# measurement has.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $start :: the earlier time, as Time::HiRes::time() returned it -- a float
+#     of seconds since the epoch.
+#
+# Returns: the elapsed milliseconds as a number rounded to one decimal. A
+# number rather than the string sprintf gives, so it encodes as a JSON number
+# and the frontend can compare and sort it.
+#
+#     my $start = Time::HiRes::time();
+#     ...
+#     _ms_since($start);   # 12.4
 sub _ms_since { return sprintf( '%.1f', ( Time::HiRes::time() - $_[0] ) * 1000 ) + 0 }
 
-=head2 _isotime_to_epoch
-
-Parses an ISO8601 UTC time (as returned by Net::SSLeay) into an epoch, or undef.
-
-=cut
-
+# Turn a certificate validity time into an epoch, so notAfter can be compared
+# against now to say whether a certificate has expired.
+#
+# Net::SSLeay hands these back as ISO8601 UTC. Parsed here with a regex and
+# timegm rather than a date module because it is the one format that ever
+# arrives and the panel should not gain a dependency for it.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $iso :: the time as Net::SSLeay produced it, e.g.
+#     '2027-01-14T09:22:31Z'. Anything after the seconds is ignored. undef is
+#     allowed.
+#
+# Returns: the epoch as an integer, or undef when the value is missing, is not
+# in that format, or will not convert. Callers treat undef as "expiry unknown"
+# and leave the expired flag off rather than guessing.
+#
+#     _isotime_to_epoch('2027-01-14T09:22:31Z');   # 1799234551
+#     _isotime_to_epoch('sometime next year');     # undef
 sub _isotime_to_epoch {
 	my ($iso) = @_;
 	return undef unless defined $iso && $iso =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/;
 	return eval { Time::Local::timegm( $6, $5, $4, $3, $2 - 1, $1 ) };
 }
 
-=head2 _httpsinfo_gather
-
-Does the blocking TLS/HTTP work for httpsinfo and returns a result hashref.
-Intended to be run inside a subprocess.
-
-=cut
-
+# What the HTTPS panel shows for a host: how long each phase took, the
+# certificate it presented, what GET / answered, and whether the chain actually
+# verifies.
+#
+# Two connections are made, deliberately. The first runs with verification off
+# so the certificate can be read and reported even when it is expired,
+# self-signed, or for the wrong name -- which are exactly the cases worth
+# looking at. The second verifies properly against the Mozilla CA bundle and
+# only records the verdict. Doing it in one pass would mean either refusing to
+# show a bad certificate or never reporting whether it was good.
+#
+# Everything is bounded: one deadline covers the whole exchange, and the
+# response body is capped, so a slow or endless server costs a fixed amount.
+# timed_out and read_capped say which limit was hit, so the panel never
+# presents a truncated body as a complete one.
+#
+# Certificate fields are best effort -- each is read under eval and dropped if
+# unavailable, since certificates vary in what they carry.
+#
+# Blocking throughout, so it is only ever called inside a
+# Mojo::IOLoop->subprocess. Plain function, not a method.
+#
+# Args:
+#
+#   - $domain :: the host to connect to, as a hostname. Also sent as SNI and as
+#     the Host header, and verified against.
+#   - $port :: the TCP port, normally 443.
+#
+# Returns: a hash ref, rendered to the browser as-is:
+#
+#     {
+#       domain           => 'example.org',
+#       port             => 443,
+#       tcp_connect_ms   => 11.2,
+#       tls_handshake_ms => 24.8,
+#       response_ms      => 41.0,
+#       total_ms         => 77.0,
+#       timed_out        => 0,
+#       read_capped      => 0,
+#       http_status      => 301,
+#       http_reason      => 'Moved Permanently',
+#       redirect_to      => 'https://www.example.org/',   # 3xx only
+#       expired          => 0,
+#       valid            => 1,
+#       cert             => { cn => 'example.org', issuer => '...', sans => [...],
+#                             not_before => '...', not_after => '...',
+#                             fp_sha256 => '...', key_bits omitted if unreadable },
+#     }
+#
+# A connection that never got started returns early with only domain, port, and
+# error set -- so a caller must check error before reading a timing.
+#
+#     my $info = _httpsinfo_gather( 'example.org', 443 );
+#     # $info->{valid} is 1, $info->{cert}{cn} is 'example.org'
+#
+#     my $info = _httpsinfo_gather( 'nowhere.invalid', 443 );
+#     # { domain => 'nowhere.invalid', port => 443,
+#     #   error => 'TCP connect to nowhere.invalid:443 failed: ...' }
 sub _httpsinfo_gather {
 	my ( $domain, $port ) = @_;
 	my %r = ( domain => $domain, port => $port + 0 );
@@ -910,12 +1144,38 @@ sub mailinfo {
 	return;
 } ## end sub mailinfo
 
-=head2 _mailinfo_gather
-
-Gathers SPF, DMARC, and DKIM for a domain. Intended to be run in a subprocess.
-
-=cut
-
+# The whole mail authentication picture for a domain in one structure: where
+# its mail goes, and its SPF, DMARC, and DKIM. Just the four gatherers under one
+# key each, so the frontend makes one request instead of four and gets a
+# consistent view rather than four snapshots taken at different moments.
+#
+# Each part handles its own failures, so a domain with SPF but no DMARC returns
+# both keys with the second explaining itself. Nothing here dies.
+#
+# Blocking throughout, so it is only ever called inside a
+# Mojo::IOLoop->subprocess. Plain function, not a method.
+#
+# Args:
+#
+#   - $domain :: the domain to check. Already validated by the caller against
+#     /^[A-Za-z0-9._-]+$/.
+#   - $ip :: a sending address to evaluate the SPF policy against, or undef for
+#     the record and its summary without an evaluation.
+#   - $selector :: a known DKIM selector to look up, or undef to probe the
+#     common ones.
+#
+# Returns: a hash ref of the four gathers:
+#
+#     {
+#       domain => 'example.org',
+#       mx     => [ { preference => 10, exchange => 'mx1.example.org' } ],
+#       spf    => { record => 'v=spf1 ...', summary => {...}, result => 'pass' },
+#       dmarc  => { record => 'v=DMARC1; p=reject', p => 'reject', ... },
+#       dkim   => { keys => [ ... ], probed => 1 },
+#     }
+#
+#     my $info = _mailinfo_gather( 'example.org', '192.0.2.10', undef );
+#     # $info->{spf}{result} is 'pass' when that address may send for the domain
 sub _mailinfo_gather {
 	my ( $domain, $ip, $selector ) = @_;
 	return {
@@ -927,13 +1187,30 @@ sub _mailinfo_gather {
 	};
 } ## end sub _mailinfo_gather
 
-=head2 _mx_gather
-
-Returns the domain's MX records as an arrayref of { preference, exchange },
-sorted by preference.
-
-=cut
-
+# Where a domain's mail actually goes, as the mail panel lists it. Sorted by
+# preference so the primary exchanger is first, which is the order a sender
+# would try them in.
+#
+# Short resolver timeouts and a single retry: this is one part of a larger
+# gather, and a domain with no MX at all is a normal answer worth returning
+# quickly rather than waiting out the default retry schedule for.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $domain :: the domain to look up.
+#
+# Returns: an array ref of { preference, exchange } hash refs sorted by
+# preference ascending. preference is forced to a number so it encodes as a
+# JSON number; exchange is the hostname as the record gave it.
+#
+# Empty when the domain has no MX records or the lookup failed -- the two are
+# not distinguished, since neither gives the panel anything to show.
+#
+#     _mx_gather('example.org');
+#     # [ { preference => 10, exchange => 'mx1.example.org' },
+#     #   { preference => 20, exchange => 'mx2.example.org' } ]
 sub _mx_gather {
 	my ($domain) = @_;
 	my @mx;
@@ -951,13 +1228,35 @@ sub _mx_gather {
 	return \@mx;
 } ## end sub _mx_gather
 
-=head2 _fetch_txt
-
-Returns the first TXT record at $name matching $re, or undef. Uses a short
-timeout so probing many names does not hang.
-
-=cut
-
+# The first TXT record at a name that looks like the kind of record being
+# hunted. SPF, DMARC, and DKIM all live in TXT records, and a name may hold
+# several unrelated ones, so a pattern rather than the first answer is what
+# decides.
+#
+# Short timeouts and one retry matter here more than anywhere else: probing the
+# common DKIM selectors means around thirty lookups, most of which are expected
+# to find nothing. On the default retry schedule that alone would outlast the
+# request.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $name :: the exact name to query, already assembled -- e.g.
+#     '_dmarc.example.org' or 'default._domainkey.example.org'.
+#   - $re :: a qr// the record must match to count, e.g. qr/^v=DMARC1\b/i.
+#     Multi-string TXT records are joined before matching, so a long key split
+#     across strings still matches.
+#
+# Returns: the matching record as a single string, or undef when the name does
+# not resolve, holds no TXT record, or holds none that matches. The caller
+# treats undef as "not published".
+#
+#     _fetch_txt( '_dmarc.example.org', qr/^v=DMARC1\b/i );
+#     # 'v=DMARC1; p=reject; rua=mailto:dmarc@example.org'
+#
+#     _fetch_txt( '_dmarc.example.org', qr/^v=DMARC1\b/i );
+#     # undef when the domain publishes no DMARC record
 sub _fetch_txt {
 	my ( $name, $re ) = @_;
 	my $rec;
@@ -975,13 +1274,38 @@ sub _fetch_txt {
 	return $rec;
 } ## end sub _fetch_txt
 
-=head2 _dmarc_gather
-
-DMARC record and parsed policy for a domain, walking up to the organizational
-domain (via Mail::DMARC) when the exact domain has no record.
-
-=cut
-
+# A domain's DMARC record and what its policy actually says.
+#
+# DMARC is inherited: a subdomain with no record of its own is covered by the
+# organizational domain's. So the exact name is tried first and the
+# organizational domain second, and found_at records which one answered --
+# without it the panel could not tell a domain's own policy from an inherited
+# one, which is the difference between a deliberate setting and a default.
+#
+# The record is parsed with Mail::DMARC::Policy so the panel can show the tags
+# individually rather than leaving the reader to pick a raw record apart. That
+# parse is best effort: an unparseable record still comes back verbatim.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $domain :: the domain to check.
+#
+# Returns: a hash ref. With a record found:
+#
+#     {
+#       record   => 'v=DMARC1; p=reject; pct=100; rua=mailto:dmarc@example.org',
+#       found_at => 'example.org',   # the name that held it
+#       v => 'DMARC1', p => 'reject', pct => '100',
+#       rua => 'mailto:dmarc@example.org',
+#       # sp, ruf, adkim, aspf, fo, rf, ri when the record sets them
+#     }
+#
+# With none, a single note key naming both places that were tried, so the panel
+# can say what was looked for rather than only that nothing was found:
+#
+#     { note => 'no DMARC record found for mail.example.org or example.org' }
 sub _dmarc_gather {
 	my ($domain) = @_;
 	my %d;
@@ -1020,13 +1344,41 @@ my @COMMON_DKIM_SELECTORS = qw(
 	zoho zmail smtp key1 pic scph mte1
 );
 
-=head2 _dkim_gather
-
-DKIM public keys for a domain: the given selector, or a probe of common
-selectors when none is supplied. Returns any found keys parsed for detail.
-
-=cut
-
+# A domain's DKIM public keys, either at a selector that is known or by probing
+# the ones in common use.
+#
+# DKIM has no way to ask a domain which selectors it publishes -- a key lives at
+# a name derived from a selector, and the selector is only ever learned from a
+# signed message. So without one the only option is to guess, and the probe walks
+# @COMMON_DKIM_SELECTORS. That means a negative result proves nothing, which is
+# why probed is reported and the note says so in as many words.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $domain :: the domain to check.
+#   - $selector :: the selector to look up, as taken from a signed message's
+#     DKIM-Signature s= tag. undef or empty probes the common list instead.
+#
+# Returns: a hash ref:
+#
+#     {
+#       selector => 'google',   # only when one was supplied
+#       probed   => 1,          # only when the common list was walked
+#       keys     => [ { selector => 'google', key_bits => 2048, ... } ],
+#       note     => '...',      # only when keys is empty
+#     }
+#
+# keys is always present, one entry per selector that answered, each as
+# _dkim_parse_record built it. Empty with a note explaining which of the two
+# searches came up short.
+#
+#     _dkim_gather( 'example.org', 'google' );
+#     # { selector => 'google', keys => [ { selector => 'google', key_bits => 2048, ... } ] }
+#
+#     _dkim_gather( 'example.org', undef );
+#     # { probed => 1, keys => [], note => 'no DKIM key found for the probed ...' }
 sub _dkim_gather {
 	my ( $domain, $selector ) = @_;
 	my %d;
@@ -1054,13 +1406,45 @@ sub _dkim_gather {
 	return \%d;
 } ## end sub _dkim_gather
 
-=head2 _dkim_parse_record
-
-Parses a DKIM public-key TXT record into a detail hashref (best effort). Pure,
-no DNS. Key size is computed via Mail::DKIM when the key is present.
-
-=cut
-
+# Pick a DKIM public key record apart into named fields, so the panel can show
+# what the key is and what state it is in rather than a wall of tags.
+#
+# Two states are worth naming outright because both look like an ordinary
+# record to anyone skimming it. An empty p= is a revoked key, not a malformed
+# one -- that is how DKIM retires a selector. And t=y marks the domain as
+# testing, meaning verifiers are asked to ignore failures, so a signature that
+# appears to work may not be being enforced at all.
+#
+# Key size is worked out by handing the record to Mail::DKIM, since it is
+# encoded in the key rather than stated. Best effort: a key that will not parse
+# simply has no key_bits.
+#
+# Pure -- no DNS, no network. Plain function, not a method.
+#
+# Args:
+#
+#   - $selector :: the selector this record was found at, carried through so a
+#     caller probing several can tell the results apart.
+#   - $txt :: the record as published, e.g.
+#     'v=DKIM1; k=rsa; p=MIIBIjANBgkq...'. Tags it does not carry are simply
+#     absent from the result.
+#
+# Returns: a hash ref. selector, record, key_type, testing, and revoked are
+# always present; the rest only when the record set them:
+#
+#     {
+#       selector   => 'google',
+#       record     => 'v=DKIM1; k=rsa; p=MIIBIjANBgkq...',
+#       version    => 'DKIM1',
+#       key_type   => 'rsa',        # 'rsa' when the record omits k=
+#       key_bits   => 2048,         # absent when the key will not parse
+#       public_key => 'MIIBIjANBgkq...',
+#       testing    => 0,            # 1 when t=y
+#       revoked    => 0,            # 1 when p= is empty
+#     }
+#
+#     _dkim_parse_record( 'sel1', 'v=DKIM1; k=rsa; p=' );
+#     # revoked => 1, no public_key, no key_bits
 sub _dkim_parse_record {
 	my ( $selector, $txt ) = @_;
 	my %info = ( selector => $selector, record => $txt );
@@ -1087,13 +1471,52 @@ sub _dkim_parse_record {
 	return \%info;
 } ## end sub _dkim_parse_record
 
-=head2 _spfinfo_gather
-
-Does the blocking SPF evaluation (and v=spf1 record lookup) for spfinfo and
-returns a result hashref. Intended to be run inside a subprocess.
-
-=cut
-
+# A domain's SPF record, what it means, and -- when an address is given -- what
+# it says about that address.
+#
+# The two halves are separate on purpose. The record and its summary need only a
+# TXT lookup and answer "what has this domain published". An evaluation needs a
+# sending address and answers "may this host send for it", which is a different
+# question and the one that matters when looking at a suspect message. Asking
+# without an address gets the first half alone.
+#
+# The evaluation goes through Mail::SPF rather than reading the record here,
+# because getting it right means following include and redirect and honouring
+# the lookup limit -- and a hand rolled answer that disagrees with what a real
+# receiver would decide is worse than none.
+#
+# Blocking, so it is only ever called inside a Mojo::IOLoop->subprocess. Plain
+# function, not a method.
+#
+# Args:
+#
+#   - $domain :: the domain whose policy is being read.
+#   - $ip :: the sending address to evaluate against, v4 or v6. undef or empty
+#     skips the evaluation and returns the record and summary only.
+#
+# Returns: a hash ref. domain is always present; record and summary whenever
+# the domain publishes SPF; the evaluation keys only when an address was given:
+#
+#     {
+#       domain       => 'example.org',
+#       record       => 'v=spf1 include:_spf.example.org -all',
+#       summary      => { all => 'fail', mechanisms => [...], dns_lookups => 3 },
+#       ip           => '192.0.2.10',
+#       identity     => 'postmaster@example.org',   # what was evaluated as
+#       result       => 'pass',   # or fail, softfail, neutral, none, permerror
+#       explanation  => '...',
+#       received_spf => 'Received-SPF: pass ...',
+#       error        => '...',    # only when the evaluation itself failed
+#     }
+#
+# A domain with no SPF record returns just domain, and ip when one was given --
+# so a caller must check record before reading summary.
+#
+#     _spfinfo_gather( 'example.org', '192.0.2.10' );
+#     # result => 'pass'
+#
+#     _spfinfo_gather( 'example.org', undef );
+#     # the record and its summary, with no verdict
 sub _spfinfo_gather {
 	my ( $domain, $ip ) = @_;
 	my %r = ( domain => $domain );
@@ -1138,14 +1561,42 @@ sub _spfinfo_gather {
 	return \%r;
 } ## end sub _spfinfo_gather
 
-=head2 _spf_summary
-
-Parses a v=spf1 record string into a summary: the default (all) policy, the
-list of mechanisms and modifiers, and a count of the DNS-lookup-consuming terms
-in this record.
-
-=cut
-
+# Reduce an SPF record to the three things worth knowing at a glance: what it
+# does with mail it does not recognise, what it is made of, and how close it is
+# to the limit that would break it.
+#
+# That last one is the reason this exists. SPF allows ten DNS-consuming terms
+# per evaluation, and a record over the limit is a permerror -- which receivers
+# may treat as no SPF at all. The count here is for this record alone and does
+# not follow include or redirect, so it is a floor rather than a total: a record
+# counting four may still be over once its includes are expanded.
+#
+# The all policy is reported as the qualifier's name, since '-all' and '~all'
+# are read at a glance as the same thing and mean quite different things to a
+# receiver.
+#
+# Pure -- no DNS. Plain function, not a method.
+#
+# Args:
+#
+#   - $record :: the record as published, e.g. 'v=spf1 include:_spf.example.org
+#     -all'. The v=spf1 prefix is optional. undef is allowed.
+#
+# Returns: a hash ref, or undef when given undef:
+#
+#     {
+#       all         => 'fail',      # pass, fail, softfail, or neutral
+#       mechanisms  => [ 'include:_spf.example.org', '-all' ],
+#       modifiers   => [ 'redirect=_spf.example.org' ],
+#       dns_lookups => 1,
+#     }
+#
+# mechanisms, modifiers, and dns_lookups are always present. all is absent when
+# the record has no all term, which leaves the default behaviour to whatever a
+# redirect points at.
+#
+#     _spf_summary('v=spf1 a mx include:_spf.example.org ~all');
+#     # all => 'softfail', dns_lookups => 3
 sub _spf_summary {
 	my ($record) = @_;
 	return undef unless defined $record;

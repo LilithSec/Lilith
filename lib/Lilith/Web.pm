@@ -132,8 +132,8 @@ sub startup {
 	# thirty inputs.
 	#
 	# The URLs are built from the request rather than by JavaScript, so a chip
-	# is an ordinary link: it works with the back button, it can be opened in a
-	# new tab, and it needs nothing loaded to function.
+	# is an ordinary link: it works with the back button, it opens in a new tab,
+	# and it still works with JavaScript off.
 	#
 	# Args:
 	#
@@ -170,6 +170,16 @@ sub startup {
 	#     my $active = $c->filter_chips( [ { name => 'src_ip', label => 'Src IP' } ] );
 	#     # on /search?table=sagan&src_ip=1.2.3.4&offset=100 that gives one chip
 	#     # labelled 'Src IP' for '1.2.3.4', whose url is /search?table=sagan
+	#
+	# And with a controller-applied default to account for -- the search page
+	# excludes one classification unless told a search was submitted, so it
+	# names the values in force and forces search=1 onto the URLs, without
+	# which dropping that chip would put the default straight back:
+	#
+	#     my $active = $c->filter_chips(
+	#         [ { name => 'class_not', label => 'Not class', values => \@class_not } ],
+	#         { search => 1 },
+	#     );
 	$self->helper(
 		filter_chips => sub {
 			my ( $c, $filter_fields, $forced ) = @_;

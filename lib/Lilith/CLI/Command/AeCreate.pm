@@ -30,7 +30,7 @@ sub opt_spec {
 		[ 'tables=s',   'comma separated alert tables the rule applies to' ],
 		[ 'priority=s', 'evaluation order, lower first' ],
 		[ 'stop',       'set stop_on_match' ],
-		[ 'desc=s',     'a optional description' ],
+		[ 'desc=s',     'an optional description' ],
 		[ 'disable',    'create the rule disabled' ],
 	);
 } ## end sub opt_spec

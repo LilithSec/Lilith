@@ -127,12 +127,19 @@ sub column_exists {
 	my ($def) = $dbh->selectrow_array("select count(*) from dashboards where name = 'default' and is_default");
 	is( $def, 1, 'deploy seeded the default dashboard' );
 
-	# version 7: the Suricata severity expression index.
-	ok( index_exists( $dbh, 'suricata_alerts_severity_ts_idx' ), 'deploy created the severity index' );
+	# versions 7 and 8 indexed the severity and MITRE fields as expressions over
+	# raw; version 13 promoted them to generated columns and reindexed on those,
+	# timestamp first so a windowed group-by can be answered from the index.
+	ok( column_exists( $dbh, 'suricata_alerts', 'severity' ),           'deploy created the severity column' );
+	ok( column_exists( $dbh, 'suricata_alerts', 'mitre_tactic' ),       'deploy created the MITRE tactic column' );
+	ok( column_exists( $dbh, 'suricata_alerts', 'mitre_technique' ),    'deploy created the MITRE technique column' );
+	ok( index_exists( $dbh, 'suricata_alerts_ts_severity_idx' ),        'deploy created the severity index' );
+	ok( index_exists( $dbh, 'suricata_alerts_ts_mitre_tactic_idx' ),    'deploy created the MITRE tactic index' );
+	ok( index_exists( $dbh, 'suricata_alerts_ts_mitre_technique_idx' ), 'deploy created the MITRE technique index' );
 
-	# version 8: the MITRE tactic/technique partial expression indexes.
-	ok( index_exists( $dbh, 'suricata_alerts_mitre_tactic_idx' ),    'deploy created the MITRE tactic index' );
-	ok( index_exists( $dbh, 'suricata_alerts_mitre_technique_idx' ), 'deploy created the MITRE technique index' );
+	# and the expression indexes they replace are gone, not left maintained for
+	# nothing -- a query naming the column cannot match an index on the expression
+	ok( !index_exists( $dbh, 'suricata_alerts_severity_ts_idx' ), 'deploy left no stale expression index' );
 
 	# version 9: the per-dashboard settings column.
 	ok( column_exists( $dbh, 'dashboards', 'settings' ), 'deploy added the dashboards.settings column' );
@@ -179,11 +186,13 @@ sub column_exists {
 	my ($ver)
 		= $dbh->selectrow_array('select version from dbix_class_deploymenthandler_versions order by id desc limit 1');
 	is( $ver, $code, 'version storage records the current version after the upgrade' );
-	ok( table_exists( $dbh, 'dashboards' ),                       'the upgrade created the dashboards table' );
-	ok( index_exists( $dbh, 'suricata_alerts_severity_ts_idx' ),  'the upgrade created the severity index' );
-	ok( index_exists( $dbh, 'suricata_alerts_mitre_tactic_idx' ), 'the upgrade created the MITRE tactic index' );
-	ok( column_exists( $dbh, 'dashboards', 'settings' ),          'the upgrade added the dashboards.settings column' );
-	ok( table_exists( $dbh, 'baphomet_alerts' ),                  'the upgrade created baphomet_alerts' );
+	ok( table_exists( $dbh, 'dashboards' ),                          'the upgrade created the dashboards table' );
+	ok( column_exists( $dbh, 'suricata_alerts', 'severity' ),        'the upgrade created the severity column' );
+	ok( index_exists( $dbh, 'suricata_alerts_ts_severity_idx' ),     'the upgrade created the severity index' );
+	ok( index_exists( $dbh, 'suricata_alerts_ts_mitre_tactic_idx' ), 'the upgrade created the MITRE tactic index' );
+	ok( !index_exists( $dbh, 'suricata_alerts_severity_ts_idx' ),    'the upgrade dropped the expression index' );
+	ok( column_exists( $dbh, 'dashboards', 'settings' ), 'the upgrade added the dashboards.settings column' );
+	ok( table_exists( $dbh, 'baphomet_alerts' ),         'the upgrade created baphomet_alerts' );
 	$dbh->disconnect;
 
 	my ($sv) = run_cmd('Lilith::CLI::Command::SchemaVersion');

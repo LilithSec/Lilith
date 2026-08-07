@@ -40,7 +40,7 @@ anything malformed.
 
 =head2 esc_lookup_target( $lilith, $tid, $name )
 
-Looks up a escalation target, by C<$tid> when given and by C<$name> otherwise.
+Looks up an escalation target, by C<$tid> when given and by C<$name> otherwise.
 
 =head2 esc_resolve_targets( $lilith, $to )
 
@@ -171,7 +171,7 @@ sub ae_read_rule {
 	my $decoded;
 	eval { $decoded = decode_json($json); };
 	if ( $@ || ref($decoded) ne 'HASH' ) {
-		die( 'could not parse --rule as a JSON object: ' . ( $@ ? $@ : 'not a object' ) );
+		die( 'could not parse --rule as a JSON object: ' . ( $@ ? $@ : 'not an object' ) );
 	}
 
 	return $decoded;

@@ -8,7 +8,7 @@ use Lilith::Escalate ();
 
 =head1 NAME
 
-Lilith::Escalate::Type::Syslog - Escalate a event via syslog.
+Lilith::Escalate::Type::Syslog - Escalate an event via syslog.
 
 =head1 VERSION
 
@@ -33,7 +33,7 @@ my %facilities = map { $_ => 1 } qw(
 
 # the fields pulled off the event by default; expressed as JSONPath so a site
 # can trim or extend them per target from the web UI. 'id' is always logged
-# separately so a event can be identified even if these are cleared.
+# separately so an event can be identified even if these are cleared.
 my @default_json_paths = (
 	{ key => 'event_id',  path => '$.event_id' },
 	{ key => 'instance',  path => '$.instance' },
@@ -137,14 +137,14 @@ sub check_config {
 				die("each json_paths entry must be a key/path object\n");
 			}
 
-			# a blank path is a empty row and simply ignored at escalate time
+			# a blank path is an empty row and simply ignored at escalate time
 			next if !defined( $spec->{path} ) || $spec->{path} eq '';
 
 			if ( defined( $spec->{key} ) && $spec->{key} ne '' && $spec->{key} !~ /^[A-Za-z0-9._-]+$/ ) {
 				die( '"' . $spec->{key} . '" is not a usable json_paths field name' . "\n" );
 			}
 
-			# JSON::Path parses lazily, so actually evaluate against a empty
+			# JSON::Path parses lazily, so actually evaluate against an empty
 			# document to surface a malformed expression here instead of at
 			# escalate time; warnings from odd but harmless paths are muffled
 			my $ok = eval {
