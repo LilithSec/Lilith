@@ -37,6 +37,181 @@
     else { el.style.display = 'none'; }
   }
 
+  // ---- Shodan ----------------------------------------------------------
+  //
+  // Only reached when enable_shodan is set; see showIpInfo below.
+
+  // The tags that change what an alert means, colored so they are not lost in a
+  // row of grey chips. Everything else Shodan tags a host with is descriptive
+  // (cloud, cdn, starttls, ...) and stays grey.
+  var SHODAN_TAG_CLASS = {
+    compromised: 'bg-danger', malware: 'bg-danger', c2: 'bg-danger', doublepulsar: 'bg-danger',
+    honeypot: 'bg-warning text-dark', scanner: 'bg-warning text-dark', tor: 'bg-warning text-dark',
+    vpn: 'bg-warning text-dark', proxy: 'bg-warning text-dark', ics: 'bg-warning text-dark',
+    'self-signed': 'bg-warning text-dark', 'eol-os': 'bg-warning text-dark',
+    'eol-product': 'bg-warning text-dark', database: 'bg-warning text-dark'
+  };
+
+  // Append one badge to a container. Unlike util.appendBadge this takes the
+  // class rather than a boolean, since these are not pass/fail.
+  function chip(container, text, cssClass, title) {
+    var chipEl = document.createElement('span');
+    chipEl.className = 'badge me-1 mb-1 ' + (cssClass || 'bg-secondary');
+    chipEl.textContent = text;
+    if (title) { chipEl.title = title; }
+    container.appendChild(chipEl);
+    return chipEl;
+  }
+
+  // One CVE as a chip linking to its NVD entry, colored by severity and
+  // carrying Shodan's summary as its tooltip.
+  //
+  // Chips rather than a table because the count varies wildly — a long-lived
+  // Apache host can carry over a hundred CVEs, and a hundred table rows would
+  // be the whole modal. The summary only exists on the API tier, and is long
+  // enough that a tooltip is the right place for it either way.
+  function vulnChip(container, vuln) {
+    var cssClass = 'bg-secondary';
+    if (vuln.cvss !== '' && vuln.cvss >= 9)      { cssClass = 'bg-danger'; }
+    else if (vuln.cvss !== '' && vuln.cvss >= 7) { cssClass = 'bg-warning text-dark'; }
+
+    var label = vuln.cve + (vuln.cvss !== '' ? ' ' + vuln.cvss : '') + (vuln.verified ? ' ✓' : '');
+    var linkEl = document.createElement('a');
+    linkEl.className = 'badge me-1 mb-1 text-decoration-none ' + cssClass;
+    linkEl.href = 'https://nvd.nist.gov/vuln/detail/' + encodeURIComponent(vuln.cve);
+    linkEl.target = '_blank';
+    linkEl.rel = 'noopener noreferrer';
+    linkEl.textContent = label;
+    if (vuln.summary) { linkEl.title = vuln.summary; }
+    container.appendChild(linkEl);
+  }
+
+  // One service block: the port as a heading, whatever the banner identified
+  // under it, and the raw banner text itself.
+  function serviceBlock(container, service) {
+    var block = document.createElement('div');
+    block.className = 'border-start border-secondary ps-2 mt-2';
+
+    // "443/tcp — nginx 1.18.0", falling back to the crawler module that found
+    // it when Shodan could not name the product.
+    var name = [service.product, service.version].filter(Boolean).join(' ') || service.module;
+    var headingEl = document.createElement('div');
+    headingEl.className = 'small fw-semibold';
+    headingEl.textContent = service.port + '/' + (service.transport || 'tcp') + (name ? ' — ' + name : '');
+    block.appendChild(headingEl);
+
+    var table = document.createElement('table');
+    table.className = 'table table-dark table-sm table-borderless mb-0 mt-1';
+    var tbody = document.createElement('tbody');
+    table.appendChild(tbody);
+
+    var http = service.http || {}, ssl = service.ssl || {}, ssh = service.ssh || {};
+    util.kvRow(tbody, 'HTTP title', http.title);
+    util.kvRow(tbody, 'HTTP server', http.server);
+    util.kvRow(tbody, 'HTTP status', http.status);
+    util.kvRow(tbody, 'WAF', http.waf);
+    util.kvRow(tbody, 'Components', http.components);
+    util.kvRow(tbody, 'Favicon hash', http.favicon_hash);
+    util.kvRow(tbody, 'TLS versions', ssl.versions);
+    util.kvRow(tbody, 'Cipher', ssl.cipher);
+    util.kvRow(tbody, 'Certificate', ssl.cert_subject);
+    util.kvRow(tbody, 'Issuer', ssl.cert_issuer);
+    util.kvRow(tbody, 'Cert expires', ssl.cert_expires
+      ? (ssl.cert_expires + (ssl.cert_expired ? ' (EXPIRED)' : '')) : undefined,
+      ssl.cert_expired ? 'text-warning' : '');
+    util.kvRow(tbody, 'Cert serial', ssl.cert_serial);
+    util.kvRow(tbody, 'Cert SHA-256', ssl.cert_fingerprint);
+    util.kvRow(tbody, 'JARM', ssl.jarm);
+    util.kvRow(tbody, 'JA3S', ssl.ja3s);
+    util.kvRow(tbody, 'SSH key type', ssh.type);
+    util.kvRow(tbody, 'SSH fingerprint', ssh.fingerprint);
+    util.kvRow(tbody, 'HASSH', ssh.hassh);
+    util.kvRow(tbody, 'CPE', service.cpes);
+    util.kvRow(tbody, 'CVEs', service.vulns);
+    util.kvRow(tbody, 'Seen', service.timestamp);
+    if (tbody.childNodes.length) { block.appendChild(table); }
+
+    if (service.banner) {
+      var bannerEl = document.createElement('pre');
+      bannerEl.className = 'small mt-1 mb-0';
+      bannerEl.style.whiteSpace = 'pre-wrap';
+      bannerEl.style.maxHeight = '150px';
+      bannerEl.style.overflowY = 'auto';
+      bannerEl.textContent = service.banner;
+      block.appendChild(bannerEl);
+    }
+
+    container.appendChild(block);
+  }
+
+  // Fill the IP info modal's Shodan section from an /api/ipinfo response, and
+  // decide whether it is shown at all.
+  //
+  // The section stays hidden when the feature is off, which is the only case
+  // where the response carries neither a result nor an error. An address that
+  // was deliberately not looked up (private, reserved) and one Shodan simply
+  // has nothing on both show the section with a note saying which, since "no
+  // data" and "not asked" mean different things to whoever is triaging.
+  function fillShodan(data) {
+    var shodan = data.shodan || {};
+    var section = document.getElementById('ipinfo-shodan-section');
+    var tagsEl = document.getElementById('ipinfo-shodan-tags');
+    var portsEl = document.getElementById('ipinfo-shodan-ports');
+    var summaryEl = document.getElementById('ipinfo-shodan-summary');
+    var vulnsEl = document.getElementById('ipinfo-shodan-vulns');
+    var servicesEl = document.getElementById('ipinfo-shodan-services');
+    var linkEl = document.getElementById('ipinfo-shodan-link');
+    var noteEl = document.getElementById('ipinfo-shodan-note');
+
+    tagsEl.innerHTML = ''; portsEl.innerHTML = ''; summaryEl.innerHTML = '';
+    vulnsEl.innerHTML = ''; servicesEl.innerHTML = '';
+    setError(document.getElementById('ipinfo-shodan-error'), data.shodan_error);
+    document.getElementById('ipinfo-shodan-vulns-wrap').style.display = 'none';
+    linkEl.style.display = 'none';
+    noteEl.style.display = 'none';
+
+    section.style.display = (shodan.source || shodan.skipped || data.shodan_error) ? '' : 'none';
+    if (shodan.skipped) {
+      noteEl.textContent = 'not queried — ' + shodan.skipped;
+      noteEl.style.display = '';
+      return;
+    }
+    if (!shodan.source) { return; }
+
+    linkEl.href = shodan.url;
+    linkEl.style.display = '';
+
+    var ports = shodan.ports || [];
+    if (!ports.length && !(shodan.services || []).length && !(shodan.tags || []).length) {
+      noteEl.textContent = 'no data for this address';
+      noteEl.style.display = '';
+    }
+
+    (shodan.tags || []).forEach(function (tag) { chip(tagsEl, tag, SHODAN_TAG_CLASS[tag]); });
+    ports.forEach(function (port) { chip(portsEl, port, 'bg-secondary'); });
+
+    // Whether this was served from the cache matters for the same reason
+    // "Last seen" does — it says how old the answer on screen actually is.
+    util.kvRow(summaryEl, 'Source',
+      (shodan.source === 'api' ? 'Shodan host API' : 'InternetDB (no API key)')
+        + (shodan.cached ? ' — cached' : ''));
+    util.kvRow(summaryEl, 'Last seen', shodan.last_update);
+    util.kvRow(summaryEl, 'OS', shodan.os);
+    util.kvRow(summaryEl, 'Hostnames', shodan.hostnames);
+    util.kvRow(summaryEl, 'Domains', shodan.domains);
+    util.kvRow(summaryEl, 'CPE', shodan.cpes);
+
+    var vulns = shodan.vulns || [];
+    if (vulns.length) {
+      document.getElementById('ipinfo-shodan-vulns-wrap').style.display = '';
+      document.getElementById('ipinfo-shodan-vulns-label').textContent =
+        'Vulnerabilities (' + vulns.length + ')';
+      vulns.forEach(function (vuln) { vulnChip(vulnsEl, vuln); });
+    }
+
+    (shodan.services || []).forEach(function (service) { serviceBlock(servicesEl, service); });
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
 
     // ---- Go to Event -------------------------------------------------------
@@ -86,6 +261,8 @@
         setError(document.getElementById('ipinfo-geo-error'), data.geo_error);
         geoSection.style.display = (geoKeys.length || data.geo_error) ? '' : 'none';
 
+        fillShodan(data);
+
         setError(document.getElementById('ipinfo-error'), null);
         document.getElementById('ipinfo-whois').textContent = data.whois || '(none)';
       }, function (message) {
@@ -93,6 +270,7 @@
         document.getElementById('ipinfo-rdns').textContent = '';
         document.getElementById('ipinfo-ptr-name').textContent = '';
         document.getElementById('ipinfo-geo-section').style.display = 'none';
+        document.getElementById('ipinfo-shodan-section').style.display = 'none';
         document.getElementById('ipinfo-whois').textContent = '';
       });
     };

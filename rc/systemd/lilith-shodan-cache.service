@@ -1,0 +1,41 @@
+# systemd service for filling Lilith's Shodan cache.
+#
+# This is a oneshot run driven by lilith-shodan-cache.timer; it is not a
+# long running daemon. Install both files into /etc/systemd/system/ and
+# enable the timer (not the service):
+#
+#   cp rc/systemd/lilith-shodan-cache.service rc/systemd/lilith-shodan-cache.timer \
+#       /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now lilith-shodan-cache.timer
+#
+# Each run reads the addresses named by recent alerts and looks up the ones
+# the cache does not already hold, so the web UI has something to show
+# without anyone having opened each address by hand first. The -s window
+# only bounds how far back a run reads; an address's own cache entry is
+# what stops it being looked up twice, so a window wider than the timer's
+# interval is safe and is what keeps an alert ingested between runs from
+# being missed.
+#
+# Shodan allows about one request a second, so a run costs roughly a second
+# per address it has to look up. In steady state that is a handful. The
+# first run against a database that has been collecting for a while is not
+# -- do that pass by hand with `lilith shodan_cache -s 0 --limit 500`
+# before enabling the timer.
+
+[Unit]
+Description=Lilith Shodan cache fill
+Documentation=man:lilith
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# run as the same low privilege user that holds Lilith's database
+# credentials; this only touches the database and Shodan, not the EVE logs
+User=lilith
+Group=lilith
+Nice=10
+ExecStart=/usr/local/bin/lilith shodan_cache -s 600
+# to use a non default config file, comment the line above and use:
+#ExecStart=/usr/local/bin/lilith --config /usr/local/etc/lilith.toml shodan_cache -s 600

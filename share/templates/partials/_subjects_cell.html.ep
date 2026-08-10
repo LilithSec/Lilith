@@ -1,0 +1,32 @@
+% # Contents of one baphomet results-table Subjects cell: the record's subject
+% # vars on a single line as !var=value (score) entries, sorted by var name, with
+% # the var that crossed its threshold in red. Every var carries a score, so the
+% # marking is the only thing saying which one tripped the rule.
+% #
+% # Expects $subjects, the baphomet_subjects map; renders nothing when empty.
+% #
+% # The entries are assembled and escaped in Perl rather than spread over
+% # template lines whose newlines would show as gaps mid line. The event page has
+% # no markup to hang the colour on -- its field is one cell of a plain key/value
+% # grid -- so it renders the same line through baphomet_subjects_line, which
+% # marks a crossed var with a leading ! and nothing else.
+% my @entries;
+% for my $var (sort keys %{$subjects}) {
+%   my $subject = $subjects->{$var};
+%   # a usedns rule resolved value shows the hostname it resolved to, or the
+%   # first address where there is no name; a var holding several unresolved
+%   # values is written as the list it is
+%   my $value = $subject->{val};
+%   if (ref $value eq 'HASH') {
+%     my @ips = ref $value->{ip} eq 'ARRAY' ? @{ $value->{ip} } : ();
+%     $value = defined $value->{hostname} ? $value->{hostname} : $ips[0];
+%   } elsif (ref $value eq 'ARRAY') {
+%     $value = join(', ', @{$value});
+%   }
+%   my $name = Mojo::Util::xml_escape(($subject->{crossed} ? '!' : '') . $var);
+%   $name = '<span class="text-danger fw-bold" title="crossed its threshold">' . $name . '</span>'
+%     if $subject->{crossed};
+%   $name .= '=' . Mojo::Util::xml_escape($value) if defined $value && !ref $value;
+%   push(@entries, $name . ' (' . Mojo::Util::xml_escape($subject->{score}) . ')');
+% }
+%== join(', ', @entries)

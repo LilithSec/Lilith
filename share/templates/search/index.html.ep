@@ -172,6 +172,11 @@
                      title="Show the GeoIP city next to the country flag for each IP">City</label>
             </div>
             <div class="form-check mb-0">
+              <input class="form-check-input" type="checkbox" id="show-shodan" checked>
+              <label class="form-check-label small" for="show-shodan"
+                     title="Show the cached Shodan tags, open port count, and CVE count for each IP">Shodan</label>
+            </div>
+            <div class="form-check mb-0">
               <input class="form-check-input" type="checkbox" id="auto-refresh">
               <label class="form-check-label small" for="auto-refresh">Auto-refresh</label>
             </div>

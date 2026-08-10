@@ -35,6 +35,22 @@ keep anything out of the database.
 `Generic Protocol Command Decode` is a handy classification to drop —
 it is spammy.
 
+### Shodan
+
+Read by both the web frontend and the `shodan_cache` command, which is
+why these sit outside the web-only settings below. All optional.
+
+| key                | description                                     |
+|--------------------|--------------------------------------------------|
+| `enable_shodan`    | Boolean. Adds a Shodan section to the web UI's IP info modal — open ports, tags, CPEs, and known CVEs, plus per-service banners when a key is set — and the port/tag/CVE badges on the results tables' IP cells. Off by default, as it takes a Shodan account to be worth turning on. Private, reserved, and documentation addresses are never sent. Does not gate the `shodan_cache` command; running that is already a decision of its own. |
+| `shodan_api_key`   | A Shodan API key. With one, `/shodan/host/{ip}` is used, which adds the per-service detail: product and version per port, TLS certificates with their JARM/JA3S fingerprints, HTTP titles and detected components, and CVEs attributed to the service they were found on. The lookup costs no query credits. Without one the free keyless InternetDB summary is used instead. Needs `WWW::Shodan::API` installed. |
+| `shodan_cache_ttl` | Seconds an answer stays fresh in the `shodan_cache` table. Default `2592000` (30 days), since what Shodan knows about a host changes on the order of its own crawl interval; `0` disables caching, and with it off the `shodan_cache` command refuses to run. Unlike the domain info cache this lives in the database, so one lookup serves every worker and survives a restart; entries past the TTL are cleared as new ones are written. Needs schema version 15 — with an older database the web lookups run live and log the failure. |
+
+The badges on the results tables read this cache and never trigger a
+lookup, so on their own they only appear for addresses someone has already
+opened the modal for. Run `lilith shodan_cache` on a timer to fill it
+ahead of time; see [usage](usage.md).
+
 ### The web frontend
 
 All optional; all default off / unset. Read [security](security.md)

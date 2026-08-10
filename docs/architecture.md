@@ -70,7 +70,7 @@ the sensors carry a much smaller dependency chain. See
 PostgreSQL is required — the `raw` column is jsonb, and the schema is
 managed with
 [DBIx::Class::Migration](https://metacpan.org/pod/DBIx::Class::Migration)
-(currently schema version 11; see [install](install.md) for the `lilith deploy`
+(currently schema version 15; see [install](install.md) for the `lilith deploy`
 and `lilith migrate` commands that wrap it).
 
 | table                | what                                                         |
@@ -84,6 +84,7 @@ and `lilith migrate` commands that wrap it).
 | `auto_escalations`   | the standing orders — match/actions rule DSL, priority, table scoping, match stats |
 | `receiver_apikeys`   | the EVE receiver's bearer keys — the SHA-256 of each key, its IP and instance scopes, enabled flag, last use |
 | `dashboards`         | saved dashboard boards — the widget layout and view settings as jsonb, and which board is the default |
+| `shodan_cache`       | what Shodan last said about an address — its response as jsonb, plus the ports, tags, CPEs, CVEs, and worst CVSS worth querying without opening it |
 
 Each alert table also carries an `escalations bigint[]` column (the IDs of
 escalations recorded for that row, appended in the same transaction as the

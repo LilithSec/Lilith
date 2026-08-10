@@ -68,6 +68,7 @@ my %WriteMakefileArgs = (
 					'IP::Geolocation::MMDB' => '0',    # web: GeoIP country/subdivision in the IP columns and modal
 					'Mozilla::PublicSuffix' => '0',    # web: accurate registrable-domain reduction for whois
 					'Net::IP'               => '0',    # web: IPv6 reverse-DNS lookups in the IP info modal
+					'WWW::Shodan::API'      => '0',    # web: the keyed Shodan tier in the IP info modal
 					'File::LibMagic'        => '0',    # cape_submit: full fileinfo.magic (falls back to file(1))
 				},
 			},

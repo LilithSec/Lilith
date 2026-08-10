@@ -128,17 +128,15 @@ sub index {
 		$error = $@ if $@;
 	}
 
-	# The Subjects column of the baphomet results table shows the record's
-	# subjects_crossed map -- who crossed a threshold, which is no longer a
-	# column of its own -- so dig it out of raw here and hand the template the
-	# JSON text. Rows without one (every routine found/noted/sighting) get no
-	# key and render empty.
+	# The Subjects column of the baphomet results table shows each subject var
+	# with the value it was seen as and the score it reached. That detail lives in
+	# raw rather than in columns of its own, so decode it here and hand the
+	# template the combined map to render its cell from. A row with no subject
+	# vars at all gets an empty map and renders empty.
 	if ( $table eq 'baphomet' && ref $results eq 'ARRAY' ) {
 		foreach my $row (@$results) {
 			my $decoded = eval { Mojo::JSON::from_json( $row->{raw} ) };
-			if ( ref $decoded eq 'HASH' && ref $decoded->{subjects_crossed} eq 'HASH' ) {
-				$row->{subjects_crossed} = Mojo::JSON::to_json( $decoded->{subjects_crossed} );
-			}
+			$row->{subjects} = $self->baphomet_subjects($decoded);
 		}
 	}
 
@@ -155,8 +153,13 @@ sub index {
 	}
 
 	$self->stash(
-		results         => $results,
-		escalated       => $escalated,
+		results   => $results,
+		escalated => $escalated,
+
+		# What the Shodan cache already holds for the addresses on this page, for
+		# the badges on their cells. One query for the page, and never a lookup --
+		# an address with no cached entry simply gets no badges.
+		shodan_badges   => $self->shodan_badges($results),
 		error           => $error,
 		table           => $table,
 		go_back_minutes => $go_back_minutes,

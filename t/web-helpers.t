@@ -20,8 +20,10 @@ use_ok('Lilith::Web') or BAIL_OUT('Lilith::Web failed to load');
 	local $ENV{LILITH_CONFIG} = $cf;
 	my $app = Test::Mojo->new('Lilith::Web')->app;
 
-	is( $app->dns_bg_timeout(),   3, 'dns_bg_timeout defaults to 3' );
-	is( $app->dnstracer_enable(), 0, 'dnstracer_enable defaults to 0 (false)' );
+	is( $app->dns_bg_timeout(),   3,  'dns_bg_timeout defaults to 3' );
+	is( $app->dnstracer_enable(), 0,  'dnstracer_enable defaults to 0 (false)' );
+	is( $app->shodan_enable(),    0,  'shodan_enable defaults to 0 (false)' );
+	is( $app->shodan_api_key(),   '', 'shodan_api_key defaults to empty' );
 	is_deeply( $app->dnstracer_flags(), [], 'dnstracer_flags defaults to empty arrayref' );
 }
 
@@ -440,6 +442,219 @@ SKIP: {
 	);
 
 	is( $app->cape_results_for('nope'), undef, 'cape_results_for is undef for an unknown instance' );
+}
+
+# ---------------------------------------------------------------------------
+# 13.  Shodan helpers — the enable and the key that picks the tier
+# ---------------------------------------------------------------------------
+
+{
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	print $fh "enable_shodan = true\n";
+	close $fh;
+
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
+
+	is( $app->shodan_enable(),    1,            'enable_shodan = true turns the lookup on' );
+	is( $app->shodan_api_key(),   '',           'a key is optional -- without one the keyless tier is used' );
+	is( $app->shodan_source(),    'internetdb', 'no key selects the keyless tier' );
+	is( $app->shodan_cache_ttl(), 2592000,      'the cache ttl defaults to a month' );
+}
+
+{
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	print $fh "enable_shodan = true\n";
+	print $fh qq{shodan_api_key = "abc123"\n};
+	print $fh "shodan_cache_ttl = 900\n";
+	close $fh;
+
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
+
+	is( $app->shodan_api_key(),   'abc123', 'shodan_api_key is read from the config' );
+	is( $app->shodan_source(),    'api',    'a key selects the host API tier' );
+	is( $app->shodan_cache_ttl(), 900,      'shodan_cache_ttl is read from the config' );
+
+	# The tags that change what an alert means are coloured on the results
+	# tables; everything else Shodan tags a host with stays grey.
+	is( $app->shodan_tag_class('compromised'), 'bg-danger',            'a compromised host is flagged red' );
+	is( $app->shodan_tag_class('tor'),         'bg-warning text-dark', 'a tor node is flagged amber' );
+	is( $app->shodan_tag_class('cloud'),       'bg-secondary',         'a descriptive tag stays grey' );
+	is( $app->shodan_tag_class(undef),         'bg-secondary',         'an unset tag stays grey' );
+
+	# No rows, no query -- the badge helper never reaches the database for a page
+	# that names no addresses, which is what keeps it off the unconfigured ones.
+	is_deeply( $app->shodan_badges( [] ),  {}, 'no results means no badge lookup' );
+	is_deeply( $app->shodan_badges(undef), {}, 'no result set at all means no badge lookup' );
+}
+
+# ---------------------------------------------------------------------------
+# 14.  baphomet_subjects helper — subject_vars and subjects_crossed combined
+# ---------------------------------------------------------------------------
+
+{
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	close $fh;
+
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
+
+	is_deeply(
+		$app->baphomet_subjects(
+			{
+				subject_vars        => { SRC => '203.0.113.66', USER => 'jdoe' },
+				subject_vars_scores => { SRC => 9.5,            USER => 3 },
+				subjects_crossed    => { SRC => 9.5 }
+			}
+		),
+		{ SRC => { val => '203.0.113.66', score => 9.5, crossed => 1 }, USER => { val => 'jdoe', score => 3 } },
+		'every var carries its held score, and only the one that crossed is marked'
+	);
+
+	# nothing held for a var means it stands at nothing, not at unknown
+	is_deeply(
+		$app->baphomet_subjects( { subject_vars => { USER => 'jdoe' } } ),
+		{ USER => { val => 'jdoe', score => 0 } },
+		'a var with no score held scores 0'
+	);
+
+	# a crossing record from a rule with no scores of its own still has the
+	# crossing score to show
+	is_deeply(
+		$app->baphomet_subjects(
+			{ subject_vars => { SRC => '203.0.113.66' }, subjects_crossed => { SRC => 9.5 } }
+		),
+		{ SRC => { val => '203.0.113.66', score => 9.5, crossed => 1 } },
+		'the crossing score stands in when nothing is held'
+	);
+
+	# a usedns rule resolves a var to a hostname plus addresses; the value rides
+	# through as it was stored rather than being flattened, and the addresses
+	# raced the one threshold so the highest of their scores is the var's
+	is_deeply(
+		$app->baphomet_subjects(
+			{
+				subject_vars =>
+					{ SRC => { hostname => 'scanner.example.org', ip => [ '203.0.113.66', '198.51.100.9' ] } },
+				subject_vars_scores => { SRC => { '203.0.113.66' => 5, '198.51.100.9' => 7 } }
+			}
+		),
+		{
+			SRC => {
+				val   => { hostname => 'scanner.example.org', ip => [ '203.0.113.66', '198.51.100.9' ] },
+				score => 7
+			}
+		},
+		'a resolved subject keeps its hostname/ip structure and takes its highest address score'
+	);
+
+	# a var seen only as scored still shows up, without a value to show for it
+	is_deeply(
+		$app->baphomet_subjects( { subjects_crossed => { USER => 5 } } ),
+		{ USER => { score => 5, crossed => 1 } },
+		'a crossed var missing from subject_vars still appears'
+	);
+
+	is_deeply( $app->baphomet_subjects( {} ),   {}, 'a record with none of the keys combines to nothing' );
+	is_deeply( $app->baphomet_subjects(undef),  {}, 'an undecodable record combines to nothing' );
+	is_deeply( $app->baphomet_subjects('nope'), {}, 'a non-hash record combines to nothing' );
+	is_deeply( $app->baphomet_subjects( { subject_vars => 'nope' } ),
+		{}, 'a subject_vars that is not a hash is ignored' );
+}
+
+# ---------------------------------------------------------------------------
+# 15.  baphomet_subjects_line helper — the search column's one line render
+# ---------------------------------------------------------------------------
+
+{
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	close $fh;
+
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
+
+	is(
+		$app->baphomet_subjects_line(
+			{
+				subject_vars        => { USER => 'jdoe', SRC => '203.0.113.66' },
+				subject_vars_scores => { USER => 3,      SRC => 9.5 },
+				subjects_crossed    => { SRC  => 9.5 }
+			}
+		),
+		'!SRC=203.0.113.66 (9.5), USER=jdoe (3)',
+		'vars render sorted by name with their scores, the crossed one marked'
+	);
+
+	is(
+		$app->baphomet_subjects_line(
+			{
+				subject_vars        => { SRC => { hostname       => 'scanner.example.org', ip => ['203.0.113.66'] } },
+				subject_vars_scores => { SRC => { '203.0.113.66' => 5 } }
+			}
+		),
+		'SRC=scanner.example.org (5)',
+		'a resolved subject renders as its hostname'
+	);
+
+	is(
+		$app->baphomet_subjects_line( { subject_vars => { SRC => { ip => ['203.0.113.66'] } } } ),
+		'SRC=203.0.113.66 (0)',
+		'a resolved subject with no hostname falls back to its first address'
+	);
+
+	is(
+		$app->baphomet_subjects_line( { subject_vars => { SRC => [ '203.0.113.66', '198.51.100.9' ] } } ),
+		'SRC=203.0.113.66, 198.51.100.9 (0)',
+		'a var holding several unresolved values renders as the list it is'
+	);
+
+	is( $app->baphomet_subjects_line( { subjects_crossed => { USER => 5 } } ),
+		'!USER (5)', 'a var with no value renders as the name and score alone' );
+
+	is( $app->baphomet_subjects_line( {} ),  '', 'a record with no subject vars renders as empty' );
+	is( $app->baphomet_subjects_line(undef), '', 'an undecodable record renders as empty' );
+}
+
+# ---------------------------------------------------------------------------
+# 16.  the Subjects cell partial — the same line with the crossed var in red
+# ---------------------------------------------------------------------------
+
+{
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	close $fh;
+
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $app = Test::Mojo->new('Lilith::Web')->app;
+	my $c   = $app->build_controller;
+
+	my $subjects = $c->baphomet_subjects(
+		{
+			subject_vars => {
+				SRC  => { hostname => 'scanner.example.org', ip => [ '203.0.113.66', '198.51.100.9' ] },
+				USER => 'j<doe>'
+			},
+			subject_vars_scores => { SRC => { '203.0.113.66' => 5, '198.51.100.9' => 7 }, USER => 3 },
+			subjects_crossed    => { SRC => 7 },
+		}
+	);
+
+	my $rendered = $c->render_to_string( template => 'partials/_subjects_cell', subjects => $subjects );
+
+	like(
+		$rendered,
+		qr{<span class="text-danger fw-bold" title="crossed its threshold">!SRC</span>=scanner\.example\.org \(7\)},
+		'the var that crossed renders in red, as its hostname and highest address score'
+	);
+	like( $rendered, qr/(?<!>)USER=j&lt;doe&gt; \(3\)/, 'a var that did not cross renders plain, and escaped' );
+
+	is( $c->render_to_string( template => 'partials/_subjects_cell', subjects => {} ),
+		"\n", 'a record with no subject vars renders nothing' );
 }
 
 done_testing();

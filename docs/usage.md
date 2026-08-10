@@ -160,6 +160,56 @@ lilith cape_submit --server main --slug hunt /tmp/a.exe /tmp/b.dll --output json
 `--server` is optional when exactly one server is configured. It exits non-zero
 if any file failed to submit.
 
+### shodan_cache
+
+Look up the addresses recent alerts name and store what Shodan knows in the
+`shodan_cache` table, so the web UI's IP info modal and its results-table
+badges have something to show without anyone having opened each address by
+hand first. See [configuration](configuration.md#shodan) for the settings.
+
+```shell
+# what a run would ask about, without asking
+lilith shodan_cache --dry-run
+
+# the last ten minutes, for a five minute timer
+lilith shodan_cache -s 600
+
+# the whole database, five hundred addresses at a time
+lilith shodan_cache -s 0 --limit 500
+```
+
+| option      | what                                                          |
+|-------------|----------------------------------------------------------------|
+| `-s`        | How far back to read, in seconds. Default `180`; `0` reads everything. |
+| `--tables`  | Comma separated alert tables to read. All four by default.     |
+| `--limit`   | Stop after this many lookups. `0`, the default, is no limit.   |
+| `--dry-run` | Report what would be looked up without asking Shodan.          |
+
+Three kinds of address are dropped before anything leaves the machine, in
+this order: the ones that are not public (nothing to learn, and nothing that
+should go to a third party), the ones the cache already holds fresh, and
+anything past `--limit`. The summary line accounts for all of them, so a run
+that did nothing says why.
+
+`-s` only bounds how far back a run reads. What stops an address being looked
+up twice is its own cache entry, so a window wider than the interval it runs
+on is safe, and is what keeps an alert ingested between runs from being
+missed. CAPE is read on its `stop` time, which can lag ingestion, so give it
+room.
+
+Shodan allows about a request a second and this obeys that, so a run costs
+roughly a second per address it has to look up. In steady state that is a
+handful. The first pass over a database that has been collecting for a while
+is not — do that by hand, in bounded chunks, before putting it on a timer.
+Ready made systemd units and a cron.d entry ship under `rc/`; see
+[install](install.md#the-shodan-cache-timer).
+
+Unlike the web frontend's Shodan section, this is not gated on
+`enable_shodan` — running it is already the operator saying so, the same
+reasoning that leaves the CLI escalation actions ungated. It does need
+`shodan_cache_ttl` to be non-zero; with caching off there would be nowhere to
+put an answer.
+
 ### And the rest
 
 | command                     | what                                              |

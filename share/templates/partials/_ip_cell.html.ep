@@ -1,7 +1,8 @@
 % # Contents of one results-table IP cell: a clickable filter link for the IP, a
-% # "?" button opening the layout's IP info modal, and the GeoIP country flag
-% # with subdivision and (toggleable) city. Expects $ip; renders nothing when
-% # the IP is unset. Shared by the suricata/sagan/baphomet search result tables.
+% # "?" button opening the layout's IP info modal, the GeoIP country flag with
+% # subdivision and (toggleable) city, and the Shodan badges when the cache holds
+% # an entry for the address. Expects $ip; renders nothing when the IP is unset.
+% # Shared by the suricata/sagan/baphomet search result tables.
 % if ($ip) {
 <a href="#" class="ip-filter" data-ip="<%= $ip %>"><%= $ip %></a>
 %= include 'partials/_info_btn', kind => 'ip', value => $ip
@@ -16,6 +17,34 @@
 <span class="text-muted small" title="<%= $country %>"><%= $geo =%>
 <% if ($city) { =%>
 <span class="geoip-city"> <%= $city %></span><% } =%>
+</span>
+% }
+% # What Shodan knows, when the cache already had it -- the counts and tags worth
+% # seeing without opening the modal, which is where the detail behind each of
+% # them lives. Prefetched for the whole page by the shodan_badges helper, so a
+% # cell that finds nothing here simply shows nothing.
+% my $shodan = ( stash('shodan_badges') || {} )->{$ip};
+% if ($shodan) {
+<span class="shodan-badges">
+%   for my $tag (@{ $shodan->{tags} }) {
+<span class="badge <%= $self->shodan_tag_class($tag) %>"><%= $tag %></span>
+%   }
+%   if (my $port_count = scalar @{ $shodan->{ports} }) {
+%     # The ports themselves go in the tooltip: a host with thirty open would
+%     # otherwise be the widest cell in the table.
+<span class="badge bg-secondary" title="open ports: <%= join(', ', @{ $shodan->{ports} }) %>"><%= $port_count %> port<%= $port_count == 1 ? '' : 's' %></span>
+%   }
+%   if (my $vuln_count = $shodan->{vulns}) {
+%     # Coloured by the worst score rather than by how many, since one critical
+%     # matters more than a long tail of old lows. The keyless tier sends no
+%     # scores at all, which leaves the badge grey and the count still useful.
+%     my $max_cvss = $shodan->{max_cvss};
+%     my $cvss_class = !defined($max_cvss) ? 'bg-secondary'
+%       : $max_cvss >= 9 ? 'bg-danger'
+%       : $max_cvss >= 7 ? 'bg-warning text-dark' : 'bg-secondary';
+%     my $cvss_title = defined($max_cvss) ? 'worst CVSS ' . $max_cvss : 'no scores on this tier';
+<span class="badge <%= $cvss_class %>" title="<%= $cvss_title %>"><%= $vuln_count %> CVE</span>
+%   }
 </span>
 % }
 % }

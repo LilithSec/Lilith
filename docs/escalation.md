@@ -82,10 +82,11 @@ escalation — same audit trail, same per-row `escalations` array. Each
 alert's `auto_escalated` timestamp marks it considered, so it is evaluated
 exactly once no matter how the windows overlap.
 
-Run it periodically — ready made systemd timer units and a cron entry ship
+Run it periodically — ready made systemd timer units and a cron.d entry ship
 under `rc/`, both every five minutes with `-m 60`; see
-[install](install.md). Use `--dry-run` first to see what would fire
-without sending anything, and `--tables` to restrict a run.
+[install](install.md#the-auto-escalation-timer). Use `--dry-run` first to
+see what would fire without sending anything, and `--tables` to restrict a
+run.
 
 ```shell
 lilith auto_escalate --dry-run

@@ -124,10 +124,14 @@ lilith auto_escalate --dry-run
 Then put the timer in place (see [install](install.md)):
 
 ```shell
+# systemd
 cp rc/systemd/lilith-auto-escalate.service rc/systemd/lilith-auto-escalate.timer \
     /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now lilith-auto-escalate.timer
+
+# FreeBSD
+install -m 0644 rc/lilith-auto-escalate.cron /usr/local/etc/cron.d/lilith-auto-escalate
 ```
 
 ## Lilu on the sensors, Lilith at the center

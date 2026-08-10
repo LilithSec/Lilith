@@ -5,6 +5,7 @@ use warnings;
 use Test::More;
 use lib 't/lib';
 
+use Lilith                 ();
 use Lilith::Schema         ();
 use DBIx::Class::Migration ();
 
@@ -191,8 +192,8 @@ sub column_exists {
 	ok( index_exists( $dbh, 'suricata_alerts_ts_severity_idx' ),     'the upgrade created the severity index' );
 	ok( index_exists( $dbh, 'suricata_alerts_ts_mitre_tactic_idx' ), 'the upgrade created the MITRE tactic index' );
 	ok( !index_exists( $dbh, 'suricata_alerts_severity_ts_idx' ),    'the upgrade dropped the expression index' );
-	ok( column_exists( $dbh, 'dashboards', 'settings' ), 'the upgrade added the dashboards.settings column' );
-	ok( table_exists( $dbh, 'baphomet_alerts' ),         'the upgrade created baphomet_alerts' );
+	ok( column_exists( $dbh, 'dashboards', 'settings' ),      'the upgrade added the dashboards.settings column' );
+	ok( table_exists( $dbh, 'baphomet_alerts' ),              'the upgrade created baphomet_alerts' );
 	ok( column_exists( $dbh, 'baphomet_alerts', 'username' ), 'the 13 -> 14 upgrade added baphomet_alerts.username' );
 	ok( column_exists( $dbh, 'baphomet_alerts', 'sid' ),      'the 13 -> 14 upgrade added baphomet_alerts.sid' );
 	ok( !column_exists( $dbh, 'baphomet_alerts', 'subject' ), 'the 13 -> 14 upgrade dropped baphomet_alerts.subject' );
@@ -239,6 +240,171 @@ sub column_exists {
 		$down->dbic_dh->downgrade;    # 10 -> 9
 	}
 	ok( !table_exists( $dbh, 'baphomet_alerts' ), 'the 10 -> 9 downgrade dropped baphomet_alerts' );
+	$dbh->disconnect;
+}
+
+# ---------------------------------------------------------------------------
+# Phase 4: the 14 -> 15 -> 14 round trip (shodan_cache), and the cache methods
+# against the table the migration actually creates -- the SQL in
+# shodan_cache_put is the only place the column list, the casts, and the upsert
+# have to agree with the DDL, and nothing else would catch a disagreement.
+# ---------------------------------------------------------------------------
+{
+	my $sc_dsn = $pg->create_db('lilith_shodan_cache');
+
+	my $mig = DBIx::Class::Migration->new(
+		schema_class => 'Lilith::Schema',
+		schema_args  => [ $sc_dsn, $pg->user, $pg->pass ],
+	);
+	$mig->dbic_dh->install( { version => 14 } );
+
+	my $dbh = $pg->dbh($sc_dsn);
+	ok( !table_exists( $dbh, 'shodan_cache' ), 'shodan_cache absent at version 14' );
+
+	$mig->dbic_dh->upgrade;    # 14 -> 15
+	ok( table_exists( $dbh, 'shodan_cache' ), 'the 14 -> 15 upgrade created shodan_cache' );
+	for my $column (qw( ip source found fetched last_update ports tags cpes vulns max_cvss hostnames raw )) {
+		ok( column_exists( $dbh, 'shodan_cache', $column ), "shodan_cache has the $column column" );
+	}
+
+	# A live round trip through the methods the web UI uses.
+	my $lilith = Lilith->new( dsn => $sc_dsn, user => $pg->user, pass => $pg->pass );
+
+	is( $lilith->shodan_cache_get( '192.0.2.10', 'api', 3600 ), undef, 'an address never cached is a miss' );
+
+	my $raw  = { ports => [ 22, 443 ], tags => ['cloud'], last_update => '2026-06-14T02:11:33.123456' };
+	my $info = {
+		ports       => [ 22, 443 ],
+		tags        => ['cloud'],
+		cpes        => ['cpe:2.3:a:nginx:nginx:1.18.0:*:*:*:*:*:*:*'],
+		hostnames   => ['gate1.example.org'],
+		last_update => '2026-06-14T02:11:33.123456',
+		vulns       => [ { cve => 'CVE-2021-40438', cvss => 9.8 }, { cve => 'CVE-2019-0217', cvss => '' } ],
+	};
+	$lilith->shodan_cache_put( ip => '192.0.2.10', source => 'api', raw => $raw, info => $info, ttl => 3600 );
+
+	is_deeply( $lilith->shodan_cache_get( '192.0.2.10', 'api', 3600 ), $raw, 'the response comes back as it went in' );
+	is( $lilith->shodan_cache_get( '192.0.2.10', 'internetdb', 3600 ),
+		undef, 'a row from the keyed tier is not served to the keyless one' );
+	is( $lilith->shodan_cache_get( '192.0.2.10', 'api', 0 ), undef, 'a zero ttl never hits' );
+
+	my $row = $dbh->selectrow_hashref(q{select * from shodan_cache where ip = '192.0.2.10'});
+	is( $row->{found},    1,   'a response with content is recorded as found' );
+	is( $row->{max_cvss}, 9.8, 'max_cvss is the worst score of the scored CVEs' );
+	is_deeply( $row->{ports}, [ 22, 443 ],                                    'ports round trip as an integer array' );
+	is_deeply( $row->{cpes},  ['cpe:2.3:a:nginx:nginx:1.18.0:*:*:*:*:*:*:*'], 'cpes round trip as a text array' );
+	is_deeply(
+		[ sort @{ $row->{vulns} } ],
+		[ 'CVE-2019-0217', 'CVE-2021-40438' ],
+		'vulns are stored as the bare CVE ids'
+	);
+	# Read back in UTC: Shodan reports a naive stamp that is UTC, and the value
+	# is only right if it was taken as UTC rather than as the server's own zone.
+	my ($utc)
+		= $dbh->selectrow_array(q{select last_update at time zone 'UTC' from shodan_cache where ip = '192.0.2.10'});
+	like( $utc, qr/^2026-06-14 02:11:33/, 'shodan last_update is stored as the UTC instant it names' );
+
+	# The bulk read behind the results tables' IP cell badges: one statement for
+	# every address on a page, and only what is already cached.
+	my $badges = $lilith->shodan_cache_badges(
+		ips    => [ '192.0.2.10', '198.51.100.4' ],
+		source => 'api',
+		ttl    => 3600
+	);
+	is( scalar keys %{$badges}, 1, 'only addresses with a fresh entry come back' );
+	ok( !exists $badges->{'198.51.100.4'}, 'an uncached address is absent rather than empty' );
+	is_deeply( $badges->{'192.0.2.10'}{ports}, [ 22, 443 ], 'the badge read carries the ports' );
+	is_deeply( $badges->{'192.0.2.10'}{tags},  ['cloud'],   'the badge read carries the tags' );
+	is( $badges->{'192.0.2.10'}{vulns},    2,   'the badge read counts the CVEs rather than listing them' );
+	is( $badges->{'192.0.2.10'}{max_cvss}, 9.8, 'the badge read carries the worst score' );
+	is_deeply( $lilith->shodan_cache_badges( ips => [], source => 'api', ttl => 3600 ),
+		{}, 'no addresses means no badges' );
+
+	# An address Shodan has never crawled is cached too, as an empty response.
+	$lilith->shodan_cache_put( ip => '192.0.2.11', source => 'api', raw => {}, info => {}, ttl => 3600 );
+	is_deeply( $lilith->shodan_cache_get( '192.0.2.11', 'api', 3600 ),
+		{}, 'a cached "nothing known" is a hit, not a miss' );
+	my ($found) = $dbh->selectrow_array(q{select found from shodan_cache where ip = '192.0.2.11'});
+	is( $found, 0, 'an empty response is recorded as not found' );
+
+	# The upsert replaces rather than duplicating, and re-reads as the new value.
+	$lilith->shodan_cache_put(
+		ip     => '192.0.2.10',
+		source => 'internetdb',
+		raw    => { ports => [80] },
+		info   => { ports => [80] },
+		ttl    => 3600
+	);
+	my ($rows) = $dbh->selectrow_array(q{select count(*) from shodan_cache where ip = '192.0.2.10'});
+	is( $rows, 1, 'a second write for an address replaces the first' );
+	is_deeply(
+		$lilith->shodan_cache_get( '192.0.2.10', 'internetdb', 3600 ),
+		{ ports => [80] },
+		'the replacement is what is served'
+	);
+
+	# The prune on write clears anything already past the ttl.
+	$dbh->do(q{update shodan_cache set fetched = now() - interval '2 hours' where ip = '192.0.2.11'});
+	$lilith->shodan_cache_put( ip => '192.0.2.12', source => 'api', raw => {}, info => {}, ttl => 3600 );
+	my ($left) = $dbh->selectrow_array(q{select count(*) from shodan_cache where ip = '192.0.2.11'});
+	is( $left, 0, 'writing prunes the entries that have expired' );
+
+	# alert_ips -- what `lilith shodan_cache` reads. Distinct across both ends of
+	# every table, windowed on each table's own time column.
+	$dbh->do(
+		q{insert into suricata_alerts (instance,host,timestamp,event_id,src_ip,dest_ip,classification,signature,raw)
+		  values (?,?,now(),?,?,?,?,?,?)},
+		undef, 's1', 's1.example.org', '1', '198.51.100.1', '10.0.0.5', 'Misc Attack', 'sig', '{}'
+	);
+
+	# the same pair again, to prove one address is one entry however many alerts
+	$dbh->do(
+		q{insert into suricata_alerts (instance,host,timestamp,event_id,src_ip,dest_ip,classification,signature,raw)
+		  values (?,?,now(),?,?,?,?,?,?)},
+		undef, 's1', 's1.example.org', '2', '198.51.100.1', '10.0.0.5', 'Misc Attack', 'sig', '{}'
+	);
+
+	# CAPE is windowed on stop rather than timestamp
+	$dbh->do(
+		q{insert into cape_alerts (instance,instance_host,target,task,malscore,stop,src_ip,raw)
+		  values (?,?,?,?,?,now(),?,?)},
+		undef, 's1', 's1.example.org', 't.msi', 7, 0.2, '198.51.100.2', '{}'
+	);
+
+	# and one outside any sane window, to prove the window bounds the read
+	$dbh->do(
+		q{insert into suricata_alerts (instance,host,timestamp,event_id,src_ip,dest_ip,classification,signature,raw)
+		  values (?,?,now() - interval '2 days',?,?,?,?,?,?)},
+		undef, 's1', 's1.example.org', '3', '198.51.100.99', '10.0.0.9', 'Misc Attack', 'sig', '{}'
+	);
+
+	is_deeply(
+		$lilith->alert_ips( go_back_seconds => 600 ),
+		[ '10.0.0.5', '198.51.100.1', '198.51.100.2' ],
+		'alert_ips reads both ends of every table, deduped and windowed'
+	);
+	is_deeply( $lilith->alert_ips( go_back_seconds => 600, tables => ['cape'] ),
+		['198.51.100.2'], 'alert_ips can be scoped to one table, on that table\'s own time column' );
+	ok( scalar( grep { $_ eq '198.51.100.99' } @{ $lilith->alert_ips( go_back_seconds => 0 ) } ),
+		'a window of 0 reads everything, however old' );
+	ok( !scalar( grep { $_ eq '198.51.100.99' } @{ $lilith->alert_ips( go_back_seconds => 600 ) } ),
+		'an alert outside the window is not read' );
+	eval { $lilith->alert_ips( tables => ['nope'] ) };
+	like( $@, qr/not a known table type/, 'alert_ips rejects an unknown table' );
+	eval { $lilith->alert_ips( go_back_seconds => 'soon' ) };
+	like( $@, qr/not numeric/, 'alert_ips rejects a non-numeric window' );
+
+	# DeploymentHandler downgrades toward the schema's own version; see phase 3.
+	{
+		no warnings qw(redefine once);
+		local $Lilith::Schema::VERSION = 14;
+		my $down = DBIx::Class::Migration->new(
+			schema_class => 'Lilith::Schema',
+			schema_args  => [ $sc_dsn, $pg->user, $pg->pass ],
+		);
+		$down->dbic_dh->downgrade;    # 15 -> 14
+	}
+	ok( !table_exists( $dbh, 'shodan_cache' ), 'the 15 -> 14 downgrade dropped shodan_cache' );
 	$dbh->disconnect;
 }
 

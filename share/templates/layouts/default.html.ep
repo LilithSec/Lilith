@@ -178,6 +178,22 @@
       </table>
       <div id="ipinfo-geo-error" class="text-warning small mt-1" style="display:none"></div>
     </div>
+    <div class="mb-2" id="ipinfo-shodan-section" style="display:none">
+      <span class="text-muted small fw-semibold">Shodan</span>
+      <a id="ipinfo-shodan-link" class="small ms-2" target="_blank" rel="noopener noreferrer" style="display:none">shodan.io</a>
+      <div id="ipinfo-shodan-note" class="text-muted small mt-1" style="display:none"></div>
+      <div id="ipinfo-shodan-tags" class="mt-1"></div>
+      <div id="ipinfo-shodan-ports" class="mt-1"></div>
+      <table class="table table-dark table-sm table-borderless mb-0 mt-1">
+        <tbody id="ipinfo-shodan-summary"></tbody>
+      </table>
+      <div id="ipinfo-shodan-vulns-wrap" class="mt-1" style="display:none">
+        <span class="text-muted small fw-semibold" id="ipinfo-shodan-vulns-label"></span>
+        <div class="mt-1" id="ipinfo-shodan-vulns" style="max-height:200px;overflow-y:auto"></div>
+      </div>
+      <div id="ipinfo-shodan-services"></div>
+      <div id="ipinfo-shodan-error" class="text-warning small mt-1" style="display:none"></div>
+    </div>
     <div>
       <span class="text-muted small fw-semibold">WHOIS</span>
       <pre id="ipinfo-whois" class="small mt-1 mb-0" style="white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>

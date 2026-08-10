@@ -1,0 +1,17 @@
+# cron.d entry for filling Lilith's Shodan cache, for systems not using
+# systemd. Install as its own file rather than appended to a shared crontab:
+# /etc/cron.d/lilith-shodan-cache, or /usr/local/etc/cron.d/lilith-shodan-cache
+# on FreeBSD. The fifth field is the user to run as.
+#
+# Runs every five minutes. The -s 600 window only bounds how far back each
+# run reads; an address's own cache entry is what stops it being looked up
+# twice, so a window wider than the interval is safe and is what keeps an
+# alert ingested between runs from being missed. Add
+# `--config /path/to/lilith.toml` (before the subcommand) for a non default
+# config file.
+#
+# Shodan allows about one request a second, so a run costs roughly a second
+# per address it has to look up. Do the first pass by hand with
+# `lilith shodan_cache -s 0 --limit 500` before installing this.
+
+*/5 * * * * lilith /usr/local/bin/lilith shodan_cache -s 600

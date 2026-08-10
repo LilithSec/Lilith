@@ -28,6 +28,7 @@ without them and the feature simply stays inactive:
 | `IP::Geolocation::MMDB`   | GeoIP data in the IP info modal                     |
 | `Mozilla::PublicSuffix`   | accurate registrable-domain reduction for whois     |
 | `Net::IP`                 | IPv6 reverse-DNS lookups in the IP info modal       |
+| `WWW::Shodan::API`        | the keyed Shodan tier in the IP info modal; without it `enable_shodan` still works, using the keyless InternetDB summary |
 | `File::LibMagic`          | the full libmagic description sent with a `cape_submit` submission; falls back to `file(1)` |
 
 Two of the web UI's lookups shell out to a binary rather than using a
@@ -214,27 +215,73 @@ IPs/subnets and instance names. See [configuration](configuration.md) and
 If you use auto escalation rules (see [escalation](escalation.md)), run
 `lilith auto_escalate` periodically. Ready made units ship under `rc/`.
 
-With systemd:
-
 ```shell
+# systemd
 cp rc/systemd/lilith-auto-escalate.service rc/systemd/lilith-auto-escalate.timer \
     /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now lilith-auto-escalate.timer
+
+# cron
+install -m 0644 rc/lilith-auto-escalate.cron /etc/cron.d/lilith-auto-escalate
+
+# FreeBSD
+install -m 0644 rc/lilith-auto-escalate.cron /usr/local/etc/cron.d/lilith-auto-escalate
 ```
 
-Without systemd, the cron flavor:
+There is no rc.d script, and should not be: this is a periodic job rather
+than a daemon, so unlike `lilith run` and `mojo_lilith` there is nothing for
+`service` to supervise.
 
-```shell
-cp rc/lilith-auto-escalate.cron /etc/cron.d/lilith-auto-escalate
-```
-
-Both run every five minutes with `-m 60`. The `-m` window only bounds how
+All three run every five minutes with `-m 60`. The `-m` window only bounds how
 far back each run scans for alerts it has not considered yet; the per-alert
 `auto_escalated` marker is what prevents an alert from being escalated
 twice, so a generous window is safe. It mostly matters for CAPE alerts,
 whose `stop` time can lag well behind ingestion — raise `-m` if your CAPE
 analysis lag exceeds it.
+
+### The Shodan cache timer
+
+If the web frontend has Shodan turned on (see
+[configuration](configuration.md#shodan)), run `lilith shodan_cache`
+periodically. Each run looks up the addresses recent alerts name and stores
+what Shodan knows, so the IP info modal and the results tables' badges have
+something to show without anyone having opened each address by hand first.
+
+```shell
+# systemd
+cp rc/systemd/lilith-shodan-cache.service rc/systemd/lilith-shodan-cache.timer \
+    /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now lilith-shodan-cache.timer
+
+# cron
+install -m 0644 rc/lilith-shodan-cache.cron /etc/cron.d/lilith-shodan-cache
+
+# FreeBSD
+install -m 0644 rc/lilith-shodan-cache.cron /usr/local/etc/cron.d/lilith-shodan-cache
+```
+
+There is no rc.d script, and should not be: this is a periodic job rather
+than a daemon, so unlike `lilith run` and `mojo_lilith` there is nothing for
+`service` to supervise.
+
+All three run every five minutes with `-s 600`. The `-s` window only bounds
+how far back each run reads; an address's own cache entry is what stops it
+being looked up twice, so a window wider than the interval is safe and is
+what keeps an alert ingested between runs from being missed. CAPE is read on
+its `stop` time, which can lag ingestion, so give it room.
+
+Do the first pass by hand before enabling any of this. Shodan allows about a
+request a second, so a run costs roughly a second per address it looks up —
+in steady state a handful, but on a database that has been collecting for a
+while every distinct external address is cold at once:
+
+```shell
+lilith shodan_cache -s 0 --limit 500
+```
+
+Repeat until it reports nothing left to reach, then install the timer.
 
 ## Sensor boxes: Lilu
 

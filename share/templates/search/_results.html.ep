@@ -26,9 +26,9 @@
           <td><% if (my $instance = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $instance %>"><%= $instance %></a><% } %></td>
           <td class="col-host" style="display:none"><% if (my $host = $row->{host}) { %><a href="#" class="host-filter" data-host="<%= $host %>"><%= $host %></a><% } %></td>
           <td><% if (my $in_iface = $row->{in_iface}) { %><a href="#" class="iface-filter" data-iface="<%= $in_iface %>"><%= $in_iface %></a><% } %></td>
-          <td><%= include 'partials/_ip_cell', ip => $row->{src_ip} %></td>
+          <td class="ip-cell"><%= include 'partials/_ip_cell', ip => $row->{src_ip} %></td>
           <td><% if (my $src_port = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $src_port %>"><%= $src_port %></a><% } %></td>
-          <td><%= include 'partials/_ip_cell', ip => $row->{dest_ip} %></td>
+          <td class="ip-cell"><%= include 'partials/_ip_cell', ip => $row->{dest_ip} %></td>
           <td><% if (my $dest_port = $row->{dest_port}) { %><a href="#" class="port-filter" data-port="<%= $dest_port %>"><%= $dest_port %></a><% } %></td>
           <td><% if (my $proto = $row->{proto}) { %><a href="#" class="proto-filter" data-proto="<%= $proto %>"><%= $proto %></a><% } %></td>
           <td><% if (my $app_proto = $row->{app_proto}) { %><a href="#" class="aproto-filter" data-aproto="<%= $app_proto %>"><%= $app_proto %></a><% } %></td>
@@ -63,7 +63,7 @@
           <td><%= $row->{timestamp} // '' %></td>
           <td><% if (my $instance = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $instance %>"><%= $instance %></a><% } %></td>
           <td class="col-host" style="display:none"><% if (my $instance_host = $row->{instance_host}) { %><a href="#" class="instance-host-filter" data-instance-host="<%= $instance_host %>"><%= $instance_host %></a><% } %></td>
-          <td><%= include 'partials/_ip_cell', ip => $row->{src_ip} %></td>
+          <td class="ip-cell"><%= include 'partials/_ip_cell', ip => $row->{src_ip} %></td>
           <td><% if (my $src_port = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $src_port %>"><%= $src_port %></a><% } %></td>
           <td><%= $row->{host}      // '' %></td>
           <td><%= $row->{program}   // '' %></td>
@@ -119,8 +119,8 @@
       <thead class="table-secondary">
         <tr>
           <th>ID</th><th>Timestamp</th><th>Instance</th><th class="col-host" style="display:none">Host</th>
-          <th>Event</th><th>Src IP</th><th>Subjects</th>
-          <th>Severity</th><th>Class</th><th>Signature</th><th>Score</th>
+          <th>Event</th><th>Src IP</th><th>Sport</th><th>Dst IP</th><th>Dport</th><th>User</th><th>Subjects</th>
+          <th>Severity</th><th>Class</th><th>Signature</th>
         </tr>
       </thead>
       <tbody>
@@ -131,12 +131,17 @@
           <td><% if (my $instance = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $instance %>"><%= $instance %></a><% } %></td>
           <td class="col-host" style="display:none"><% if (my $host = $row->{host}) { %><a href="#" class="host-filter" data-host="<%= $host %>"><%= $host %></a><% } %></td>
           <td><%= $row->{event_type} // '' %></td>
-          <td><%= include 'partials/_ip_cell', ip => $row->{src_ip} %></td>
-          <td><small><%= $row->{subjects_crossed} // '' %></small></td>
+          <td class="ip-cell"><%= include 'partials/_ip_cell', ip => $row->{src_ip} %></td>
+          <td><% if (my $src_port = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $src_port %>"><%= $src_port %></a><% } %></td>
+          <td class="ip-cell"><%= include 'partials/_ip_cell', ip => $row->{dest_ip} %></td>
+          <td><% if (my $dest_port = $row->{dest_port}) { %><a href="#" class="port-filter" data-port="<%= $dest_port %>"><%= $dest_port %></a><% } %></td>
+          <td><% if (my $username = $row->{username}) { %><a href="#" class="user-filter" data-user="<%= $username %>"><%= $username %></a><% } %></td>
+          <td><small><%= include 'partials/_subjects_cell', subjects => $row->{subjects} %></small></td>
           <td><%= $row->{severity} // '' %></td>
-          <td title="<%= $row->{classification} // '' %>"><%= $row->{classification} // '' %></td>
+          <td title="<%= $row->{classification} // '' %>">
+            <%= $self->lilith->get_short_class($row->{classification}) %>
+          </td>
           <td><% if (my $signature = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $signature %>"><%= $signature %></a><% } %></td>
-          <td><%= $row->{score} // '' %></td>
         </tr>
         % }
       </tbody>

@@ -83,6 +83,11 @@ its own opt-in:
 - `virani_search_enable` :: downloading arbitrary PCAP searches and browsing
   cached searches through the web server. Off by default because it exposes
   arbitrary captures, not just the flow behind an alert being examined.
+- `enable_shodan` :: the Shodan section of the IP info modal. Off by default
+  because it takes a Shodan account to be worth turning on. Worth knowing
+  before you do: the lookup tells Shodan which addresses are being looked at,
+  which over a shift is a readable account of what is being investigated.
+  Private, reserved, and documentation addresses are never sent.
 
 The tiering is deliberate: each step up moves from *reading the annals* to
 *acting on the world*, and each is a separate decision.
@@ -105,7 +110,8 @@ filter matches.
 ## The lookups make the server talk to the world
 
 The IP and domain info panels do live reverse DNS, whois, GeoIP, HTTPS
-probes, and SPF/DMARC/DKIM checks. Two consequences:
+probes, SPF/DMARC/DKIM checks, and — with `enable_shodan` — a Shodan
+lookup. Two consequences:
 
 - The *server* makes those connections, triggered by whoever is using the
   UI. On a locked-down segment that may be an egress you did not intend;
@@ -117,6 +123,9 @@ probes, and SPF/DMARC/DKIM checks. Two consequences:
 
 The HTTPS check caps itself (5s timeout, 512KB read) and GeoIP lookups are
 local `.mmdb` reads, but DNS, whois, and the mail checks go where they must.
+The Shodan lookup is the one exception to the tipping-your-hand problem: it
+reads Shodan's own crawl rather than touching the address being examined,
+which is what makes it useful on an address you would rather not probe.
 
 ## The ingest daemon
 

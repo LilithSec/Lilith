@@ -27,6 +27,21 @@ body { padding-top: 56px; font-size: 0.9rem; }
   overflow-wrap: anywhere;
 }
 
+/* A results-table IP cell carries more than the address: the info button, the
+   geo annotation, and the Shodan badges. A host Shodan knows a lot about --
+   several tags, a port count, a CVE count -- runs that column far wider than
+   anything else in the row needs, and since the table sits in a horizontally
+   scrolling wrapper it simply grows rather than wrapping.
+
+   So these cells wrap, and the max-width is what makes them: a cell with room
+   to spare would otherwise still lay out on one line. It is about as wide as an
+   IPv6 address with its geo annotation, which leaves an address with no badges
+   unwrapped and lets a badged one run to a second or third line. */
+.table-sm td.ip-cell {
+  white-space: normal;
+  max-width: 20rem;
+}
+
 /* The one-record view's Columns table, where the same long message has the same
    problem and worse: that table has no scrolling wrapper, so instead of running
    off the table it runs off the page. The name column is pinned in the template

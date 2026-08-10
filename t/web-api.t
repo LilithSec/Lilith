@@ -482,4 +482,61 @@ SKIP: {
 	is( $j->{dkim}{selector},          'default',          'DKIM selector passed through' );
 }
 
+# ---------------------------------------------------------------------------
+# 16.  Shodan — the ipinfo response, on and off
+# ---------------------------------------------------------------------------
+
+{
+	# Off by default: the key is there but empty, so the modal hides the section.
+	my $t = _make_app();
+	my $off
+		= $t->get_ok('/api/ipinfo/127.0.0.1')
+		->status_is( 200, 'ipinfo renders 200 with Shodan off' )
+		->json_is( '/shodan_error', '', 'shodan_error is empty when the feature is off' )
+		->tx->res->json;
+	is_deeply( $off->{shodan}, {}, 'shodan is an empty object when the feature is off' );
+
+	# On, but for an address that is never sent anywhere -- so this stays local.
+	my $t2 = _make_app(qq{enable_shodan = true\n});
+	my $on
+		= $t2->get_ok('/api/ipinfo/127.0.0.1')
+		->status_is( 200, 'ipinfo renders 200 with Shodan on' )
+		->json_is( '/shodan/skipped', 'private or reserved address', 'a private address is skipped, not looked up' )
+		->tx->res->json;
+	is( $on->{shodan_error}, '', 'a skipped lookup leaves shodan_error empty' );
+}
+
+# ---------------------------------------------------------------------------
+# 17.  Shodan cache — a cache that cannot be reached costs only the caching
+# ---------------------------------------------------------------------------
+
+{
+	# Caching on, pointed at a database that is not there. The lookup itself is
+	# stubbed, so this stays local while still exercising the whole path: read
+	# the cache (fails), fetch, normalize, hand the raw response back for the
+	# write (fails), render.
+	no warnings qw(redefine once);
+	local *Lilith::Shodan::fetch = sub {
+		return ( { ports => [443], tags => ['cloud'] }, '' );
+	};
+	use warnings qw(redefine once);
+
+	my $t = _make_app(qq{enable_shodan = true\nshodan_cache_ttl = 3600\n});
+	$t->app->log->level('fatal');    # the cache failures are logged by design
+
+	my $json
+		= $t->get_ok('/api/ipinfo/8.8.8.8')
+		->status_is( 200, 'ipinfo renders 200 when the cache is unreachable' )
+		->json_is( '/shodan_error',  '',           'an unreachable cache is not reported as a lookup error' )
+		->json_is( '/shodan/source', 'internetdb', 'the lookup ran live instead' )
+		->tx->res->json;
+
+	is_deeply( $json->{shodan}{ports}, [443], 'the live result is rendered' );
+	ok( !exists $json->{shodan}{cached}, 'a live result is not marked cached' );
+
+	# Shodan's own response rides back from the subprocess for the cache write
+	# and must not reach the browser.
+	ok( !exists $json->{shodan_raw}, 'the raw response is stripped before rendering' );
+}
+
 done_testing();

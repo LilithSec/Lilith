@@ -58,8 +58,11 @@
 
   // One label/value row of a detail table. Skips blank values entirely, so
   // callers can list every possible field and let the absent ones drop out.
+  // An empty list counts as blank, since a field the source had nothing for
+  // arrives as one just as often as it arrives missing.
   function kvRow(tbody, label, value, cssClass) {
     if (value === undefined || value === null || value === '') { return; }
+    if (Array.isArray(value) && !value.length) { return; }
     var row = document.createElement('tr');
     var headerCell = document.createElement('th');
     headerCell.className = 'text-muted fw-normal ps-0';

@@ -4,6 +4,7 @@ use Mojo::Base 'Mojolicious::Controller';
 use Net::DNS              ();
 use IO::Select            ();
 use Mojo::IOLoop          ();
+use Lilith::Shodan        ();
 use Mojo::JSON            qw(decode_json);
 use Time::Piece           ();
 use Time::HiRes           ();
@@ -321,8 +322,10 @@ sub _run_capture {
 
 =head2 ipinfo
 
-Reverse DNS + whois + GeoIP for an IP, rendered as JSON. The blocking lookups
-run in a subprocess so the web server's event loop stays responsive.
+Reverse DNS + whois + GeoIP + optional Shodan for an IP, rendered as JSON. The
+blocking lookups run in a subprocess so the web server's event loop stays
+responsive; the Shodan half is served from the shodan_cache table when a fresh
+entry is held, and cached back when it is not.
 
 =cut
 
@@ -335,34 +338,126 @@ sub ipinfo {
 		return $self->render( json => { error => 'Invalid IP' }, status => 400 );
 	}
 
+	# Read here rather than in the gather: the cache is a database round trip,
+	# and the subprocess is forked from this process, where a DBI handle does not
+	# survive being shared. Everything else in the modal is a live lookup either
+	# way, so this only decides whether the Shodan section costs an API call.
+	my $cached_shodan = $self->_shodan_cache_get($ip);
+
 	$self->render_later;
 	Mojo::IOLoop->subprocess(
-		sub { return $self->_ipinfo_gather($ip); },
+		sub { return $self->_ipinfo_gather( $ip, $cached_shodan ); },
 		sub {
 			my ( $subprocess, $err, $result ) = @_;
 			if ( $err || ref $result ne 'HASH' ) {
 				return $self->render( json => { ip => $ip, error => 'lookup failed' }, status => 500 );
 			}
+
+			# Shodan's own response rides back from the subprocess only so it can
+			# be cached here in the parent; the browser is sent the normalized
+			# form and has no use for it. Absent when the lookup was cached,
+			# skipped, failed, or never made.
+			my $raw = delete $result->{shodan_raw};
+			$self->_shodan_cache_put( $ip, $result->{shodan}, $raw ) if $raw;
+
 			$self->render( json => $result );
 		},
 	);
 	return;
 } ## end sub ipinfo
 
-# Everything the IP info modal shows, gathered in one go: reverse DNS, whois,
-# and whatever the configured GeoIP databases know.
+# The cached Shodan response for an address, or undef when there is not a usable
+# one -- caching off, no entry, a stale entry, or an entry from a shallower tier
+# than the one now configured.
 #
-# All three block, which is why this is only ever called inside a
+# Wraps Lilith::shodan_cache_get with the two things the controller owns: the
+# config that decides whether the cache is consulted at all, and the promise
+# that a cache problem never costs the modal. A database that cannot be reached,
+# or one still on a schema without the table, degrades to doing the lookup live
+# -- logged, since either is a misconfiguration worth seeing, but not fatal to a
+# request whose other three sections are fine.
+#
+# Args:
+#
+#   - $ip :: the address, already validated by the caller.
+#
+# Returns: the decoded response as a hash ref, or undef. An empty hash ref is a
+# hit, not a miss: it is what an address Shodan has never crawled is stored as,
+# and re-fetching it would only get the same nothing back.
+#
+#     my $raw = $self->_shodan_cache_get('192.0.2.10');
+sub _shodan_cache_get {
+	my ( $self, $ip ) = @_;
+
+	return undef unless $self->shodan_enable;
+	my $ttl = $self->shodan_cache_ttl;
+	return undef unless $ttl > 0;
+
+	my $raw = eval { $self->lilith->shodan_cache_get( $ip, $self->shodan_source, $ttl ) };
+	if ($@) {
+		( my $why = $@ ) =~ s/\s+\z//;
+		$self->app->log->warn( 'shodan cache read failed, looking up live: ' . $why );
+		return undef;
+	}
+
+	return $raw;
+} ## end sub _shodan_cache_get
+
+# Store a fresh Shodan response for an address. The counterpart to
+# _shodan_cache_get, with the same config gate and the same promise that a cache
+# problem costs nothing but the caching.
+#
+# Args:
+#
+#   - $ip :: the address, already validated by the caller.
+#   - $info :: the normalized result, for the columns worth querying.
+#   - $raw :: Shodan's response as it arrived, which is what is stored.
+#
+# Returns: nothing meaningful. Called for its effect on the table.
+#
+#     $self->_shodan_cache_put( '192.0.2.10', $result->{shodan}, $raw );
+sub _shodan_cache_put {
+	my ( $self, $ip, $info, $raw ) = @_;
+
+	return unless $self->shodan_enable;
+	my $ttl = $self->shodan_cache_ttl;
+	return unless $ttl > 0;
+
+	eval {
+		$self->lilith->shodan_cache_put(
+			ip     => $ip,
+			source => $self->shodan_source,
+			raw    => $raw,
+			info   => $info,
+			ttl    => $ttl,
+		);
+	};
+	if ($@) {
+		( my $why = $@ ) =~ s/\s+\z//;
+		$self->app->log->warn( 'shodan cache write failed: ' . $why );
+	}
+
+	return;
+} ## end sub _shodan_cache_put
+
+# Everything the IP info modal shows, gathered in one go: reverse DNS, whois,
+# whatever the configured GeoIP databases know, and -- when enable_shodan is set
+# -- Shodan's view of what the address is running.
+#
+# All of them block, which is why this is only ever called inside a
 # Mojo::IOLoop->subprocess -- run on the worker itself a slow resolver or
 # registrar would stall every other request. Nothing here dies: each lookup
 # reports its own failure in its own field, so one unreachable service still
-# leaves the other two on the page.
+# leaves the rest on the page.
 #
 # Args:
 #
 #   - $ip :: the address to look up, v4 or v6. The caller has already checked
 #     it against /^[0-9a-fA-F:.]+$/, so it is safe to hand to a resolver and to
 #     an external command.
+#   - $cached_shodan :: a Shodan response the caller already held, as a hash
+#     ref, normalized here in place of asking Shodan again. undef to do the
+#     lookup. Only read when the feature is on.
 #
 # Returns: a hash ref, rendered to the browser as-is:
 #
@@ -374,7 +469,15 @@ sub ipinfo {
 #       whois      => "...",                      # the whois response as text
 #       geo        => { 'country' => 'US', 'city' => 'Austin', ... },
 #       geo_error  => '',                         # database error, '' on success
+#       shodan     => { ... },                    # see Lilith::Shodan::gather; {} when off
+#       shodan_error => '',                       # API error, '' on success
+#       shodan_raw => { ... },                    # only after a live lookup
 #     }
+#
+# shodan_raw is not for the browser. It is Shodan's own response, carried back
+# across the subprocess boundary so the parent can cache it, and deleted there
+# before the result is rendered. It is absent whenever there is nothing new
+# worth caching -- a cached, skipped, failed, or never-made lookup.
 #
 # Every key is always present. A lookup that found nothing gives an empty
 # string or an empty hash rather than undef, so the template never has to
@@ -384,7 +487,7 @@ sub ipinfo {
 #     # $info->{rdns} is 'gate1.example.org'
 #     # $info->{geo}{country} is 'US' when a GeoIP database is configured
 sub _ipinfo_gather {
-	my ( $self, $ip ) = @_;
+	my ( $self, $ip, $cached_shodan ) = @_;
 
 	# Reverse DNS via Net::DNS PTR lookup
 	my $rdns       = '';
@@ -434,15 +537,37 @@ sub _ipinfo_gather {
 		_flatten_geo( $record, '', \%geo );
 	}
 
-	return {
-		ip         => $ip,
-		ptr_name   => $ptr_name,
-		rdns       => $rdns,
-		rdns_error => $rdns_error,
-		whois      => $whois,
-		geo        => \%geo,
-		geo_error  => $geo_error,
-	};
+	# Shodan, only when it has been turned on -- it is the one part of this that
+	# tells an outside party which addresses are being looked at. A response the
+	# caller had cached is normalized here rather than fetched, so a cache hit
+	# and a fresh lookup produce the same thing by the same code.
+	my $shodan       = {};
+	my $shodan_error = '';
+	my $shodan_raw;
+	if ( $self->shodan_enable ) {
+		if ( ref $cached_shodan eq 'HASH' ) {
+			$shodan = Lilith::Shodan::normalize( $cached_shodan, $self->shodan_source, $ip );
+			$shodan->{cached} = 1;
+		} else {
+			( $shodan, $shodan_error, $shodan_raw )
+				= Lilith::Shodan::gather( $ip, $self->shodan_api_key, $self->shodan_source );
+		}
+	}
+
+	my %info = (
+		ip           => $ip,
+		ptr_name     => $ptr_name,
+		rdns         => $rdns,
+		rdns_error   => $rdns_error,
+		whois        => $whois,
+		geo          => \%geo,
+		geo_error    => $geo_error,
+		shodan       => $shodan,
+		shodan_error => $shodan_error,
+	);
+	$info{shodan_raw} = $shodan_raw if ref $shodan_raw eq 'HASH';
+
+	return \%info;
 } ## end sub _ipinfo_gather
 
 # Flatten a GeoIP record into plain dotted key => value pairs, so the modal can

@@ -1,0 +1,24 @@
+# systemd timer for filling Lilith's Shodan cache.
+#
+# Fires lilith-shodan-cache.service a couple of minutes after boot and then
+# every five minutes. The service's -s window is wider than this interval
+# on purpose so an alert ingested between runs is still within a run's
+# read; an address's own cache entry keeps that from causing a second
+# lookup.
+#
+# Enable with:
+#   systemctl enable --now lilith-shodan-cache.timer
+
+[Unit]
+Description=Fill Lilith's Shodan cache periodically
+Documentation=man:lilith
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+# after downtime just run once when back, rather than firing every missed slot
+Persistent=false
+
+[Install]
+WantedBy=timers.target

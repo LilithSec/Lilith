@@ -134,16 +134,16 @@ our %class_map = (
 	# Baphomet's category wordings not already covered above: its own log-side
 	# classtypes, plus case variants where its classtype table capitalizes
 	# differently than the Sagan/Suricata wording already listed
-	'Access to a potentially vulnerable web application'          => 'PotVulWebApp',
-	'Traffic the Sensor Blocked'                                  => 'Blocked',
-	'Brute Force Attack'                                          => 'BruteForce',
-	'Correlated Attack'                                           => 'CorrAtk',
-	'Malware Activity Detected'                                   => 'MalAct',
-	'Network Event'                                               => 'NetEvent',
-	'System Error'                                                => 'SysErr',
-	'System Event'                                                => 'SysEvent',
-	'Unsuccessful Administrator Privilege Gain'                   => '!SucAdmPG',
-	''                                                            => 'blankC',
+	'Access to a potentially vulnerable web application' => 'PotVulWebApp',
+	'Traffic the Sensor Blocked'                         => 'Blocked',
+	'Brute Force Attack'                                 => 'BruteForce',
+	'Correlated Attack'                                  => 'CorrAtk',
+	'Malware Activity Detected'                          => 'MalAct',
+	'Network Event'                                      => 'NetEvent',
+	'System Error'                                       => 'SysErr',
+	'System Event'                                       => 'SysEvent',
+	'Unsuccessful Administrator Privilege Gain'          => '!SucAdmPG',
+	''                                                   => 'blankC',
 );
 
 # The event types Baphomet emits in its EVE (eve_type "baphomet"); a record with
@@ -3401,6 +3401,271 @@ sub dashboard_set_default {
 
 	return $set;
 } ## end sub dashboard_set_default
+
+=head2 shodan_cache_get
+
+Shodan's last answer for an address, as it arrived, or undef when there is no
+usable entry. Backs the web UI's IP info modal; see C<shodan_cache_ttl> in the
+config.
+
+Three things count as no entry, and all three return undef: no row at all, a
+row older than the TTL, and a row from a different tier than the one now
+configured -- the keyless summary and the keyed host API differ in depth, so a
+row from the lesser one must not stand in for the greater.
+
+Takes C<ip> (v4 or v6), C<source> (C<api> or C<internetdb>), and C<ttl> in
+seconds. Returns the decoded response as a hash ref; an empty hash ref is a
+real answer meaning Shodan has never crawled the address, which is why the
+undef/empty distinction matters to the caller. Dies only if the database itself
+cannot be reached.
+
+    my $raw = $lilith->shodan_cache_get( '192.0.2.10', 'api', 86400 );
+
+=cut
+
+sub shodan_cache_get {
+	my ( $self, $ip, $source, $ttl ) = @_;
+
+	return undef unless defined $ip && $ip ne '';
+	return undef unless defined $ttl && $ttl =~ /^[0-9]+$/ && $ttl > 0;
+
+	my $dbh = $self->_escalation_dbh;
+	my $sth = $dbh->prepare( 'select raw from shodan_cache'
+			. ' where ip = ?::inet and source = ? and fetched > now() - (? || \' seconds\')::interval;' );
+	$sth->execute( $ip, $source, $ttl );
+
+	my $row = $sth->fetchrow_hashref;
+	return undef unless $row;
+
+	# jsonb comes back inflated or as text depending on how the row was
+	# fetched, the same as the escalation and auto escalation columns.
+	return $self->_auto_decode_rule( $row->{raw} );
+} ## end sub shodan_cache_get
+
+=head2 shodan_cache_put
+
+Store Shodan's answer for an address, replacing whatever was held for it, and
+prune the entries that have since expired.
+
+The response is stored as it arrived rather than in the form the modal renders,
+so that changing how it is rendered does not strand every cached row on the old
+shape. The columns beside it -- ports, tags, cpes, vulns, max_cvss, hostnames,
+last_update -- are the queryable projection of that response and are passed in
+already worked out, since the caller has just normalized it and would only be
+doing the same work twice.
+
+Takes:
+
+- C<ip> :: the address the answer is for, v4 or v6. Required.
+- C<source> :: which tier answered, C<api> or C<internetdb>. Required.
+- C<raw> :: the response as a hash ref, as it arrived. An empty hash ref is
+  stored as C<found = false>, which is the point -- an address Shodan has never
+  crawled is the lookup most worth not repeating.
+- C<info> :: the normalized form, as the web UI's C<_shodan_gather> returns it.
+  Only its ports/tags/cpes/vulns/hostnames/last_update are read.
+- C<ttl> :: the freshness window in seconds. Rows older than it are deleted on
+  the way through, which is the whole of the cache's housekeeping.
+
+Returns 1. Dies if the database cannot be reached or the statement fails.
+
+    $lilith->shodan_cache_put(
+        ip => '192.0.2.10', source => 'api',
+        raw => $raw, info => $info, ttl => 86400,
+    );
+
+=cut
+
+sub shodan_cache_put {
+	my ( $self, %opts ) = @_;
+
+	my $ip = defined $opts{ip} ? $opts{ip} : '';
+	die('shodan cache: an ip is required') if $ip eq '';
+
+	my $raw  = ref $opts{raw} eq 'HASH'  ? $opts{raw}  : {};
+	my $info = ref $opts{info} eq 'HASH' ? $opts{info} : {};
+
+	# The worst score of the vulnerabilities that carry one, which is what a
+	# "this host has something serious" read wants and cannot be got from the
+	# CVE ids alone. Null when nothing scored -- the keyless tier never does.
+	my $max_cvss;
+	for my $vuln ( @{ ref $info->{vulns} eq 'ARRAY' ? $info->{vulns} : [] } ) {
+		next unless ref $vuln eq 'HASH';
+		my $cvss = $vuln->{cvss};
+		next unless defined $cvss && $cvss =~ /^[0-9.]+$/;
+		$max_cvss = $cvss if !defined($max_cvss) || $cvss > $max_cvss;
+	}
+
+	# Shodan reports its own crawl time as a naive stamp in UTC, so it is cast
+	# with the zone named rather than left to whatever the server is set to.
+	my $last_update = defined $info->{last_update} && $info->{last_update} ne '' ? $info->{last_update} : undef;
+
+	my $dbh = $self->_escalation_dbh;
+	my $sth
+		= $dbh->prepare( 'insert into shodan_cache'
+			. ' ( ip, source, found, fetched, last_update, ports, tags, cpes, vulns, max_cvss, hostnames, raw )'
+			. ' values ( ?::inet, ?, ?, now(), (?::timestamp at time zone \'UTC\'), ?::integer[], ?::varchar[],'
+			. ' ?::varchar[], ?::varchar[], ?, ?::varchar[], ?::jsonb )'
+			. ' on conflict (ip) do update set'
+			. ' source = excluded.source, found = excluded.found, fetched = excluded.fetched,'
+			. ' last_update = excluded.last_update, ports = excluded.ports, tags = excluded.tags,'
+			. ' cpes = excluded.cpes, vulns = excluded.vulns, max_cvss = excluded.max_cvss,'
+			. ' hostnames = excluded.hostnames, raw = excluded.raw;' );
+	$sth->execute(
+		$ip,
+		( defined $opts{source} ? $opts{source} : '' ),
+		( keys %{$raw}          ? 1             : 0 ),
+		$last_update,
+		$self->_pg_text_array( ref $info->{ports} eq 'ARRAY' ? $info->{ports} : [] ),
+		$self->_pg_text_array( ref $info->{tags} eq 'ARRAY'  ? $info->{tags}  : [] ),
+		$self->_pg_text_array( ref $info->{cpes} eq 'ARRAY'  ? $info->{cpes}  : [] ),
+		$self->_pg_text_array(
+			[
+				map  { $_->{cve} }
+				grep { ref eq 'HASH' && defined $_->{cve} } @{ ref $info->{vulns} eq 'ARRAY' ? $info->{vulns} : [] }
+			]
+		),
+		$max_cvss,
+		$self->_pg_text_array( ref $info->{hostnames} eq 'ARRAY' ? $info->{hostnames} : [] ),
+		encode_json($raw),
+	);
+
+	# A row past the TTL is refetched on its next read, so keeping it buys
+	# nothing; clearing them here is cheaper than a cron for a table this size.
+	my $ttl = defined $opts{ttl} && $opts{ttl} =~ /^[0-9]+$/ ? $opts{ttl} : 0;
+	if ( $ttl > 0 ) {
+		$dbh->do( 'delete from shodan_cache where fetched < now() - (? || \' seconds\')::interval;', undef, $ttl );
+	}
+
+	return 1;
+} ## end sub shodan_cache_put
+
+=head2 alert_ips
+
+The distinct addresses named by the alerts ingested in a window, from every
+alert table's C<src_ip> and C<dest_ip>. What C<lilith shodan_cache> works
+through.
+
+Distinct across the whole set rather than per table, so an address on five
+hundred alerts is one entry -- the caller is about to do something per address
+that costs a network round trip.
+
+Takes:
+
+- C<go_back_seconds> :: how far back to read. C<0> means no time bound at all,
+  for a first pass over a database that has been running a while. Default 180.
+- C<tables> :: array ref of which alert tables to read, from C<suricata>,
+  C<sagan>, C<cape>, and C<baphomet>. All four by default.
+
+Returns an array ref of addresses as strings, sorted, with any netmask stripped
+so they compare against what C<shodan_cache> stores. Dies on an unknown table
+name or a non-numeric window.
+
+    my $ips = $lilith->alert_ips( go_back_seconds => 900 );
+
+=cut
+
+sub alert_ips {
+	my ( $self, %opts ) = @_;
+
+	my $seconds = defined $opts{go_back_seconds} ? $opts{go_back_seconds} : 180;
+	die( '"' . $seconds . '" for go_back_seconds is not numeric' ) if $seconds !~ /^[0-9]+$/;
+
+	my @tables = ref $opts{tables} eq 'ARRAY' && @{ $opts{tables} } ? @{ $opts{tables} } : keys %KNOWN_TABLE_TYPES;
+	for my $table (@tables) {
+		die( '"' . $table . '" is not a known table type; valid: suricata, sagan, cape, baphomet' )
+			unless $KNOWN_TABLE_TYPES{$table};
+	}
+
+	my $dbh = $self->_escalation_dbh;
+
+	my %ips;
+	for my $table ( sort @tables ) {
+		# CAPE is windowed on its completion time rather than an ingest time,
+		# the same as everywhere else that reads it -- and that time can lag,
+		# which is the reason to run this with a window wider than its interval.
+		my $time_column = $table eq 'cape' ? 'stop' : 'timestamp';
+
+		# host() strips any netmask, so the values line up with the keys
+		# shodan_cache holds. Both columns in one pass over the window.
+		my $sql
+			= 'select distinct host(ip) as ip from ('
+			. ' select src_ip as ip from '
+			. $table
+			. '_alerts where src_ip is not null'
+			. ( $seconds ? ' and ' . $time_column . ' >= now() - (? || \' seconds\')::interval' : '' )
+			. ' union all select dest_ip as ip from '
+			. $table
+			. '_alerts where dest_ip is not null'
+			. ( $seconds ? ' and ' . $time_column . ' >= now() - (? || \' seconds\')::interval' : '' )
+			. ' ) as both_ends;';
+
+		my $sth = $dbh->prepare($sql);
+		$sth->execute( $seconds ? ( $seconds, $seconds ) : () );
+		while ( my $row = $sth->fetchrow_hashref ) {
+			$ips{ $row->{ip} } = 1 if defined $row->{ip} && $row->{ip} ne '';
+		}
+	} ## end for my $table ( sort @tables )
+
+	return [ sort keys %ips ];
+} ## end sub alert_ips
+
+=head2 shodan_cache_badges
+
+The cached summary for a set of addresses at once, for the badges the web UI
+puts on its results tables' IP cells.
+
+One statement for the whole page rather than one per address: a page of results
+can name a hundred addresses, and this runs on every render of it. Nothing is
+fetched -- an address with no fresh entry is simply absent from the result, and
+its cell gets no badges.
+
+Takes C<ips> (array ref of addresses), C<source> (C<api> or C<internetdb>), and
+C<ttl> in seconds. Returns a hash ref keyed by address:
+
+    {
+      '192.0.2.10' => {
+        ports    => [ 22, 443 ],
+        tags     => [ 'cloud' ],
+        vulns    => 12,      # how many, not which -- the cell shows a count
+        max_cvss => 9.8,     # undef when nothing scored, as on the keyless tier
+      },
+    }
+
+Addresses with no fresh entry are absent rather than present and empty, so the
+caller can tell "nothing cached" from "cached, and Shodan knows nothing". Dies
+only if the database itself cannot be reached.
+
+    my $badges = $lilith->shodan_cache_badges(
+        ips => [ '192.0.2.10', '192.0.2.11' ], source => 'api', ttl => 2592000 );
+
+=cut
+
+sub shodan_cache_badges {
+	my ( $self, %opts ) = @_;
+
+	my $ips = ref $opts{ips} eq 'ARRAY' ? $opts{ips} : [];
+	my $ttl = defined $opts{ttl} && $opts{ttl} =~ /^[0-9]+$/ ? $opts{ttl} : 0;
+	return {} unless @{$ips} && $ttl > 0;
+
+	my $dbh = $self->_escalation_dbh;
+	my $sth
+		= $dbh->prepare( 'select host(ip) as ip, ports, tags, max_cvss,'
+			. ' coalesce(array_length(vulns, 1), 0) as vuln_count from shodan_cache'
+			. ' where ip = any(?::inet[]) and source = ? and fetched > now() - (? || \' seconds\')::interval;' );
+	$sth->execute( $self->_pg_text_array($ips), ( defined $opts{source} ? $opts{source} : '' ), $ttl );
+
+	my %badges;
+	while ( my $row = $sth->fetchrow_hashref ) {
+		$badges{ $row->{ip} } = {
+			ports    => ( ref $row->{ports} eq 'ARRAY' ? $row->{ports} : [] ),
+			tags     => ( ref $row->{tags} eq 'ARRAY'  ? $row->{tags}  : [] ),
+			vulns    => ( $row->{vuln_count} || 0 ),
+			max_cvss => $row->{max_cvss},
+		};
+	}
+
+	return \%badges;
+} ## end sub shodan_cache_badges
 
 =head1 AUTHOR
 

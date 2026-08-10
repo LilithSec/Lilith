@@ -90,6 +90,15 @@ function applyGeoCity(show) {
   });
 }
 
+// Toggle the cached Shodan badges shown after each IP's geo annotation. Only
+// the display: the badges are rendered with the rest of the row either way,
+// since they come from one query the page has already made.
+function applyShodanBadges(show) {
+  document.querySelectorAll('#search-results .shodan-badges').forEach(function(el) {
+    el.style.display = show ? '' : 'none';
+  });
+}
+
 // Bind a class of clickable result cells to a filter input + submit.
 function bindFilter(selector, inputId, dataKey) {
   document.querySelectorAll(selector).forEach(function(el) {
@@ -110,6 +119,9 @@ function initResults() {
   var cityCheckbox = document.getElementById('show-city');
   applyGeoCity(!cityCheckbox || cityCheckbox.checked);
 
+  var shodanCheckbox = document.getElementById('show-shodan');
+  applyShodanBadges(!shodanCheckbox || shodanCheckbox.checked);
+
   bindFilter('.host-filter',          'host-input',          'host');
   bindFilter('.instance-host-filter', 'instance-host-input', 'instanceHost');
   bindFilter('.instance-filter',      'instance-input',      'instance');
@@ -122,6 +134,7 @@ function initResults() {
   bindFilter('.port-filter',          'port-input',          'port');
   bindFilter('.proto-filter',         'proto-input',         'proto');
   bindFilter('.aproto-filter',        'app-proto-input',     'aproto');
+  bindFilter('.user-filter',          'username-input',      'user');
 
   LilithTable.initSort(document.querySelector('#search-results table.table'));
 
@@ -159,6 +172,17 @@ document.addEventListener('DOMContentLoaded', function() {
   cityCheckbox.addEventListener('change', function() {
     localStorage.setItem('showGeoCity', this.checked);
     applyGeoCity(this.checked);
+  });
+
+  // Shodan badges: the cached tags, port count, and CVE count after each IP's
+  // geo annotation. Defaults on when the user has not made an explicit choice.
+  var shodanCheckbox = document.getElementById('show-shodan');
+  var storedShodan   = localStorage.getItem('showShodanBadges');
+  shodanCheckbox.checked = ( storedShodan === null ) ? true : ( storedShodan === 'true' );
+  applyShodanBadges(shodanCheckbox.checked);
+  shodanCheckbox.addEventListener('change', function() {
+    localStorage.setItem('showShodanBadges', this.checked);
+    applyShodanBadges(this.checked);
   });
 
   // Auto-FC: keep the filter panel collapsed on load (overriding the server's

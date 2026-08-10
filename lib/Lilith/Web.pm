@@ -1,12 +1,13 @@
 package Lilith::Web;
 
 use Mojo::Base 'Mojolicious';
-use Mojo::File   qw(curfile);
-use TOML         qw(from_toml);
-use File::Slurp  qw(read_file);
-use File::Temp   ();
-use Mojo::IOLoop ();
-use Lilith       ();
+use Mojo::File     qw(curfile);
+use TOML           qw(from_toml);
+use File::Slurp    qw(read_file);
+use File::Temp     ();
+use Mojo::IOLoop   ();
+use Lilith         ();
+use Lilith::Shodan ();
 
 # When run from a checkout, share/ lives three directories up from
 # lib/Lilith/Web.pm and takes priority so an installed copy of the dist
@@ -124,6 +125,127 @@ sub startup {
 	# classification a short label, and is not something to pick from a list.
 	my @classifications = sort { lc($a) cmp lc($b) } grep { $_ ne '' } keys %Lilith::class_map;
 	$self->helper( classifications => sub { \@classifications } );
+
+	# The Subjects view of a Baphomet record: every subject var it carries, with
+	# the value it was seen as and the score it stands at. Baphomet reports those
+	# in three separate keys -- subject_vars is everything captured,
+	# subject_vars_scores what each is holding, subjects_crossed only the vars
+	# that reached a threshold -- and none on its own says what a reader wants to
+	# know, so they are stitched back together here for the search results column
+	# and the event page field alike.
+	#
+	# Args:
+	#
+	#   - $raw :: the record's decoded raw EVE record as a hash ref. Tolerant of
+	#     undef or a non-hash, neither of which has anything to combine.
+	#
+	# Returns: a hash ref keyed by var name, each value a hash ref of:
+	#
+	#   - val :: the captured value, as subject_vars held it -- a plain string, or
+	#     a { hostname => ..., ip => [ ... ] } hash ref where a usedns rule
+	#     resolved it. Absent for a var that somehow only shows up scored.
+	#   - score :: the var's score, always present. From subject_vars_scores,
+	#     falling back to the crossing score, and 0 for a var holding neither --
+	#     which is what a var with nothing held actually stands at. A var whose
+	#     value resolved to several addresses scores each of them separately
+	#     against the one threshold, so the highest of them is the var's score.
+	#   - crossed :: 1 for a var that reached its threshold, absent otherwise. The
+	#     score alone no longer says so, and on a multi var record which var
+	#     tripped the rule is the whole point.
+	#
+	# The hash is empty for a record with no subject vars at all, which is the
+	# caller's cue to render nothing rather than an empty object.
+	#
+	#     $c->baphomet_subjects( { subject_vars        => { SRC => '1.2.3.4', USER => 'root' },
+	#                              subject_vars_scores => { SRC => 9.5, USER => 3 },
+	#                              subjects_crossed    => { SRC => 9.5 } } );
+	#     # { SRC  => { val => '1.2.3.4', score => 9.5, crossed => 1 },
+	#     #   USER => { val => 'root',    score => 3 } }
+	$self->helper(
+		baphomet_subjects => sub {
+			my ( $c, $raw ) = @_;
+
+			return {} unless ref($raw) eq 'HASH';
+
+			my $vars    = ref( $raw->{subject_vars} ) eq 'HASH'        ? $raw->{subject_vars}        : {};
+			my $scores  = ref( $raw->{subject_vars_scores} ) eq 'HASH' ? $raw->{subject_vars_scores} : {};
+			my $crossed = ref( $raw->{subjects_crossed} ) eq 'HASH'    ? $raw->{subjects_crossed}    : {};
+
+			my %subjects;
+			foreach my $var ( keys %{$vars}, keys %{$scores}, keys %{$crossed} ) {
+				next if $subjects{$var};
+
+				# a resolved var holds a value => score hash rather than the one
+				# number, its addresses having raced the same threshold
+				my $score = exists $scores->{$var} ? $scores->{$var} : $crossed->{$var};
+				if ( ref($score) eq 'HASH' ) {
+					($score) = sort { $b <=> $a } grep { defined($_) && !ref($_) } values %{$score};
+				}
+
+				$subjects{$var} = {
+					( exists $vars->{$var}    ? ( val     => $vars->{$var} ) : () ),
+					( exists $crossed->{$var} ? ( crossed => 1 )             : () ),
+					score => ( defined($score) && !ref($score) ) ? $score : 0,
+				};
+			} ## end foreach my $var ( keys %{$vars}, keys %{$scores...})
+
+			return \%subjects;
+		}
+	);
+
+	# The one line render of the above, for the search results Subjects column:
+	# var=value (score) per subject, sorted by var name. A nested table in that
+	# cell reads as a box drawn around nothing and makes the row as tall as its
+	# subject count, so the column stays one line and the event page card is where
+	# the same map gets a table.
+	#
+	# Args:
+	#
+	#   - $raw :: the record's decoded raw EVE record as a hash ref, as
+	#     baphomet_subjects takes it.
+	#
+	# Returns: the rendered line, or '' for a record with no subject vars -- which
+	# the column renders as an empty cell rather than special casing.
+	#
+	# A var that crossed its threshold is marked with a leading ! -- every var
+	# carries a score now, so nothing else on the line says which one tripped the
+	# rule.
+	#
+	# A var a usedns rule resolved shows its hostname, falling back to the first
+	# address it resolved to, since the whole { hostname, ip } structure does not
+	# belong on one line. A var that appears with no value to show renders as its
+	# name and score alone.
+	#
+	#     $c->baphomet_subjects_line( { subject_vars        => { SRC => '1.2.3.4', USER => 'root' },
+	#                                   subject_vars_scores => { SRC => 9.5, USER => 3 },
+	#                                   subjects_crossed    => { SRC => 9.5 } } );
+	#     # '!SRC=1.2.3.4 (9.5), USER=root (3)'
+	$self->helper(
+		baphomet_subjects_line => sub {
+			my ( $c, $raw ) = @_;
+
+			my $subjects = $c->baphomet_subjects($raw);
+
+			my @rendered;
+			foreach my $var ( sort keys %{$subjects} ) {
+				my $value = $subjects->{$var}{val};
+				if ( ref($value) eq 'HASH' ) {
+					$value
+						= defined( $value->{hostname} )  ? $value->{hostname}
+						: ref( $value->{ip} ) eq 'ARRAY' ? $value->{ip}[0]
+						:                                  undef;
+				} elsif ( ref($value) eq 'ARRAY' ) {
+					$value = join( ', ', @{$value} );
+				}
+
+				my $subject = $subjects->{$var}{crossed} ? '!' . $var : $var;
+				$subject .= '=' . $value if ( defined($value) && !ref($value) );
+				push( @rendered, $subject . ' (' . $subjects->{$var}{score} . ')' );
+			} ## end foreach my $var ( sort keys %{$subjects} )
+
+			return join( ', ', @rendered );
+		}
+	);
 
 	# The active filter chips shown above a page's results: one chip per filter
 	# value the current request carries, each holding the URL that drops just
@@ -306,6 +428,111 @@ sub startup {
 	$self->helper(
 		domaininfo_cache_ttl => sub {
 			defined $toml->{domaininfo_cache_ttl} ? $toml->{domaininfo_cache_ttl} + 0 : 300;
+		}
+	);
+
+	# Shodan enrichment for the IP info modal, off unless enable_shodan is set --
+	# it makes the server tell a third party which addresses are being looked at.
+	#
+	# The key is what picks the tier rather than a config of its own: with
+	# shodan_api_key set the full host API is used (open ports with their
+	# banners, TLS certificates, per-service CVEs), and without one the free
+	# keyless InternetDB summary is (ports, CPEs, tags, CVE ids).
+	# The answers are cached in the shodan_cache table (schema version 15) for
+	# shodan_cache_ttl seconds, a month by default and 0 for no caching at all.
+	# Unlike the domaininfo cache this is in the database rather than in the
+	# worker, since the point is to spare the API a lookup every worker and every
+	# restart would otherwise repeat. A month is long because what Shodan knows
+	# about a host changes on the order of its own crawl interval, not of a shift.
+	$self->helper( shodan_enable  => sub { $toml->{enable_shodan}          ? 1                       : 0 } );
+	$self->helper( shodan_api_key => sub { defined $toml->{shodan_api_key} ? $toml->{shodan_api_key} : '' } );
+	$self->helper(
+		shodan_cache_ttl => sub {
+			defined $toml->{shodan_cache_ttl} && $toml->{shodan_cache_ttl} =~ /^[0-9]+$/
+				? $toml->{shodan_cache_ttl} + 0
+				: 2592000;
+		}
+	);
+
+	# Which tier the configured key selects, and so which rows of the cache may
+	# be read: the keyless summary and the keyed host API differ in depth, and a
+	# row written by the lesser must not stand in for the greater. The rule lives
+	# in Lilith::Shodan because the shodan_cache command has to apply the same one.
+	$self->helper( shodan_source => sub { Lilith::Shodan::source( $_[0]->shodan_api_key ) } );
+
+	# The Bootstrap class for one Shodan tag on a results table IP cell. Only the
+	# tags that change what an alert means are colored; everything else Shodan
+	# tags a host with is descriptive (cloud, cdn, starttls, ...) and stays grey.
+	#
+	# The IP info modal keeps its own copy of this map in lilith-lookup.js,
+	# because it renders in the browser from JSON rather than here. The two are
+	# meant to agree; change both.
+	my %shodan_tag_class = (
+		compromised  => 'bg-danger',
+		malware      => 'bg-danger',
+		c2           => 'bg-danger',
+		doublepulsar => 'bg-danger',
+		(
+			map { $_ => 'bg-warning text-dark' }
+				qw( honeypot scanner tor vpn proxy ics self-signed eol-os eol-product database )
+		),
+	);
+	$self->helper(
+		shodan_tag_class => sub {
+			my ( $c, $tag ) = @_;
+			return ( defined $tag && $shodan_tag_class{$tag} ) ? $shodan_tag_class{$tag} : 'bg-secondary';
+		}
+	);
+
+	# What the cache holds for the addresses in a page of results, as
+	# { ip => { ports => [...], tags => [...], vulns => 12, max_cvss => 9.8 } },
+	# for the badges on the results tables' IP cells.
+	#
+	# Reads the cache and nothing else. A results page can carry a hundred
+	# addresses, and looking any of them up live would mean a hundred Shodan
+	# calls behind a page load -- so an address with no cached entry simply gets
+	# no badges, and gets them once someone opens its IP info modal. That is also
+	# why this is one query for the whole page rather than one per cell.
+	#
+	# Args:
+	#
+	#   - $rows :: the result rows, as the search controller has them. Their
+	#     src_ip and dest_ip are read; anything else is ignored.
+	#
+	# Returns: a hash ref keyed by address, holding only the addresses that had
+	# a fresh entry. Empty when the feature or the cache is off, when there is
+	# nothing to look up, or when the cache cannot be read -- which is logged and
+	# otherwise costs only the badges.
+	#
+	#     my $badges = $c->shodan_badges( $results );
+	#     # $badges->{'192.0.2.10'}{vulns} is 12
+	$self->helper(
+		shodan_badges => sub {
+			my ( $c, $rows ) = @_;
+
+			return {} unless $c->shodan_enable;
+			my $ttl = $c->shodan_cache_ttl;
+			return {} unless $ttl > 0;
+			return {} unless ref $rows eq 'ARRAY' && @{$rows};
+
+			# Deduped, and filtered to what may be handed to Postgres as an inet
+			# -- one unparseable value would otherwise fail the whole statement
+			# and cost every cell on the page its badges.
+			my %seen;
+			my @ips = grep { !$seen{$_}++ }
+				grep { defined($_) && /^[0-9a-fA-F:.]+$/ }
+				map { ( $_->{src_ip}, $_->{dest_ip} ) } @{$rows};
+			return {} unless @ips;
+
+			my $badges
+				= eval { $c->lilith->shodan_cache_badges( ips => \@ips, source => $c->shodan_source, ttl => $ttl ) };
+			if ($@) {
+				( my $why = $@ ) =~ s/\s+\z//;
+				$c->app->log->warn( 'shodan badge lookup failed: ' . $why );
+				return {};
+			}
+
+			return $badges;
 		}
 	);
 

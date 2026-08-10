@@ -34,6 +34,17 @@ sub view {
 
 	my ( $event, $error ) = $self->_load_event( $table, $id );
 
+	# A Baphomet score says nothing the per subject scores do not, and says it for
+	# the record as a whole, so the info grid carries the same subjects line the
+	# search results Subjects column does in its place. It is nested detail rather
+	# than a column, so build it off raw here. A record with no subject vars at
+	# all simply gets neither field.
+	if ( $table eq 'baphomet' && $event ) {
+		delete $event->{score};
+		my $subjects = $self->baphomet_subjects_line( $event->{raw} );
+		$event->{subjects} = $subjects if ( $subjects ne '' );
+	}
+
 	my $pretty_raw;
 	if ( $event && ref $event->{raw} eq 'HASH' ) {
 		eval {

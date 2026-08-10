@@ -1,6 +1,7 @@
-# /etc/cron.d style entry for Lilith automatic escalation, for systems not
-# using systemd. Install as /etc/cron.d/lilith-auto-escalate (the fifth
-# field is the user to run as).
+# cron.d entry for Lilith automatic escalation, for systems not using
+# systemd. Install as its own file rather than appended to a shared crontab:
+# /etc/cron.d/lilith-auto-escalate, or /usr/local/etc/cron.d/lilith-auto-escalate
+# on FreeBSD. The fifth field is the user to run as.
 #
 # Runs every five minutes. The -m 60 window only bounds how far back each
 # run scans; the per-alert auto_escalated marker is what prevents an alert
