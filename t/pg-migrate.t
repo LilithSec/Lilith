@@ -193,6 +193,9 @@ sub column_exists {
 	ok( !index_exists( $dbh, 'suricata_alerts_severity_ts_idx' ),    'the upgrade dropped the expression index' );
 	ok( column_exists( $dbh, 'dashboards', 'settings' ), 'the upgrade added the dashboards.settings column' );
 	ok( table_exists( $dbh, 'baphomet_alerts' ),         'the upgrade created baphomet_alerts' );
+	ok( column_exists( $dbh, 'baphomet_alerts', 'username' ), 'the 13 -> 14 upgrade added baphomet_alerts.username' );
+	ok( column_exists( $dbh, 'baphomet_alerts', 'sid' ),      'the 13 -> 14 upgrade added baphomet_alerts.sid' );
+	ok( !column_exists( $dbh, 'baphomet_alerts', 'subject' ), 'the 13 -> 14 upgrade dropped baphomet_alerts.subject' );
 	$dbh->disconnect;
 
 	my ($sv) = run_cmd('Lilith::CLI::Command::SchemaVersion');

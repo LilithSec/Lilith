@@ -352,33 +352,45 @@ is( $lilith->parse_eve( type => 'bogus',    json => { event_type => 'alert' } ),
 }
 
 # ===========================================================================
-# Baphomet: its own event_type vocabulary, ip -> src_ip / subject columns,
-# jsonb-field encoding, the derived event_id, and the ignore knob.
+# Baphomet: its own event_type vocabulary, the promoted flow vars and the
+# banishing fallback, jsonb-field encoding, the derived event_id, and the
+# ignore knob.
 # ===========================================================================
 
-# -- a banish: has ip/ban_time/recidive/country, and every jsonb field --
+# -- a banish: promoted flow vars, ban_time/recidive/country, every jsonb field --
 {
 	my $eve = {
-		eve_type   => 'baphomet',
-		event_type => 'banish',
-		timestamp  => '2026-07-15T12:00:00+0000',
-		hostname   => 'ids1',
-		kur        => 'baphomet-sshd',
-		ip         => '203.0.113.66',
-		dest_ip    => '198.51.100.9',
-		ban_time   => 3600,
-		recidive   => JSON::true,
-		country    => 'US',
-		msg        => 'SSH brute force',
-		severity   => 'high',
-		classtype  => 'attempted-admin',
-		score      => 9.5,
-		path       => '/var/log/auth.log',
-		references => [ 'https://example/1', 'https://example/2' ],
-		attack     => { tactic => 'credential-access' },
-		rule       => { name   => 'sshd-bruteforce', id => 42 },
-		found      => { count  => 12 },
-		marks_set  => ['sshd'],
+		eve_type            => 'baphomet',
+		event_type          => 'banish',
+		timestamp           => '2026-07-15T12:00:00+0000',
+		hostname            => 'ids1',
+		kur                 => 'baphomet-sshd',
+		src_ip              => '203.0.113.66',
+		src_port            => 51423,
+		dest_ip             => '198.51.100.9',
+		dest_port           => 22,
+		user                => 'root',
+		gid                 => 0,
+		sid                 => 90210,
+		rev                 => 2,
+		banishing           => ['203.0.113.66'],
+		subject_vars        => { SRC => '203.0.113.66' },
+		subject_vars_scores => { SRC => 9.5 },
+		subjects_crossed    => { SRC => 9.5 },
+		ban_time            => 3600,
+		recidive            => JSON::true,
+		country             => 'US',
+		msg                 => 'SSH brute force',
+		severity            => 'high',
+		category            => 'Attempted Administrator Privilege Gain',
+		score               => 9.5,
+		threshold           => 9,
+		path                => '/var/log/auth.log',
+		references          => [ 'https://example/1', 'https://example/2' ],
+		attack              => ['T1110'],
+		rule                => { name => 'sshd-bruteforce', id => 42 },
+		found               => { count => 12 },
+		marks_set           => ['sshd'],
 	};
 	my $raw = encode_json($eve);
 
@@ -400,47 +412,88 @@ is( $lilith->parse_eve( type => 'bogus',    json => { event_type => 'alert' } ),
 		'baphomet row keys match the baphomet_alerts column set exactly'
 	);
 
-	is( $row->{host},           'ids1',              'baphomet host is the record hostname, not the sensor host' );
-	is( $row->{kur},            'baphomet-sshd',     'kur carried through' );
-	is( $row->{event_type},     'banish',            'event_type carried through' );
-	is( $row->{src_ip},         '203.0.113.66',      'offender ip -> src_ip' );
-	is( $row->{dest_ip},        '198.51.100.9',      'dest_ip carried through' );
-	is( $row->{subject},        undef,               'no subject on a banish' );
-	is( $row->{ban_time},       3600,                'ban_time carried through' );
-	is( $row->{recidive},       1,                   'recidive JSON true coerced to 1' );
-	is( $row->{country},        'US',                'country carried through' );
-	is( $row->{path},           '/var/log/auth.log', 'path carried through' );
-	is( $row->{signature},      'SSH brute force',   'msg -> signature' );
-	is( $row->{classification}, 'attempted-admin',   'classtype -> classification' );
-	is( $row->{severity},       'high',              'severity carried through' );
-	is( $row->{score},          9.5,                 'score carried through' );
-	is( $row->{raw},            $raw,                'raw stored verbatim' );
+	is( $row->{host},       'ids1',          'baphomet host is the record hostname, not the sensor host' );
+	is( $row->{kur},        'baphomet-sshd', 'kur carried through' );
+	is( $row->{event_type}, 'banish',        'event_type carried through' );
+	is( $row->{src_ip},     '203.0.113.66',  'promoted src_ip carried through' );
+	is( $row->{src_port},   51423,           'promoted src_port carried through' );
+	is( $row->{dest_ip},    '198.51.100.9',  'promoted dest_ip carried through' );
+	is( $row->{dest_port},  22,              'promoted dest_port carried through' );
+	is( $row->{username},   'root',          'promoted user -> username' );
+	is( $row->{gid},        0,               'gid carried through' );
+	is( $row->{sid},        90210,           'sid carried through' );
+	is( $row->{rev},        2,               'rev carried through' );
+	is( $row->{ban_time},   3600,            'ban_time carried through' );
+	is( $row->{recidive},   1,               'recidive JSON true coerced to 1' );
+	is( $row->{country},    'US',            'country carried through' );
+	is( $row->{path},  '/var/log/auth.log',                       'path carried through' );
+	is( $row->{signature}, 'SSH brute force',                     'msg -> signature' );
+	is( $row->{classification}, 'Attempted Administrator Privilege Gain', 'category -> classification' );
+	is( $row->{severity}, 'high', 'severity carried through' );
+	is( $row->{score},    9.5,    'score carried through' );
+	is( $row->{raw},      $raw,   'raw stored verbatim' );
 
 	# the nested detail is not promoted to columns (the exact-keys check above
 	# guarantees that); it is preserved only in raw, reachable via raw->'...'
 	my $raw_decoded = decode_json( $row->{raw} );
-	is_deeply( $raw_decoded->{attack}, { tactic => 'credential-access' }, 'nested attack detail is kept in raw' );
-	is_deeply( $raw_decoded->{rule},   { name   => 'sshd-bruteforce', id => 42 }, 'nested rule detail is kept in raw' );
+	is_deeply( $raw_decoded->{subjects_crossed}, { SRC => 9.5 }, 'nested subjects_crossed detail is kept in raw' );
+	is_deeply( $raw_decoded->{banishing},        ['203.0.113.66'],          'banishing kept in raw' );
+	is_deeply( $raw_decoded->{rule}, { name => 'sshd-bruteforce', id => 42 }, 'nested rule detail is kept in raw' );
 	is_deeply( $raw_decoded->{references}, [ 'https://example/1', 'https://example/2' ], 'references kept in raw' );
 
 	# event_id = SHA256 (base64) of hostname + kur + timestamp + event_type +
-	# rule name + offender (the ip when present)
+	# rule name + offender (the src_ip when present)
 	my $expect_eid
 		= sha256_base64( 'ids1' . 'baphomet-sshd' . $eve->{timestamp} . 'banish' . 'sshd-bruteforce' . '203.0.113.66' );
 	is( $row->{event_id}, $expect_eid, 'event_id follows the baphomet recipe' );
 }
 
-# -- a sighting: has a subject and no ip; event_id falls back to the subject --
+# -- a subnet banish: no promoted src_ip; src_ip falls back to banishing[0],
+#    which is a CIDR --
 {
 	my $eve = {
 		eve_type   => 'baphomet',
-		event_type => 'sighted',
-		timestamp  => '2026-07-15T12:05:00+0000',
+		event_type => 'banish',
+		timestamp  => '2026-07-15T12:03:00+0000',
 		hostname   => 'ids1',
-		kur        => 'baphomet-web',
-		subject    => 'eviluser',
-		msg        => 'suspicious login',
-		rule       => { name => 'web-login' },
+		kur        => 'baphomet-sshd',
+		src_ip     => undef,
+		banishing  => ['198.51.100.0/24'],
+		msg        => 'subnet over threshold',
+		rule       => { name => 'sshd-bruteforce' },
+	};
+
+	my $row = $lilith->parse_eve(
+		type     => 'baphomet',
+		json     => $eve,
+		instance => 'baphomet-sshd',
+		host     => 'sensor1',
+		raw      => 'RAW-subnet',
+	);
+
+	is( $row->{src_ip}, '198.51.100.0/24', 'src_ip falls back to banishing[0], CIDR included' );
+
+	my $expect_eid
+		= sha256_base64(
+		'ids1' . 'baphomet-sshd' . $eve->{timestamp} . 'banish' . 'sshd-bruteforce' . '198.51.100.0/24' );
+	is( $row->{event_id}, $expect_eid, 'event_id uses the banishing fallback as the offender' );
+}
+
+# -- a sighted: no ip anywhere; the subject rides in subject_vars and the
+#    event_id falls back to a stable render of it --
+{
+	my $eve = {
+		eve_type            => 'baphomet',
+		event_type          => 'sighted',
+		timestamp           => '2026-07-15T12:05:00+0000',
+		hostname            => 'ids1',
+		kur                 => 'baphomet-web',
+		src_ip              => undef,
+		subject_vars        => { USER => 'eviluser' },
+		subject_vars_scores => { USER => 5 },
+		subjects_crossed    => { USER => 5 },
+		msg                 => 'suspicious login',
+		rule                => { name => 'web-login' },
 	};
 
 	my $row = $lilith->parse_eve(
@@ -451,14 +504,43 @@ is( $lilith->parse_eve( type => 'bogus',    json => { event_type => 'alert' } ),
 		raw      => 'RAW2',
 	);
 
-	is( $row->{event_type}, 'sighted',  'sighted event_type parses' );
-	is( $row->{subject},    'eviluser', 'subject carried through' );
-	is( $row->{src_ip},     undef,      'no ip => src_ip is undef' );
-	is( $row->{ban_time},   undef,      'no ban_time on a sighting' );
+	is( $row->{event_type}, 'sighted', 'sighted event_type parses' );
+	is( $row->{src_ip},     undef,     'no ip => src_ip is undef' );
+	is( $row->{ban_time},   undef,     'no ban_time on a sighted' );
 
 	my $expect_eid
-		= sha256_base64( 'ids1' . 'baphomet-web' . $eve->{timestamp} . 'sighted' . 'web-login' . 'eviluser' );
-	is( $row->{event_id}, $expect_eid, 'event_id uses the subject when there is no ip' );
+		= sha256_base64( 'ids1' . 'baphomet-web' . $eve->{timestamp} . 'sighted' . 'web-login' . 'USER=eviluser' );
+	is( $row->{event_id}, $expect_eid, 'event_id renders subject_vars when there is no ip' );
+}
+
+# -- a usedns-resolved subject: subject_vars value is the {hostname, ip}
+#    shape, whose hostname feeds the event_id render; garbage in the
+#    promoted vars stores as NULL rather than failing the inet/integer bind --
+{
+	my $eve = {
+		eve_type     => 'baphomet',
+		event_type   => 'banish',
+		timestamp    => '2026-07-15T12:07:00+0000',
+		hostname     => 'ids1',
+		kur          => 'baphomet-sshd',
+		src_ip       => 'bad.example.com',
+		src_port     => 'junk',
+		banishing    => [ '192.0.2.72', '192.0.2.73' ],
+		subject_vars => { SRC => { hostname => 'bad.example.com', ip => [ '192.0.2.72', '192.0.2.73' ] } },
+		msg          => 'resolved ban',
+		rule         => { name => 'sshd-bruteforce' },
+	};
+
+	my $row = $lilith->parse_eve(
+		type     => 'baphomet',
+		json     => $eve,
+		instance => 'baphomet-sshd',
+		host     => 'sensor1',
+		raw      => 'RAW-usedns',
+	);
+
+	is( $row->{src_ip},   '192.0.2.72', 'a non-IP promoted src_ip is skipped for the banishing fallback' );
+	is( $row->{src_port}, undef,        'a non-numeric promoted port stores as NULL' );
 }
 
 # -- a found: instance falls back to the record kur when not given --

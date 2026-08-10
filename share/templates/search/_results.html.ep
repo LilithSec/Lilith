@@ -119,7 +119,7 @@
       <thead class="table-secondary">
         <tr>
           <th>ID</th><th>Timestamp</th><th>Instance</th><th class="col-host" style="display:none">Host</th>
-          <th>Event</th><th>Src IP</th><th>Subject</th>
+          <th>Event</th><th>Src IP</th><th>Subjects</th>
           <th>Severity</th><th>Class</th><th>Signature</th><th>Score</th>
         </tr>
       </thead>
@@ -132,7 +132,7 @@
           <td class="col-host" style="display:none"><% if (my $host = $row->{host}) { %><a href="#" class="host-filter" data-host="<%= $host %>"><%= $host %></a><% } %></td>
           <td><%= $row->{event_type} // '' %></td>
           <td><%= include 'partials/_ip_cell', ip => $row->{src_ip} %></td>
-          <td><%= $row->{subject} // '' %></td>
+          <td><small><%= $row->{subjects_crossed} // '' %></small></td>
           <td><%= $row->{severity} // '' %></td>
           <td title="<%= $row->{classification} // '' %>"><%= $row->{classification} // '' %></td>
           <td><% if (my $signature = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $signature %>"><%= $signature %></a><% } %></td>

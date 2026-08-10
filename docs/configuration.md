@@ -98,11 +98,14 @@ eve="/var/log/baphomet/eve.json"
 `baphomet` ingests the EVE
 [Baphomet](https://github.com/LilithSec/Baphomet) emits about its own verdicts
 (`eve_type` `baphomet`; event types `found`/`banish`/`noted`/`alert`/`sighting`/`sighted`)
-into the `baphomet_alerts` table. Baphomet's offender IP is stored as `src_ip`
-(so the top-talker, escalation, and GeoIP machinery reuse it) and a non-IP
-subject in its own `subject` column. Use the top-level `baphomet_event_ignore`
-to drop event types you do not want stored. Baphomet is viewable in search and
-the dashboard but is not escalated automatically (escalation stays opt-in).
+into the `baphomet_alerts` table. The record's promoted flow vars land in
+`src_ip`/`src_port`/`dest_ip`/`dest_port` and `username` (the EVE `user`), with
+`src_ip` falling back to the first banished address -- a subnet ban's CIDR
+included -- so the top-talker, escalation, and GeoIP machinery reuse it. Who
+crossed a threshold stays in `raw` (`subjects_crossed`/`subject_vars`),
+reachable with `raw->'...'`. Use the top-level `baphomet_event_ignore` to drop
+event types you do not want stored. Baphomet is viewable in search and the
+dashboard but is not escalated automatically (escalation stays opt-in).
 
 A malformed instance is warned about and skipped rather than killing the
 daemon. Note: prior to 4.0.0 instances were plain top-level tables

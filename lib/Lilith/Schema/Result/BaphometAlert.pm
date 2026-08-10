@@ -95,9 +95,29 @@ __PACKAGE__->table("baphomet_alerts");
   is_nullable: 1
   size: 1024
 
+=head2 gid
+
+  data_type: 'bigint'
+  is_nullable: 1
+
+=head2 sid
+
+  data_type: 'bigint'
+  is_nullable: 1
+
+=head2 rev
+
+  data_type: 'bigint'
+  is_nullable: 1
+
 =head2 src_ip
 
   data_type: 'inet'
+  is_nullable: 1
+
+=head2 src_port
+
+  data_type: 'integer'
   is_nullable: 1
 
 =head2 dest_ip
@@ -105,7 +125,12 @@ __PACKAGE__->table("baphomet_alerts");
   data_type: 'inet'
   is_nullable: 1
 
-=head2 subject
+=head2 dest_port
+
+  data_type: 'integer'
+  is_nullable: 1
+
+=head2 username
 
   data_type: 'varchar'
   is_nullable: 1
@@ -174,11 +199,21 @@ __PACKAGE__->add_columns(
 	{ data_type => "varchar", is_nullable => 1, size => 32 },
 	"classification",
 	{ data_type => "varchar", is_nullable => 1, size => 1024 },
+	"gid",
+	{ data_type => "bigint", is_nullable => 1 },
+	"sid",
+	{ data_type => "bigint", is_nullable => 1 },
+	"rev",
+	{ data_type => "bigint", is_nullable => 1 },
 	"src_ip",
 	{ data_type => "inet", is_nullable => 1 },
+	"src_port",
+	{ data_type => "integer", is_nullable => 1 },
 	"dest_ip",
 	{ data_type => "inet", is_nullable => 1 },
-	"subject",
+	"dest_port",
+	{ data_type => "integer", is_nullable => 1 },
+	"username",
 	{ data_type => "varchar", is_nullable => 1, size => 1024 },
 	"ban_time",
 	{ data_type => "bigint", is_nullable => 1 },

@@ -372,10 +372,16 @@ is_deeply( $captured_search->{id}, { '=' => '42' }, 'and the id filter still app
 # ---------------------------------------------------------------------------
 
 $captured_search = undef;
-$lilith->search( table => 'baphomet', sid => ['123'], port => '22', src_port => ['22'] );
-ok( !exists( $captured_search->{sid} ),      'sid filter is skipped for a table without a sid column' );
-ok( !exists( $captured_search->{src_port} ), 'src_port filter is skipped for a table without ports' );
-ok( !exists( $captured_search->{'-and'} ),   'the complex port filter is skipped too' );
+$lilith->search( table => 'cape', sid => ['123'] );
+ok( !exists( $captured_search->{sid} ), 'sid filter is skipped for a table without a sid column' );
+
+# baphomet carries the ports, the gid/sid/rev trio, and username, so those
+# filters bind for it rather than being skipped
+$captured_search = undef;
+$lilith->search( table => 'baphomet', sid => ['123'], src_port => ['22'], username => 'admin' );
+is_deeply( $captured_search->{sid},      { '=' => '123' },   'the sid filter applies to baphomet' );
+is_deeply( $captured_search->{src_port}, { '=' => '22' },    'the src_port filter applies to baphomet' );
+is_deeply( $captured_search->{username}, { '=' => 'admin' }, 'the username filter applies to baphomet' );
 
 $captured_search = undef;
 $lilith->search( table => 'cape', target => 'somehost' );

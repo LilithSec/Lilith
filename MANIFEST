@@ -154,6 +154,7 @@ share/migrations/PostgreSQL/deploy/10/001-auto.sql
 share/migrations/PostgreSQL/deploy/11/001-auto.sql
 share/migrations/PostgreSQL/deploy/12/001-auto.sql
 share/migrations/PostgreSQL/deploy/13/001-auto.sql
+share/migrations/PostgreSQL/deploy/14/001-auto.sql
 share/migrations/PostgreSQL/downgrade/1-0/001-auto.sql
 share/migrations/PostgreSQL/downgrade/3-2/001-auto.sql
 share/migrations/PostgreSQL/downgrade/4-3/001-auto.sql
@@ -166,6 +167,7 @@ share/migrations/PostgreSQL/downgrade/10-9/001-auto.sql
 share/migrations/PostgreSQL/downgrade/11-10/001-auto.sql
 share/migrations/PostgreSQL/downgrade/12-11/001-auto.sql
 share/migrations/PostgreSQL/downgrade/13-12/001-auto.sql
+share/migrations/PostgreSQL/downgrade/14-13/001-auto.sql
 share/migrations/PostgreSQL/upgrade/0-1/001-auto.sql
 share/migrations/PostgreSQL/upgrade/1-2/001-auto.sql
 share/migrations/PostgreSQL/upgrade/2-3/001-auto.sql
@@ -179,6 +181,7 @@ share/migrations/PostgreSQL/upgrade/9-10/001-auto.sql
 share/migrations/PostgreSQL/upgrade/10-11/001-auto.sql
 share/migrations/PostgreSQL/upgrade/11-12/001-auto.sql
 share/migrations/PostgreSQL/upgrade/12-13/001-auto.sql
+share/migrations/PostgreSQL/upgrade/13-14/001-auto.sql
 share/fixtures/1/conf/keep
 share/fixtures/2/conf/keep
 share/fixtures/3/conf/keep
@@ -192,6 +195,7 @@ share/fixtures/10/conf/keep
 share/fixtures/11/conf/keep
 share/fixtures/12/conf/keep
 share/fixtures/13/conf/keep
+share/fixtures/14/conf/keep
 share/public/vendor/Chart.js
 share/public/js/time-range.js
 share/public/js/auto-refresh.js

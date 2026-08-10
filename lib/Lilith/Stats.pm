@@ -103,7 +103,7 @@ my %DIMENSION = (
 	baphomet => {
 		map { $_ => 1 }
 			qw( instance host kur event_type severity classification
-			src_ip dest_ip subject signature country )
+			src_ip src_port dest_ip dest_port username signature gid sid country )
 	},
 );
 

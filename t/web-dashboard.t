@@ -108,7 +108,7 @@ sub app_for {
 	# the same catalog endpoints answer for baphomet, driving its dashboard pickers
 	$t->get_ok('/api/dashboard/columns?table=baphomet')->status_is( 200, 'baphomet columns ok' );
 	my %bcols = map { $_ => 1 } @{ $t->tx->res->json->{columns} };
-	ok( $bcols{event_type} && $bcols{subject} && $bcols{severity}, 'baphomet columns list its dimensions' );
+	ok( $bcols{event_type} && $bcols{username} && $bcols{severity}, 'baphomet columns list its dimensions' );
 	$t->get_ok('/api/dashboard/measures?table=baphomet')->status_is( 200, 'baphomet measures ok' );
 	my %bmeas = map { $_->{name} => 1 } @{ $t->tx->res->json->{measures} };
 	ok( $bmeas{avg_score} && $bmeas{max_score}, 'baphomet measures include the score aggregates' );

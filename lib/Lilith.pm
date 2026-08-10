@@ -8,6 +8,7 @@ use JSON                 qw( decode_json encode_json );
 use Sys::Hostname        qw( hostname );
 use DBI                  ();
 use Digest::SHA          qw(sha256_base64);
+use Socket               qw( AF_INET AF_INET6 inet_pton );
 use Sys::Syslog          qw( closelog openlog syslog );
 use POSIX                qw( strftime );
 use Time::Piece::Guess   ();
@@ -58,7 +59,8 @@ our %alert_columns = (
 	baphomet => [
 		qw(
 			instance host timestamp event_id event_type kur path score
-			signature severity classification src_ip dest_ip subject
+			signature severity classification gid sid rev
+			src_ip src_port dest_ip dest_port username
 			ban_time recidive country raw
 		)
 	],
@@ -129,6 +131,18 @@ our %class_map = (
 	'Suspicious Traffic'                                          => 'SusT',
 	'Configuration Error'                                         => 'ConfErr',
 	'Hardware Event'                                              => 'HWevent',
+	# Baphomet's category wordings not already covered above: its own log-side
+	# classtypes, plus case variants where its classtype table capitalizes
+	# differently than the Sagan/Suricata wording already listed
+	'Access to a potentially vulnerable web application'          => 'PotVulWebApp',
+	'Traffic the Sensor Blocked'                                  => 'Blocked',
+	'Brute Force Attack'                                          => 'BruteForce',
+	'Correlated Attack'                                           => 'CorrAtk',
+	'Malware Activity Detected'                                   => 'MalAct',
+	'Network Event'                                               => 'NetEvent',
+	'System Error'                                                => 'SysErr',
+	'System Event'                                                => 'SysEvent',
+	'Unsuccessful Administrator Privilege Gain'                   => '!SucAdmPG',
 	''                                                            => 'blankC',
 );
 
@@ -523,24 +537,35 @@ sub _parse_cape {
 # baphomet_alerts row. Kept out of parse_eve for the same reason as _parse_cape:
 # the shape has nothing in common with an IDS alert.
 #
-# Baphomet's offender IP maps to src_ip so the existing top talker / escalation
-# / %INET machinery reuse it; its subject (a non-IP offender, e.g. a username)
-# gets its own column. As with the suricata/sagan/cape sources, only the scalar
-# fields worth filtering, sorting, or grouping by are promoted to columns. The
-# nested detail (attack, rule, found, marks_set, references, ...) stays in raw
-# and is reached with raw->'...'.
+# The flow columns come from Baphomet's promoted vars -- src_ip, src_port,
+# dest_ip, dest_port, and user (stored as username; "user" is reserved in
+# Postgres and column names are interpolated unquoted into SQL elsewhere).
+# src_ip falls back to the first entry of banishing, so a banish whose rule
+# promoted no src_ip -- a subnet ban's CIDR, a resolved name's first address --
+# still lands in the top talker / escalation / %INET machinery. As with the
+# suricata/sagan/cape sources, only the scalar fields worth filtering, sorting,
+# or grouping by are promoted to columns. The nested detail (subject_vars,
+# subjects_crossed, banishing, attack, rule, found, marks_set, tracked, ...)
+# stays in raw and is reached with raw->'...'.
+#
+# The promoted vars are lifted from rule-named capture vars, so a misauthored
+# rule can put a non-IP or non-numeric value in them; those are stored as NULL
+# rather than letting the inet/integer bind fail and lose the whole row.
 #
 # Baphomet has no flow identity, so event_id is derived rather than read: the
 # base64 SHA256 of hostname + kur + timestamp + event_type + rule name +
-# offender, where offender is the ip, or the subject when there is no ip. The
+# offender, where offender is the src_ip (after the banishing fallback), or a
+# stable render of subject_vars when there is no ip -- so a subject-only
+# verdict (a sighted on a username, say) still gets a distinct handle. The
 # rule name comes out of the record even though rule itself is not a column.
 #
 # Args:
 #
 #   - $json :: the decoded EVE record as a hash ref, whose eve_type the caller
 #     has already established is "baphomet". The keys read are event_type,
-#     kur, hostname, timestamp, msg, classtype, severity, score, path, ip,
-#     dest_ip, subject, ban_time, recidive, country, and the rule block.
+#     kur, hostname, timestamp, msg, category, severity, score, gid, sid, rev,
+#     path, src_ip, src_port, dest_ip, dest_port, user, banishing,
+#     subject_vars, ban_time, recidive, country, and the rule block.
 #   - $opts :: a hash ref of what the record cannot supply on its own:
 #       - instance :: the instance name to record, as configured for this
 #         [eves.*]. Falls back to the record's kur when undef.
@@ -576,10 +601,19 @@ sub _parse_baphomet {
 	my $instance = defined( $opts->{instance} ) ? $opts->{instance} : $json->{kur};
 	my $host     = defined( $json->{hostname} ) ? $json->{hostname} : $opts->{host};
 
-	# offender is the ip when present, else the subject; it keeps the derived
-	# event_id stable for a subject-only verdict
+	# the flow source, falling back to what was banished when it is missing or
+	# not an address (a usedns rule's src_ip var can carry a hostname);
+	# banishing may carry a CIDR (subnet ban), which the inet column holds fine
+	my $src_ip = _baphomet_inet( $json->{src_ip} ) ? $json->{src_ip} : undef;
+	if ( !defined($src_ip) && ref( $json->{banishing} ) eq 'ARRAY' && _baphomet_inet( $json->{banishing}[0] ) ) {
+		$src_ip = $json->{banishing}[0];
+	}
+	my $dest_ip = _baphomet_inet( $json->{dest_ip} ) ? $json->{dest_ip} : undef;
+
+	# offender is the ip when present, else the subjects render; it keeps the
+	# derived event_id stable and distinct for a subject-only verdict
 	my $rule_name = ref( $json->{rule} ) eq 'HASH' ? $json->{rule}{name} : undef;
-	my $offender  = defined( $json->{ip} )         ? $json->{ip}         : $json->{subject};
+	my $offender  = defined($src_ip)               ? $src_ip             : _baphomet_subjects( $json->{subject_vars} );
 
 	my $event_id
 		= sha256_base64( ( defined($host) ? $host : '' )
@@ -600,16 +634,112 @@ sub _parse_baphomet {
 		score          => $json->{score},
 		signature      => $json->{msg},
 		severity       => $json->{severity},
-		classification => $json->{classtype},
-		src_ip         => $json->{ip},
-		dest_ip        => $json->{dest_ip},
-		subject        => $json->{subject},
+		classification => $json->{category},
+		gid            => _baphomet_number( $json->{gid} ),
+		sid            => _baphomet_number( $json->{sid} ),
+		rev            => _baphomet_number( $json->{rev} ),
+		src_ip         => $src_ip,
+		src_port       => _baphomet_number( $json->{src_port} ),
+		dest_ip        => $dest_ip,
+		dest_port      => _baphomet_number( $json->{dest_port} ),
+		username       => $json->{user},
 		ban_time       => $json->{ban_time},
 		recidive       => _baphomet_bool( $json->{recidive} ),
 		country        => $json->{country},
 		raw            => $opts->{raw},
 	};
 } ## end sub _parse_baphomet
+
+# Check that a value is storable in a Postgres inet column: an IPv4 or IPv6
+# address, optionally with a /prefix (a subnet ban's CIDR). Baphomet's promoted
+# src_ip/dest_ip are lifted from rule-named capture vars, so a misauthored rule
+# can put anything there; a value failing this is stored as NULL rather than
+# letting the insert die and lose the row. Plain function, not a method.
+#
+# Args:
+#
+#   - $value :: the candidate value; undef, a ref, or a non-address string all
+#     fail.
+#
+# Returns: 1 when the value parses as an address or CIDR, 0 otherwise.
+#
+#     $src_ip = undef unless _baphomet_inet($src_ip);
+#
+#     _baphomet_inet('203.0.113.66');    # 1
+#     _baphomet_inet('65.49.1.0/24');    # 1
+#     _baphomet_inet('bad.example.com'); # 0
+sub _baphomet_inet {
+	my ($value) = @_;
+
+	return 0 if !defined($value) || ref($value);
+
+	my ( $address, $prefix ) = split( m{/}, $value, 2 );
+	return 0 unless defined($address) && $address ne '';
+
+	my $family = $address =~ /:/ ? AF_INET6 : AF_INET;
+	if ( defined($prefix) ) {
+		return 0 unless $prefix =~ /^[0-9]{1,3}$/ && $prefix <= ( $family == AF_INET6 ? 128 : 32 );
+	}
+
+	return defined( inet_pton( $family, $address ) ) ? 1 : 0;
+} ## end sub _baphomet_inet
+
+# Coerce a Baphomet numeric field (the promoted src_port/dest_port and the
+# gid/sid/rev trio) for an integer column. Baphomet emits these as integers or
+# null, but the ports are lifted from rule-named capture vars and ride through
+# unchanged when non-numeric, so anything else becomes NULL rather than a
+# failed bind. Plain function, not a method.
+#
+# Args:
+#
+#   - $value :: the decoded JSON value; expected a non-negative integer, but
+#     tolerant of undef or any string.
+#
+# Returns: the value as a number when it is all digits, undef otherwise.
+#
+#     src_port => _baphomet_number( $json->{src_port} ),
+sub _baphomet_number {
+	my ($value) = @_;
+
+	return undef if !defined($value) || ref($value) || $value !~ /^[0-9]+$/;
+	return $value + 0;
+}
+
+# Render a record's subject_vars compactly and stably for the event_id hash:
+# each var as var=value sorted by var name, joined with commas, a
+# usedns-resolved value ({hostname, ip[]}) contributing its hostname. Only for
+# the hash input -- never stored or displayed. Plain function, not a method.
+#
+# Args:
+#
+#   - $subject_vars :: the record's subject_vars hash ref (var name => captured
+#     value, or => { hostname => ..., ip => [...] } where usedns resolved).
+#     Tolerant of undef or a non-hash.
+#
+# Returns: the rendered string, '' when there is nothing to render.
+#
+#     _baphomet_subjects( { SRC => '1.2.3.4', USER => 'admin' } );
+#     # 'SRC=1.2.3.4,USER=admin'
+#
+#     _baphomet_subjects( { SRC => { hostname => 'bad.example.com',
+#                                    ip => ['192.0.2.72'] } } );
+#     # 'SRC=bad.example.com'
+sub _baphomet_subjects {
+	my ($subject_vars) = @_;
+
+	return '' unless ref($subject_vars) eq 'HASH';
+
+	my @rendered;
+	foreach my $var ( sort keys %{$subject_vars} ) {
+		my $value = $subject_vars->{$var};
+		if ( ref($value) eq 'HASH' ) {
+			$value = $value->{hostname};
+		}
+		push( @rendered, $var . '=' . ( defined($value) && !ref($value) ? $value : '' ) );
+	}
+
+	return join( ',', @rendered );
+} ## end sub _baphomet_subjects
 
 # Coerce a Baphomet JSON boolean (a JSON::PP::Boolean, which stringifies to ''
 # for false and would not bind as a Postgres boolean) to 1/0, leaving undef as
@@ -1401,6 +1531,7 @@ Below are a list of string items.
     - url_hostname
     - slug
     - pkg
+    - username
 
     # will become "and host = 'foo.bar'"
     host => 'foo.bar',
@@ -1807,7 +1938,7 @@ sub search {
 		'host',      'instance_host', 'instance',         'signature',
 		'app_proto', 'in_iface',      'url',              'url_hostname',
 		'slug',      'pkg',           'subbed_from_host', 'event_type',
-		'subject',   'target'
+		'username',  'target'
 	);
 	foreach my $item (@strings) {
 		if ( defined( $opts{$item} ) && $table_has_column{$item} ) {

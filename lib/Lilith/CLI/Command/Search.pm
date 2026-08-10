@@ -67,6 +67,7 @@ sub opt_spec {
 		[ 'size=s@',          'the size of the sample' ],
 		[ 'target=s',         'the detonation target' ],
 		[ 'task=s@',          'the task ID of the run' ],
+		[ 'user=s',           'the username the line was about' ],
 	);
 } ## end sub opt_spec
 
@@ -147,6 +148,7 @@ sub execute {
 		size             => $opt->{size}     // [],
 		target           => $opt->{target},
 		task             => $opt->{task} // [],
+		username         => $opt->{user},
 	);
 
 	#
@@ -201,9 +203,9 @@ sub execute {
 				}
 			} elsif ( $table eq 'baphomet' ) {
 				if ( $column_set eq 'default' ) {
-					$columns = 'id,instance,event_type,src_ip,subject,severity,signature,classification,score';
+					$columns = 'id,instance,event_type,src_ip,username,severity,signature,classification,score';
 				} elsif ( $column_set eq 'default_timestamp' ) {
-					$columns = 'timestamp,instance,event_type,src_ip,subject,severity,signature,classification,score';
+					$columns = 'timestamp,instance,event_type,src_ip,username,severity,signature,classification,score';
 				} else {
 					die( '"' . $column_set . '" is not a known column set' );
 				}
@@ -250,7 +252,7 @@ sub execute {
 			'subbed_from_ip'      => 'subbed_from_ip',
 			'subbed_from_host'    => 'subbed_from_host',
 			'event_type'          => 'event_type',
-			'subject'             => 'subject',
+			'username'            => 'user',
 			'severity'            => 'severity',
 			'score'               => 'score',
 			'kur'                 => 'kur',

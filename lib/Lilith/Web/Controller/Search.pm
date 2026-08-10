@@ -114,6 +114,7 @@ sub index {
 				slug             => $self->param('slug')             || undef,
 				pkg              => $self->param('pkg')              || undef,
 				target           => $self->param('target')           || undef,
+				username         => $self->param('username')         || undef,
 				src_port         => \@src_port,
 				dest_port        => \@dest_port,
 				gid              => \@gid,
@@ -125,6 +126,20 @@ sub index {
 			);
 		};
 		$error = $@ if $@;
+	}
+
+	# The Subjects column of the baphomet results table shows the record's
+	# subjects_crossed map -- who crossed a threshold, which is no longer a
+	# column of its own -- so dig it out of raw here and hand the template the
+	# JSON text. Rows without one (every routine found/noted/sighting) get no
+	# key and render empty.
+	if ( $table eq 'baphomet' && ref $results eq 'ARRAY' ) {
+		foreach my $row (@$results) {
+			my $decoded = eval { Mojo::JSON::from_json( $row->{raw} ) };
+			if ( ref $decoded eq 'HASH' && ref $decoded->{subjects_crossed} eq 'HASH' ) {
+				$row->{subjects_crossed} = Mojo::JSON::to_json( $decoded->{subjects_crossed} );
+			}
+		}
 	}
 
 	# Escalation counts for badging escalated events, read straight off each

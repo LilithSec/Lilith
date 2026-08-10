@@ -78,7 +78,7 @@ and `lilith migrate` commands that wrap it).
 | `suricata_alerts`    | Suricata alerts — flow tuple, classification, sig, gid/sid/rev, flow counters, `raw` |
 | `sagan_alerts`       | Sagan alerts — as above plus facility, level, priority, program, xff, and both the sending `host` and the `instance_host` the instance runs on |
 | `cape_alerts`        | CAPEv2 detonations — target, task, malscore, hashes, package, slug, submission source, start/stop |
-| `baphomet_alerts`    | Baphomet judgments — event type, kur, score, the offender as `src_ip` (or a non-IP `subject`), ban time, recidive flag, country |
+| `baphomet_alerts`    | Baphomet judgments — event type, kur, score, sig, gid/sid/rev, the flow tuple and `username` from the promoted vars (`src_ip` falling back to the banished address), ban time, recidive flag, country |
 | `escalation_targets` | where word can be sent — name, type, per-type jsonb config, enabled flag |
 | `escalations`        | the audit trail — every escalation attempt, its status, error, and the raw payload actually sent |
 | `auto_escalations`   | the standing orders — match/actions rule DSL, priority, table scoping, match stats |
