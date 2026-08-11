@@ -1,6 +1,16 @@
 Revision history for Lilith
 
 4.0.0	unreleased
+		 - search(): the string and address filters now take several values
+		   like class already did, positives ORed and negations ANDed. The
+		   web UI submits every text filter as one parameter per value, so
+		   each value gets its own chip above the results and can be dropped
+		   without clearing the rest of the filter. proto, event_id, and the
+		   hashes moved to the string handling on the way, so they take a
+		   '!' and (bar the inet columns) a '%' as well. A filter field
+		   named after a column that can be grouped by also offers the
+		   values that occur, with their counts, from a new
+		   /api/search/values.
 		 - Widen cape_alerts.malscore from bigint to double precision
 		   (schema version 11). CAPEv2's malscore is a fractional score
 		   (e.g. 0.2, 7.5), so a non-integer value aborted the INSERT with

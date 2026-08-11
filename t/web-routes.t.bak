@@ -236,7 +236,7 @@ sub _make_app {
 	# the fields whose dropdown offers the values that occur name their column;
 	# the src-or-dst pairs have no single column to offer and name none
 	$t->get_ok('/search')
-		->element_exists( 'select[name="instance"][data-column="instance"]',   'instance offers values for its column' )
+		->element_exists( 'select[name="instance"][data-column="instance"]', 'instance offers values for its column' )
 		->element_exists( 'select[name="signature"][data-column="signature"]', 'signature offers values' )
 		->element_exists_not( 'select[name="ip"][data-column]',   'the src-or-dst IP filter offers none' )
 		->element_exists_not( 'select[name="port"][data-column]', 'the src-or-dst port filter offers none' );
@@ -256,11 +256,11 @@ sub _make_app {
 
 	$t->get_ok('/api/search/values?table=sagan&column=instance&go_back_minutes=60')
 		->status_is( 200, 'the values endpoint renders 200' )
-		->json_is( '/table',          'sagan',     'it names the table asked for' )
-		->json_is( '/column',         'instance',  'and the column' )
-		->json_is( '/values/0/value', 'nibbles04', 'the most common value comes first' )
-		->json_is( '/values/0/count', 812,         'with its count' )
-		->json_is( '/values/1/value', 'inari-pie', 'and the rest follow' );
+		->json_is( '/table',           'sagan',     'it names the table asked for' )
+		->json_is( '/column',          'instance',  'and the column' )
+		->json_is( '/values/0/value',  'nibbles04', 'the most common value comes first' )
+		->json_is( '/values/0/count',  812,         'with its count' )
+		->json_is( '/values/1/value',  'inari-pie', 'and the rest follow' );
 	is( $captured{table},           'sagan',    'the table reaches Lilith::Stats' );
 	is( $captured{column},          'instance', 'the column reaches Lilith::Stats' );
 	is( $captured{go_back_minutes}, 60,         'the window reaches Lilith::Stats' );

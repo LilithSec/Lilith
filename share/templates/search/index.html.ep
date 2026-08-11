@@ -27,45 +27,51 @@
 % #
 % # - tables :: the alert tables the filter applies to, space separated. Omit
 % #   for one that applies to all of them.
+% #
+% # - suggest :: set when the field's dropdown offers the values that actually
+% #   occur, fetched from /api/search/values when it is focused. The field name
+% #   is the column asked for, so this is only for a filter named after a
+% #   column Lilith::Stats can group by -- not the src-or-dst pairs, and not the
+% #   near-unique columns where a list of the top values says nothing.
 % my @_filter_groups = (
 %   {   heading => 'Network',
 %       fields  => [
-%           { name => 'src_ip',    label => 'Src IP' },
-%           { name => 'src_port',  label => 'Src Port',  form_label => 'Src Port(s)' },
-%           { name => 'dest_ip',   label => 'Dst IP' },
-%           { name => 'dest_port', label => 'Dst Port',  form_label => 'Dst Port(s)' },
+%           { name => 'src_ip',    label => 'Src IP',    suggest => 1 },
+%           { name => 'src_port',  label => 'Src Port',  form_label => 'Src Port(s)', suggest => 1 },
+%           { name => 'dest_ip',   label => 'Dst IP',    suggest => 1 },
+%           { name => 'dest_port', label => 'Dst Port',  form_label => 'Dst Port(s)', suggest => 1 },
 %           { name => 'ip',        label => 'IP',        form_label => 'IP (src <em>or</em> dst)' },
 %           { name => 'port',      label => 'Port',      form_label => 'Port (src <em>or</em> dst)' },
-%           { name => 'proto',     label => 'Proto' },
-%           { name => 'app_proto', label => 'App Proto' },
-%           { name => 'in_iface',  label => 'Interface' },
+%           { name => 'proto',     label => 'Proto',     suggest => 1 },
+%           { name => 'app_proto', label => 'App Proto', suggest => 1 },
+%           { name => 'in_iface',  label => 'Interface', suggest => 1 },
 %       ],
 %   },
 %   {   heading => 'Instance / Host',
 %       fields  => [
-%           { name => 'instance',      label => 'Instance' },
-%           { name => 'instance_host', label => 'Instance Host', tables => 'sagan cape' },
-%           { name => 'host',          label => 'Host' },
+%           { name => 'instance',      label => 'Instance', suggest => 1 },
+%           { name => 'instance_host', label => 'Instance Host', tables => 'sagan cape', suggest => 1 },
+%           { name => 'host',          label => 'Host', suggest => 1 },
 %       ],
 %   },
 %   {   heading => 'Rule / Signature',
 %       tables  => 'suricata sagan baphomet',
 %       fields  => [
-%           { name => 'signature', label => 'Signature', width => 3 },
-%           { name => 'gid',       label => 'GID' },
-%           { name => 'sid',       label => 'SID' },
+%           { name => 'signature', label => 'Signature', width => 3, suggest => 1 },
+%           { name => 'gid',       label => 'GID',  suggest => 1 },
+%           { name => 'sid',       label => 'SID',  suggest => 1 },
 %           { name => 'rev',       label => 'Rev' },
 %           { name => 'event_id',  label => 'Event ID', width => 3 },
-%           { name => 'username',  label => 'User', tables => 'baphomet' },
+%           { name => 'username',  label => 'User', tables => 'baphomet', suggest => 1 },
 %       ],
 %   },
 %   {   heading => 'CAPE',
 %       tables  => 'cape',
 %       fields  => [
-%           { name => 'target',           label => 'Target' },
-%           { name => 'slug',             label => 'Slug' },
-%           { name => 'pkg',              label => 'Package' },
-%           { name => 'malscore',         label => 'Malscore' },
+%           { name => 'target',           label => 'Target',   suggest => 1 },
+%           { name => 'slug',             label => 'Slug',     suggest => 1 },
+%           { name => 'pkg',              label => 'Package',  suggest => 1 },
+%           { name => 'malscore',         label => 'Malscore', suggest => 1 },
 %           { name => 'size',             label => 'Size' },
 %           { name => 'task',             label => 'Task ID' },
 %           { name => 'subbed_from_ip',   label => 'Subbed From IP' },
@@ -197,7 +203,7 @@
   <div class="collapse <%= $show_filters ? 'show' : '' %>" id="filter-panel">
     <div class="card mb-2 border-secondary">
       <div class="card-header py-1 small text-muted">
-        Filters — prefix <code>!</code> to negate, <code>%</code> for LIKE. Numeric fields accept comma-separated values e.g. <code>22,!80,&lt;1024</code>
+        Filters — prefix <code>!</code> to negate, <code>%</code> for LIKE. Every field takes more than one value: type and press enter or comma. Several values match any of them e.g. <code>nibbles0%</code> + <code>inari-pie</code>; numeric fields also take <code>&lt;</code> and <code>&gt;</code> e.g. <code>22</code>, <code>!80</code>, <code>&lt;1024</code>
       </div>
       <div class="card-body py-2">
         <div class="row g-2">
@@ -214,13 +220,22 @@
             <div class="row g-2 <%= $group_index < $last_group ? 'mb-1 ' : '' %>search-filter-field" data-tables="<%= $group->{tables} // $all_tables %>">
               <div class="col-12"><span class="text-muted small fw-semibold"><%= $group->{heading} %></span></div>
 
+              % # Each field is a <select multiple> holding one option per value
+              % # in force, which /js/search.js turns into a type-to-add token
+              % # field. That is what makes a filter submit one query parameter
+              % # per value, so the chips above the results can drop a single
+              % # value and leave the rest of the filter alone.
               % for my $field ( @{ $group->{fields} } ) {
               %   ( my $field_id = $field->{name} ) =~ s/_/-/g;
               %   $field_id .= '-input';
               <div class="col-md-<%= $field->{width} // 2 %> search-filter-field" data-tables="<%= $field->{tables} // $all_tables %>">
                 <label class="form-label" for="<%= $field_id %>"><%== $field->{form_label} // $field->{label} %></label>
-                <input type="text" name="<%= $field->{name} %>" id="<%= $field_id %>" class="form-control form-control-sm"
-                       value="<%= param( $field->{name} ) // '' %>">
+                <select name="<%= $field->{name} %>" id="<%= $field_id %>" class="form-select form-select-sm search-token-field" multiple
+                        <%== $field->{suggest} ? 'data-column="' . $field->{name} . '"' : '' %>>
+                  % for my $value ( grep { defined($_) && $_ ne '' } @{ $self->every_param( $field->{name} ) } ) {
+                  <option value="<%= $value %>" selected><%= $value %></option>
+                  % }
+                </select>
               </div>
               % }
             </div><!-- /<%= lc $group->{heading} %> row -->

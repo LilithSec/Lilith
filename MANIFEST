@@ -85,6 +85,7 @@ t/lilith-new.t
 t/lilith-parse-eve.t
 t/lilith-receiver.t
 t/lilith-search-class.t
+t/lilith-search-strings.t
 t/lilith-shodan-cli.t
 t/lilith-shodan.t
 t/lilith-stats.t

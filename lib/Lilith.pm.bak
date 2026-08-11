@@ -1657,8 +1657,8 @@ sub _string_filter_clauses {
 
 	my @values = ref($values) eq 'ARRAY' ? @{$values} : ($values);
 
-	my @in;          # plain positives, which collapse into one '=' or '-in'
-	my @positive;    # positives needing an operator of their own, i.e. the LIKEs
+	my @in;         # plain positives, which collapse into one '=' or '-in'
+	my @positive;   # positives needing an operator of their own, i.e. the LIKEs
 	my @negative;
 
 	foreach my $value (@values) {
@@ -1683,17 +1683,8 @@ sub _string_filter_clauses {
 	if ( defined( $positive[0] ) && !defined( $positive[1] ) ) {
 		push( @clauses, { $column => $positive[0] } );
 	} elsif ( defined( $positive[1] ) ) {
-		push(
-			@clauses,
-			{
-				'-or' => [
-					map {
-						{ $column => $_ }
-					} @positive
-				]
-			}
-		);
-	} ## end elsif ( defined( $positive[1] ) )
+		push( @clauses, { '-or' => [ map { { $column => $_ } } @positive ] } );
+	}
 	foreach my $item (@negative) {
 		push( @clauses, { $column => $item } );
 	}
@@ -1921,7 +1912,7 @@ sub search {
 			push( @{ $search->{'-and'} }, { '-or' => \@positive } ) if @positive;
 			push( @{ $search->{'-and'} }, @negative );
 		}
-	} ## end if ( defined( $opts{ip} ) && ( ref( $opts{...})))
+	} ## end if ( defined( $opts{ip} ) && $opts{ip} ne ...)
 
 	if (   defined( $opts{port} )
 		&& ( ref( $opts{port} ) eq 'ARRAY' || $opts{port} ne '' )
@@ -1983,7 +1974,7 @@ sub search {
 			push( @{ $search->{'-and'} }, { '-or' => \@positive } ) if @positive;
 			push( @{ $search->{'-and'} }, @negative );
 		}
-	} ## end if ( defined( $opts{port} ) && ( ref( $opts...)))
+	} ## end if ( defined( $opts{port} ) && $opts{port}...)
 
 	#
 	# handle string items
@@ -2001,11 +1992,11 @@ sub search {
 	}
 
 	my @strings = (
-		'host',         'instance_host', 'instance', 'signature',
-		'app_proto',    'proto',         'in_iface', 'event_id',
-		'md5',          'sha1',          'sha256',   'url',
-		'url_hostname', 'slug',          'pkg',      'subbed_from_host',
-		'event_type',   'username',      'target'
+		'host',      'instance_host', 'instance',         'signature',
+		'app_proto', 'proto',         'in_iface',         'event_id',
+		'md5',       'sha1',          'sha256',           'url',
+		'url_hostname', 'slug',       'pkg',              'subbed_from_host',
+		'event_type', 'username',     'target'
 	);
 	foreach my $item (@strings) {
 		if ( defined( $opts{$item} ) && $table_has_column{$item} ) {
@@ -2015,7 +2006,7 @@ sub search {
 				push( @{ $search->{'-and'} }, @clauses );
 			}
 		}
-	}
+	} ## end foreach my $item (@strings)
 
 	my %result_attrs = (
 		order_by     => $opts{order_by} . ' ' . $opts{order_dir},

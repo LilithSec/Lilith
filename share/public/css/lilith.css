@@ -60,11 +60,11 @@ pre.raw-json { max-height: 600px; overflow-y: auto; font-size: 0.78em; backgroun
 /* The small "?" button that opens the IP / Domain info modal (partials/_info_btn). */
 .info-btn { font-size: 0.65rem; line-height: 1.2; }
 
-/* Tom Select's Bootstrap 5 theme (the classification pickers on /search) reads
-   --bs-* variables for most of its colours, so it follows the dark theme on its
-   own. These few it hardcodes to light values, which on a dark page show up as
-   pale blocks: the chip per selected classification, the divider before the
-   chip's remove button, and the dropdown border. Point them back at the theme.
+/* Tom Select's Bootstrap 5 theme (the filter fields on /search) reads --bs-*
+   variables for most of its colours, so it follows the dark theme on its own.
+   These few it hardcodes to light values, which on a dark page show up as pale
+   blocks: the chip per value held by a field, the divider before the chip's
+   remove button, and the dropdown border. Point them back at the theme.
    The layout loads this sheet after the vendored one so these win. */
 .ts-wrapper.multi .ts-control > div { background: var(--bs-secondary-bg); color: var(--bs-body-color); }
 .ts-wrapper.plugin-remove_button:not(.rtl) .item .remove { border-left-color: var(--bs-border-color); }
