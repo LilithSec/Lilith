@@ -1,358 +1,133 @@
 Revision history for Lilith
 
 4.0.0	unreleased
-		 - search(): the string and address filters now take several values
-		   like class already did, positives ORed and negations ANDed. The
-		   web UI submits every text filter as one parameter per value, so
-		   each value gets its own chip above the results and can be dropped
-		   without clearing the rest of the filter. proto, event_id, and the
-		   hashes moved to the string handling on the way, so they take a
-		   '!' and (bar the inet columns) a '%' as well. A filter field
-		   named after a column that can be grouped by also offers the
-		   values that occur, with their counts, from a new
-		   /api/search/values.
-		 - Widen cape_alerts.malscore from bigint to double precision
-		   (schema version 11). CAPEv2's malscore is a fractional score
-		   (e.g. 0.2, 7.5), so a non-integer value aborted the INSERT with
-		   "invalid input syntax for type bigint"; the column now matches
-		   what CAPE emits (and the sibling baphomet_alerts.score).
-		 - Ingest Baphomet's own judgment EVE (eve_type "baphomet"; event
-		   types found/banish/noted/alert/sighting/sighted) into a new
-		   baphomet_alerts table (schema version 10). A type=baphomet EVE
-		   instance is tailed the same way as suricata/sagan/cape; the
-		   offender IP maps to src_ip (so top-talkers/escalation/GeoIP reuse
-		   it) and a non-IP subject to its own column, and a per-instance
-		   baphomet_event_ignore knob drops chosen event types. As with the
-		   sibling tables only the scalar fields worth filtering/sorting/
-		   grouping by become columns; the nested detail (attack, rule, found,
-		   marks, references, ...) stays in raw. Baphomet is added to search,
-		   the CLI, Lilith::Stats, and the dashboard so it is viewable.
-		   Lilith::Receiver accepts pushed rows at /eve/baphomet_alerts over
-		   both the HTTP POST and WebSocket transports, so a sensor running
-		   App::Lilu can feed baphomet to a central receiver without database
+		 - Schema version 3 -> 11; run lilith migrate after upgrading.
+		 - search(): the class, string, and address filters take several
+		   values, positives ORed and negations ANDed, with '%' LIKE
+		   support per item. proto, event_id, and the hashes moved to
+		   the string handling, so they take those as well. lilith -a
+		   search: -c may be repeated or comma separated.
+		 - search(): fix multi-value numeric filters being ORed instead
+		   of ANDed, so e.g. dest_port "!22, !443" filtered nothing.
+		 - search(): the port and ip filters take '!' negation, the
+		   comparison operators, and comma separated values.
+		 - search(): an explicit start/end window as an alternative to
+		   go_back_minutes, ranged on the type's time column.
+		 - The web search page submits every text filter as one
+		   parameter per value, so each gets its own chip above the
+		   results and can be dropped without clearing the rest. A
+		   filter named after a groupable column offers the values that
+		   occur, with counts, from /api/search/values. Its When control
+		   -- last N minutes or a custom range -- is a shared partial
+		   used on /logs and /dashboard too.
+		 - Widen cape_alerts.malscore to double precision; CAPE's
+		   malscore is fractional and aborted the INSERT.
+		 - Ingest Baphomet's judgment EVE into a new baphomet_alerts
+		   table, wired into search, the CLI, Lilith::Stats, and the
+		   dashboard. Lilith::Receiver takes it over both transports,
+		   its events can be escalated manually and automatically
+		   (though it is kept out of the default rule-tables set, so a
+		   rule only acts on it when it says so), and a per-instance
+		   baphomet_event_ignore drops chosen event types.
+		 - Add a configurable web dashboard at /dashboard. Widgets --
+		   stat, top values, over time, and source countries -- drag
+		   and resize on a 12-column Gridstack and persist in a new
+		   dashboards table as one shared board, the web UI being
+		   unauthenticated. Each picks its table, column, and measure
+		   (sum, average, or a distinct count) from a per-table
+		   catalog, including virtual suricata dimensions dug out of
+		   the raw EVE: severity, and the MITRE ATT&CK tactic and
+		   technique a ruleset tags on. The time window and bucket are
+		   set per board and overridable per widget, and "Reset to..."
+		   seeds one of the built-in presets. Backed by Lilith::Stats
+		   and /api/dashboard/*, drawn with a vendored Chart.js and
+		   documented in docs/dashboard.md.
+		 - Add Lilith::Stats, the aggregation layer behind it: total,
+		   distinct, top, and bucketed timeseries over the alert
+		   tables. Names are checked against a fixed set and the window
+		   and limit integer-checked, so request parameters pass
+		   straight through.
+		 - Add a read-only /logs page for browsing an Allani store
+		   (syslog, http_access, http_error, and an interleaved http
+		   view) over its own [allani] connection, so the two need not
+		   share a database. Hidden unless [allani] is configured.
+		   Dashboard widgets and presets can read a log source as well
+		   as an alert table, and the event view gains a Logs dropdown
+		   deep-linking around the event.
+		 - Add search and dashboard indexes; the alert tables carried
+		   only their primary key, so anything filtered or aggregated
+		   seq-scanned.
+		 - Add lilith deploy / migrate / schema_version wrapping
+		   DBIx::Class::Migration, so the schema is handled with the
+		   same CLI and config as everything else.
+		 - Fix the migration fixture directories never installing.
+		   ExtUtils::Install hardcodes skipping .exists, so the
+		   placeholder is now named keep.
+		 - Add mojo_lilith_receiver (Lilith::Receiver), which ingests
+		   alert rows a sensor pushes to /eve/:table over HTTP POST or
+		   a WebSocket, so sensors need no database credentials -- the
+		   receiving side of App::Lilu's push modes. Bodies are
+		   validated against the table's columns; id, escalations, and
+		   auto_escalated cannot be set by a caller. API keys are
+		   stored as their SHA-256 and managed with the lilith
+		   receiver_key_* commands, and may be scoped to client
+		   IPs/subnets and to instance names, which take the '*' and
+		   '?' wildcards.
+		 - Rename init/ to rc/, split into rc/freebsd/ and rc/systemd/,
+		   and add boot scripts for both Mojolicious daemons.
+		 - Add escalation. Targets live in SQL and have a pluggable
+		   type under Lilith::Escalate::Type:: (Webhook, Email, and
+		   Syslog ship). The web UI gains a /escalation management
+		   page, an Escalate button and history on the event view, and
+		   an "E" badge in search results; the CLI gains esc,
+		   esc_history, esc_types, and the esc_target_* actions. Every
+		   attempt is recorded with its status and the payload actually
+		   sent, and the alert tables gain an escalations bigint[] so a
+		   reader sees escalation counts without a join. The web side
+		   is gated behind escalation_enable, with sends run in a
+		   subprocess; the CLI is not, as it already holds the DB
 		   credentials.
-		 - Baphomet events can be escalated: manual escalation (the event
-		   page's Escalate button and the CLI) and auto-escalation both accept
-		   baphomet, and auto_escalate scans baphomet_alerts. baphomet is kept
-		   out of the default rule-tables set, so an auto-escalation rule only
-		   acts on baphomet when it names it explicitly; existing rules are
-		   unaffected.
-		 - The dashboard fully supports baphomet: every widget type
-		   (stat/top/timeseries/countries) works against it, the column and
-		   measure pickers offer its dimensions (event_type, subject, severity,
-		   kur, country, ...) and score aggregates, and the Reset menu gains a
-		   built-in "Baphomet (judgments overview)" preset.
-		 - Lilith::search now accepts an explicit start/end time window (any
-		   Time::Piece::Guess-parseable time, bound as values and read in the
-		   DB session timezone) as an alternative to the now-relative
-		   go_back_minutes; it ranges on the type's time column (stop for
-		   cape). The web search page gains a When toggle -- Last N min vs a
-		   Custom range (native date inputs plus 24-hour hour/minute number
-		   fields, no picker library) -- with only the active mode's params
-		   submitted. The control is a reusable partial
-		   (templates/partials/_time_range.html.ep + /js/time-range.js), used
-		   on /search, /logs, and the /dashboard. Lilith::Stats and Lilith::Allani gained an
-		   explicit start/end absolute range (preferred over go_back_minutes);
-		   on the alert dashboard an absolute range is a live override, not
-		   saved with the board.
-		 - Remove the fixed log dashboard (/logs/dashboard) and its
-		   /api/logs/summary endpoint: the configurable /dashboard now covers
-		   logs entirely (log sources as the Default table, per-widget log
-		   sources, the Syslog/HTTP/HTTP Access/HTTP Error presets, and the
-		   adjustable bucket). The navbar's Logs entry is now a plain link to the
-		   /logs search page.
-		 - /dashboard gains an adjustable time Bucket (auto/minute/hour/day/week/
-		   month) like the log dashboard's, saved per board; auto sizes the
-		   bucket to the window (the same thresholds Lilith::Allani uses). Each
-		   Alerts over time widget can override it (or follow the board), stored
-		   as a per-widget bucket config key. The auto sizing now reaches week
-		   and month for very long windows instead of capping at day.
-		 - The /dashboard Default table selector can now be set to an Allani log
-		   source (syslog/http/http_error) as well as an alert table when
-		   [allani] is configured, so a widget left to follow the default reads
-		   that log; the board setting accepts the log sources too.
-		 - The /dashboard Reset control is now a "Reset to..." menu of built-in
-		   presets instead of a single layout: Suricata (the SIEM overview, still
-		   the default board's seed) and CAPE, plus Syslog, HTTP (a combined
-		   access+error overview), HTTP Access, and HTTP Error when an [allani]
-		   store is configured. An alert preset also sets the board's Default
-		   table; a log preset pins each widget's own Allani source.
-		 - Add a Stat (text) widget type to /dashboard: a single number --
-		   Total / Distinct-of-a-column / Escalated / Busiest-value -- with an
-		   optional custom label, backed by GET /api/{dashboard,logs}/stat.
-		   Numbers are shown in full with thousands separators by default; an
-		   Abbreviate large numbers config toggle shortens them (2010 -> 2k).
-		 - Replace the fixed stat-card strip atop /dashboard with stat widgets:
-		   the built-in board now seeds Total alerts, Unique sources, Unique
-		   signatures, Escalated, and Busiest sensor as ordinary Stat widgets in
-		   the top row, so they move, retype, retable, and remove like any other.
-		   The now-unused GET /api/dashboard/summary endpoint is removed (its
-		   numbers are served per-widget by /api/dashboard/stat).
-		 - The configurable /dashboard can now host Allani log widgets: a
-		   widget's Table picker offers the log sources (syslog/http/http_error)
-		   when [allani] is configured, and such a widget reads from
-		   /api/logs/* (with that source's dims/measures) instead of the alert
-		   tables, so one board can mix alert and log graphs. Adds
-		   /api/logs/{columns,measures}; Stat widgets work per log source too.
-		 - Add a read-only Logs page (/logs) to the web UI for browsing the
-		   logs an Allani store holds (syslog / http_access / http_error,
-		   plus an interleaved http view). It reads Allani over its own
-		   [allani] connection (dsn/user/pass) and reuses Allani::Sources
-		   as the source of accepted columns and filters, so it neither touches Lilith's
-		   alert schema nor requires the two to share a database. The page,
-		   its record view, and the nav entry stay hidden unless [allani]
-		   is configured; Allani is an optional (suggested) prereq.
-		   The event view also grows a "Logs" dropdown when Allani is
-		   configured, deep-linking to /logs pre-filtered by the event's
-		   host (syslog) and source IP (interleaved http), windowed to
-		   reach back around the event. The log aggregation endpoints
-		   (/api/logs/{top,timeseries,countries,columns,measures,stat})
-		   feed the configurable dashboard's log widgets.
-		 - Add MITRE ATT&CK tactic/technique as virtual Suricata dashboard
-		   dimensions, read from the alert.metadata a ruleset (e.g.
-		   Emerging Threats) tags on, with the underscored names spaced out
-		   for display and backed by partial expression indexes in schema
-		   version 8 (partial because MITRE is present on only a fraction
-		   of alerts). The default board gains a tactic pie beside the
-		   alerts-over-time chart (empty where the ruleset does not tag
-		   MITRE).
-		 - Give the top-values and alerts-over-time widgets a "measure":
-		   besides counting rows they can sum/average a numeric column or
-		   count distinct values, via a per-table catalog
-		   (GET /api/dashboard/measures over Lilith::Stats->measures). This
-		   turns the Suricata flow byte/packet counters into top-talker and
-		   bandwidth panels and the ports into port-scan / fan-out panels,
-		   and adds average/max malscore for CAPE. The default board gains
-		   a bandwidth chart plus top-talkers-by-bytes and fan-out panels,
-		   and bar/axis values are shown compactly (1.5K, 3.2M).
-		 - Ship a fuller Suricata-shaped default dashboard (alerts over
-		   time, top classifications/signatures, severity and app-protocol
-		   pies, top source/destination IPs and ports, per-sensor, and
-		   source countries) and document the dashboard, its widget types,
-		   and the recipe panels per table in docs/dashboard.md.
-		 - Make the dashboard panels configurable widgets rather than a
-		   fixed set. An "Add widget" picker builds timeseries, top-values
-		   (any column -- including a virtual "severity" read from the raw
-		   EVE for suricata, its 1-4 numbers shown as High/Medium/Low/
-		   Informational and ordered by that rank, backed by an expression
-		   index in schema version 7 -- drawn as a bar or pie, showing 1-50
-		   values), and source-country
-		   widgets; each has a gear to
-		   reconfigure and an x to remove, and the whole set drag/resizes
-		   and persists as before. The saved layout now stores each
-		   widget's type and config (not just its position), sanitized
-		   server-side against a fixed set of accepted types and config keys.
-		   A new GET /api/dashboard/columns endpoint (over
-		   Lilith::Stats->columns) drives the config pickers from the same
-		   accepted columns the API validates against. A fresh or reset board
-		   starts from a
-		   built-in default widget set.
-		 - Make the dashboard panels draggable and resizable with
-		   Gridstack (vendored), laid out on a 12-column grid. The layout
-		   is saved to a new dashboards table (schema version 6) as a
-		   global "default" board -- the web UI is unauthenticated, so
-		   boards are shared rather than per-user -- via the
-		   GET/POST /api/dashboard/layout endpoints and Lilith's
-		   dashboard_get/dashboard_save. A "Reset layout" button restores
-		   the built-in positions.
-		 - Add a web dashboard at /dashboard: stat cards (total,
-		   escalated, unique sources, unique signatures/targets, busiest
-		   sensor), an alerts over time chart stacked by
-		   classification/target, six per-table top-N charts
-		   (classification/signature/program/src+dest IP/dest port/app
-		   proto/level/facility/target/pkg/malscore/url host), and a top
-		   source countries chart resolved through the GeoIP databases,
-		   with a table and time-range selector. Backed by
-		   Lilith::Web::Controller::Dashboard and the
-		   /api/dashboard/{stat,top,timeseries,countries} JSON endpoints
-		   over Lilith::Stats, drawn with a vendored Chart.js. A "Show
-		   GPCD" checkbox (off by default) toggles whether Generic Protocol
-		   Command Decode alerts are included. A Dashboard (and Search)
-		   link were added to the navbar.
-		 - Add Lilith::Stats, the dashboard's aggregation layer: total,
-		   distinct, top, and (bucketed, optionally grouped) timeseries
-		   over the suricata/sagan/cape alert tables, windowed on
-		   timestamp (or stop for cape) and leaning on the version-5
-		   indexes. Table/column/bucket names are checked against a fixed set and the
-		   window/limit are integer-checked, so request parameters can be
-		   passed straight through. Reachable as $lilith->stats.
-		 - Fix the migration fixture directories never installing. The
-		   share/fixtures/<version>/conf dirs were kept by a .exists
-		   placeholder, but ExtUtils::Install hardcodes skipping that
-		   reserved MakeMaker marker name, so the dirs never reached the
-		   installed share tree and a non-root `lilith migrate` died
-		   trying to mkdir them under the root-owned share. Renamed the
-		   placeholder to "keep" so the directories install.
-		 - Add lilith deploy / migrate / schema_version commands wrapping
-		   DBIx::Class::Migration, so the schema is installed and upgraded
-		   with the same CLI and config file as everything else rather
-		   than by calling dbic-migration by hand. schema_version reports
-		   the deployed vs expected version and whether work is pending.
-		 - Add search / dashboard indexes (schema version 5). The alert
-		   tables previously carried only their primary key, so search()
-		   and any aggregation seq-scanned the whole table. Add the time
-		   column (timestamp, or stop for cape) plus composite
-		   (column, time) btrees over the top filters per table
-		   (classification, src_ip, sid; malscore/target for cape) so
-		   filtered "newest N" queries and time-windowed GROUP BYs use an
-		   index instead. Conservative set -- other cuts and a BRIN on the
-		   time column can be added per deployment.
-		 - Add mojo_lilith_receiver (Lilith::Receiver), a Mojolicious daemon
-		   that ingests pushed alert rows. A remote sensor parses its own
-		   EVE stream and POSTs each parse_eve row as JSON to
-		   POST /eve/:table, so sensors need no database credentials. The
-		   body is validated against the table's column set and inserted via
-		   the new shared Lilith::insert_alert; id, escalations, and
-		   auto_escalated cannot be set by a caller and a body carrying them
-		   is rejected.
-		 - The receiver also accepts alerts over a WebSocket at the same
-		   /eve/:table endpoint (and same bearer auth): a sensor opens one
-		   connection per table and streams each parsed row as a JSON frame,
-		   getting a JSON status frame back per alert, instead of a fresh
-		   HTTP request per alert. Both transports share one validate-and-
-		   insert path so they cannot drift; a bad frame is reported without
-		   dropping the stream and an unknown table refuses the handshake
-		   with the same 404 the POST gives. This is the receiving side of
-		   App::Lilu's lilith_websocket push mode.
-		 - Receiver API keys are stored in the database (schema version 4,
-		   new receiver_apikeys table) as their SHA-256, managed with the
-		   lilith receiver_key_create/list/get/update/delete commands. A key
-		   can be scoped to a set of client IPs/subnets and to a set of
-		   instance names; instance patterns may use the '*' and '?'
-		   wildcards (e.g. foo-*). Behind a reverse proxy set
-		   MOJO_REVERSE_PROXY=1 so the client IP scoping works.
-		 - Rename init/ to rc/ and split it into rc/freebsd/ and
-		   rc/systemd/ (the generic cron entry stays at rc/). Add boot
-		   scripts for the Mojolicious daemons: FreeBSD rc.d scripts
-		   rc/freebsd/mojo_lilith and rc/freebsd/mojo_lilith_receiver and
-		   systemd units rc/systemd/mojo_lilith.service and
-		   rc/systemd/mojo_lilith_receiver.service.
-		 - Add a escalation system to the web frontend. Escalation targets
-		   are stored in SQL (schema version 3, new escalation_targets and
-		   escalations tables) and each has a pluggable type; a type is a
-		   module under Lilith::Escalate::Type:: (Webhook, Email, and
-		   Syslog ship with the dist) and extra namespaces may be added
-		   via escalation_type_namespaces in the config. The web UI gets a
-		   /escalation management page (targets are created/edited via a
-		   form generated from the type's config_fields spec, with a per
-		   target test button), an Escalate button + escalation history on
-		   the event view, and a "E" badge on escalated events in search
-		   results. Every escalation attempt is recorded with its status
-		   and the raw JSON payload actually sent, including attempts
-		   refused before a send (unknown or disabled target), and the
-		   target's name is snapshotted per attempt so history stays
-		   readable after a target is deleted. The alert tables gain a
-		   escalations bigint[] column holding the escalation IDs for
-		   each row, appended in the same transaction as the escalations
-		   insert, so anything reading the alert tables can trivially
-		   see if/how many times a alert has been escalated without
-		   querying the escalations table. All of it is gated
-		   behind escalation_enable (off by default) and the sends run in
-		   a subprocess so the web server's event loop is not blocked.
-		 - lilith CLI: new escalation actions. esc escalates a event to
-		   targets given by ID or name (--to, --note, --by; exits
-		   non-zero if any target failed), esc_history prints the
-		   escalations for a event, esc_types lists the installed types
-		   with their config fields, and esc_targets /esc_target_get /
-		   esc_target_create / esc_target_update / esc_target_delete /
-		   esc_target_test manage targets, with config given as repeated
-		   --set key=value items. The escalation actions are not gated
-		   by escalation_enable, as that exists for the unauthenticated
-		   web UI; the CLI already holds the DB credentials.
-		 - Add automatic escalation. A new auto_escalations table (still
-		   schema version 3) holds rules as a JSON match/actions DSL;
-		   Lilith::AutoEscalate validates a rule and compiles its match
-		   into a Rule::Engine ruleset. auto_escalate() evaluates the
-		   enabled rules against alerts ingested within a window and,
-		   for each match, escalates the alert to the rule's targets via
-		   the existing escalate(), so auto escalations share the same
-		   audit trail and per-row escalations array. Each alert gains a
-		   auto_escalated timestamp so it is considered exactly once;
-		   rules are evaluated in priority order and a stop_on_match rule
-		   halts later rules for that alert. The lilith CLI gets an
-		   auto_escalate action (with --dry-run and --tables) meant to be
-		   run periodically, plus ae_list / ae_get / ae_create /
-		   ae_update / ae_delete to manage rules. A systemd service +
-		   timer and a cron example for running auto_escalate every few
-		   minutes ship under rc/. The web UI gets a /auto_escalation
-		   page for managing rules: a visual builder for the match tree
-		   (nested ALL/ANY/NOT groups of field/op/value tests) with a
-		   "Advanced (JSON)" toggle for editing the raw DSL, and a live
-		   dry-run preview against recent alerts that never sends. Its
-		   gating is two tiered: the page and its read/preview endpoints
-		   follow escalation_enable, while creating/editing/deleting
-		   rules additionally requires the new auto_escalation_manage_enable
-		   (off by default, so a saved rule can not be changed from the
-		   web UI unless explicitly opted in); with it off the page is
-		   read only.
-		 - EVE instances are now defined under the [eves.*] table, e.g.
-		   [eves.suricata-eve], instead of as plain top-level tables. Old
-		   top-level instance tables are ignored, with a warning.
-		 - search() now accepts an array for 'class'; positive values are
-		   ORed (via an IN) and '!'-negated values are ANDed, with '%'
-		   LIKE support per item.
-		 - lilith -a search: -c may be given multiple times or as a comma
-		   separated list to match/negate several classifications.
-		 - web event view: added a "Download PCAP" control that fetches the
-		   flow PCAP from a remote Virani instance and streams it back.
-		   Remotes are configured as [virani.NAME] tables; the feature is
-		   enabled when one or more are present, and the instance matching
-		   the alert is pre-selected. The fetch runs in a subprocess so it
-		   does not block the web server's event loop. The control also lets
-		   you pick which set to pull from (queried live from the remote) or
-		   copy a ready-made virani command to run locally on the PCAP box.
-		 - web: a "Virani" navbar dropdown opens either a PCAP search for an
-		   arbitrary BPF filter and time range, or (when virani_search_enable
-		   is on) a browser of the remote's most recent cached searches with
-		   per-row cached-PCAP download. The search always builds a copyable
-		   local virani command; direct download through the web server is
-		   gated by the virani_search_enable config option (off by default).
-		 - web: the /api/ipinfo and /api/domaininfo lookups now run their
-		   blocking work in a subprocess, so a slow whois/DNS lookup no
-		   longer stalls the web server's event loop.
-		 - web: an "HTTPS" button under Domain Info (with a port field,
-		   default 443) checks https://DOMAIN:PORT/ and shows the HTTP
-		   status (and redirect target), per-phase and total timing, whether
-		   the cert is expired, whether it validates (full chain + hostname),
-		   and as much certificate detail as possible. 5s timeout, 512KB read
-		   cap, both noted when hit.
-		 - web: a "Mail" button under Domain Info runs a combined SPF / DMARC
-		   / DKIM check. SPF shows the v=spf1 record and a summary, plus a
-		   Mail::SPF evaluation when an IP is given. DMARC shows the record
-		   and parsed policy (via Mail::DMARC, with the organizational-domain
-		   tree walk). DKIM shows the public key for a given selector, or
-		   probes common selectors when none is supplied, with maximal key
-		   detail (type, size, revoked/testing flags, hashes, etc.).
-		 - Lilith->run() now warns and skips a malformed EVE instance
-		   instead of dying, so one bad entry no longer stops the rest.
-		 - search(): fix multi-value numeric filters (src_port, dest_port,
-		   gid, sid, rev, size, malscore, task). Multiple terms were ORed
-		   instead of ANDed, so e.g. dest_port "!22, !443" matched every
-		   row (a 443 row still satisfies "!= 22") and filtered nothing.
-		 - search(): the complex "port" and "ip" filters now understand a
-		   '!' prefix (and port the <, <=, >, >= operators) and accept
-		   several comma separated values. Previously "!22" was passed
-		   straight to Postgres as an integer and errored, and "22,80"
-		   died as an invalid port. Positive values are ORed across the
-		   source/destination columns and items; a negated value is ANDed
-		   so it is excluded from both sides.
-
-		 - Add a docs/ dir (architecture, install, configuration, usage,
-		   escalation, security, examples) matching the rest of the
-		   LilithSec household, and rework the README to a short intro
-		   that points at docs/index.md.
-
-		 - Fix the sagan_alerts INSERT listing "proto" twice (with a
-		   matching duplicate bind), which PostgreSQL rejects with
-		   "column specified more than once"; the Sagan ingest path now
-		   inserts the correct 24 columns.
-
+		 - Add automatic escalation. Rules are a JSON match/actions DSL
+		   in a new auto_escalations table, compiled by
+		   Lilith::AutoEscalate into a Rule::Engine ruleset and
+		   evaluated by auto_escalate() against recently ingested
+		   alerts, escalating through the same audit trail. Each alert
+		   gains an auto_escalated timestamp so it is considered once,
+		   and a stop_on_match rule halts later rules for it. Adds the
+		   lilith auto_escalate and ae_* actions plus rc/ service,
+		   timer, and cron examples, and a /auto_escalation page with a
+		   visual match builder and a live dry-run preview. Editing
+		   rules from the web needs auto_escalation_manage_enable, off
+		   by default.
+		 - EVE instances are now defined under [eves.*]; old top-level
+		   instance tables are ignored, with a warning.
+		 - web event view: a Download PCAP control fetches the flow
+		   PCAP from a remote Virani instance ([virani.NAME] tables),
+		   lets you pick the set, and can hand you a virani command to
+		   run on the PCAP box instead. The fetch runs in a subprocess.
+		 - web: a Virani navbar dropdown searches a remote for a BPF
+		   filter and time range, or browses its recent cached searches
+		   when virani_search_enable is on. It always builds a copyable
+		   local virani command; downloading through the web server is
+		   what the option gates.
+		 - web: /api/ipinfo and /api/domaininfo run their blocking work
+		   in a subprocess.
+		 - web: an HTTPS button under Domain Info checks
+		   https://DOMAIN:PORT/ and reports the status, per-phase
+		   timing, and as much certificate detail as possible. 5s
+		   timeout and 512KB read cap, both noted when hit.
+		 - web: a Mail button under Domain Info runs SPF, DMARC, and
+		   DKIM checks, probing common selectors when none is given.
+		 - Lilith->run() warns and skips a malformed EVE instance
+		   instead of dying.
+		 - Add a docs/ dir matching the rest of the LilithSec
+		   household, and rework the README to a short intro pointing
+		   at docs/index.md.
+		 - Fix the sagan_alerts INSERT listing "proto" twice, which
+		   PostgreSQL rejects.
 		 - Factor the EVE field extraction out of the run() POE closure
-		   into a testable parse_eve() method, with %Lilith::alert_columns
-		   as the shared source of truth for each table's column order
-		   (so the INSERT and the parsed row cannot drift). Adds
-		   t/lilith-parse-eve.t covering Suricata/Sagan/CAPE parsing,
-		   including a regression test for the duplicate-proto fix.
+		   into a testable parse_eve(), with %Lilith::alert_columns as
+		   the shared source of truth for each table's column order.
 
 3.0.0	2026-06-25/01:00
 		 - use DBIx::Class::Migration
