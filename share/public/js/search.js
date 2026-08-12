@@ -119,10 +119,16 @@ function initFilterPickers() {
   });
 
   document.querySelectorAll('#filter-panel select.search-token-field').forEach(function(selectEl) {
+    // A field whose vocabulary is fixed (data-fixed, e.g. the shodan known
+    // states) offers exactly its markup options: free typing is off, since
+    // anything outside the set would die or match nothing.
+    var fixedField = selectEl.dataset.fixed === '1';
     new TomSelect(selectEl, {
       plugins:     ['remove_button'],
       placeholder: 'any',
-      create:      true,
+      create:      !fixedField,
+      // per-option data riding along in the markup, e.g. a fixed value's gloss
+      dataAttr:    'data-data',
       // The dropdown offers the values that actually occur (see
       // loadValueSuggestions), which is a fetch on focus rather than one per
       // keystroke: the whole list arrives at once and Tom Select filters it
@@ -132,8 +138,9 @@ function initFilterPickers() {
       load:       function(query, callback) { fetchValueSuggestions(selectEl, callback); },
       onFocus:    function() { loadValueSuggestions(selectEl); },
       // the fetched values arrive most common first, which is the order to
-      // show them in when nothing has been typed to rank them by
-      sortField:  [ { field: '$score' }, { field: '$order' } ],
+      // show them in when nothing has been typed to rank them by; a fixed
+      // field keeps its markup order, which is written meaningful-first
+      sortField:  fixedField ? [ { field: '$order' } ] : [ { field: '$score' }, { field: '$order' } ],
       // a column with more values than the dropdown's default cap is exactly
       // one worth scrolling rather than silently truncating
       maxOptions: null,
@@ -141,11 +148,14 @@ function initFilterPickers() {
         option: function(data) {
           var row = document.createElement('div');
           row.textContent = data.text;
-          if (data.count !== undefined) {
-            var count = document.createElement('span');
-            count.className   = 'text-muted small ms-2';
-            count.textContent = data.count;
-            row.appendChild(count);
+          // the annotation beside a value: how often it occurs (suggested
+          // values) or what it means (fixed ones)
+          var note = data.count !== undefined ? data.count : data.desc;
+          if (note !== undefined) {
+            var noteEl = document.createElement('span');
+            noteEl.className   = 'text-muted small ms-2';
+            noteEl.textContent = note;
+            row.appendChild(noteEl);
           }
           return row;
         }

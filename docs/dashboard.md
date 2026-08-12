@@ -139,6 +139,17 @@ way: on inbound alerts the source is the attacker, while the destination is what
 was reached out to, which is where the command-and-control and download side
 shows up. The two are separate joins, so a board can panel both at once.
 
+One column crosses the two halves instead of describing one:
+
+- `shodan_dest_cve_match` :: whether the rule that fired names a CVE the
+  destination's cache entry lists it as vulnerable to — *Matched* / *Not
+  matched* / *No CVE in rule* / *Not looked up*, *Matched* first. An exploit
+  thrown at a host actually vulnerable to it is the loudest thing this data
+  can say, and the same comparison badges the search rows and the event view.
+  Suricata and destination only — the rule's ids come from its metadata and
+  signature, and the question is about what was attacked. Needs the `cves`
+  column (schema version 16).
+
 Expect the destination panels to read mostly *Not looked up* on a sensor
 watching inbound traffic: there the destination is your own asset, which is a
 private address, and Lilith never sends those to Shodan. The destination
@@ -182,8 +193,8 @@ Two things to read the charts by:
 - `tag`, `vuln`, `cpe`, and `port` — either end — come from lists, so **one
   alert counts once per value** and the slices sum to more than the alert
   total. An address with nothing cached drops out of these entirely.
-- `known` and `cvss` keep every alert, putting the addresses with nothing cached
-  in their own bucket.
+- `known`, `cvss`, and `cve_match` keep every alert, putting the addresses with
+  nothing cached in their own bucket.
 
 Either way an alert that names no address on the end being read — a Baphomet
 judgment passed on a username, or an alert with no destination — is left out,
@@ -224,6 +235,7 @@ selected table (e.g. `classification` on CAPE) simply notes so.
 | CVEs / software on the sources | Top values | `shodan_src_vuln`, `shodan_src_cpe` |
 | Alerts from crawled vs unseen hosts | Alerts over time | group by `shodan_src_known` |
 | What the alerts reached out to | Top values | `shodan_dest_tag`, `shodan_dest_cpe` |
+| Exploits against hosts vulnerable to them (Suricata) | Top values (pie) / Alerts over time | `shodan_dest_cve_match` |
 
 ### CAPE
 

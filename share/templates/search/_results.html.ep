@@ -28,7 +28,13 @@
           <td><% if (my $in_iface = $row->{in_iface}) { %><a href="#" class="iface-filter" data-iface="<%= $in_iface %>"><%= $in_iface %></a><% } %></td>
           <td class="ip-cell"><%= include 'partials/_ip_cell', ip => $row->{src_ip} %></td>
           <td><% if (my $src_port = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $src_port %>"><%= $src_port %></a><% } %></td>
-          <td class="ip-cell"><%= include 'partials/_ip_cell', ip => $row->{dest_ip} %></td>
+          <td class="ip-cell"><%= include 'partials/_ip_cell', ip => $row->{dest_ip} %><%
+            # The loudest thing a row can say: the rule names a CVE the
+            # destination's cached Shodan entry lists it as vulnerable to. The
+            # matched ids go in the tooltip; inside .shodan-badges so the
+            # Shodan toggle governs it with the rest of the enrichment.
+            my $matched = ( stash('cve_matches') || {} )->{ $row->{id} };
+            if ($matched) { %> <span class="shodan-badges"><span class="badge bg-danger" title="rule CVE the destination is vulnerable to per Shodan: <%= join(', ', @$matched) %>">CVE match</span></span><% } %></td>
           <td><% if (my $dest_port = $row->{dest_port}) { %><a href="#" class="port-filter" data-port="<%= $dest_port %>"><%= $dest_port %></a><% } %></td>
           <td><% if (my $proto = $row->{proto}) { %><a href="#" class="proto-filter" data-proto="<%= $proto %>"><%= $proto %></a><% } %></td>
           <td><% if (my $app_proto = $row->{app_proto}) { %><a href="#" class="aproto-filter" data-aproto="<%= $app_proto %>"><%= $app_proto %></a><% } %></td>

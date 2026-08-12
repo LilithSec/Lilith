@@ -6,8 +6,10 @@ use TOML           qw(from_toml);
 use File::Slurp    qw(read_file);
 use File::Temp     ();
 use Mojo::IOLoop   ();
+use Mojo::JSON     ();
 use Lilith         ();
 use Lilith::Shodan ();
+use Lilith::CVEDB  ();
 
 # When run from a checkout, share/ lives three directories up from
 # lib/Lilith/Web.pm and takes priority so an installed copy of the dist
@@ -533,6 +535,66 @@ sub startup {
 			}
 
 			return $badges;
+		}
+	);
+
+	# The rows on a page whose rule names a CVE the destination's cached Shodan
+	# entry lists it as vulnerable to -- an exploit thrown at a host Shodan says
+	# is actually vulnerable to it, the strongest triage signal this data can
+	# give, and worth more than either half shown side by side.
+	#
+	# The comparison is done here at render time and costs no query of its own:
+	# the cache side rides the vuln_ids the shodan_badges helper already fetched
+	# for the page, and the rule side comes out of each row's raw -- decoded
+	# only for rows whose destination has cached CVEs at all, which on most
+	# pages is few of them.
+	#
+	# Args:
+	#
+	#   - $table :: the table the rows are from. Only suricata rules carry CVE
+	#     metadata, so anything else returns empty.
+	#
+	#   - $rows :: the result rows, as the search controller has them. Each
+	#     row's id, dest_ip, and raw are read. raw may be the JSON string the
+	#     row was fetched with or already decoded -- the event view holds it
+	#     decoded.
+	#
+	#   - $badges :: what the shodan_badges helper returned for these rows.
+	#
+	# Returns: a hash ref keyed by row id, each value the matched ids sorted.
+	# Only rows with a match are present, so existence of the key is the badge
+	# test. Empty whenever there is nothing to compare.
+	#
+	#     my $matches = $c->cve_matches( 'suricata', $results, $badges );
+	#     # $matches->{5012} is [ 'CVE-2021-44228' ]
+	$self->helper(
+		cve_matches => sub {
+			my ( $c, $table, $rows, $badges ) = @_;
+
+			return {} unless defined $table        && $table eq 'suricata';
+			return {} unless ref $rows eq 'ARRAY'  && @{$rows};
+			return {} unless ref $badges eq 'HASH' && keys %{$badges};
+
+			my %matches;
+			foreach my $row ( @{$rows} ) {
+				next unless ref $row eq 'HASH' && defined $row->{id} && defined $row->{dest_ip};
+
+				my $entry = $badges->{ $row->{dest_ip} };
+				next unless ref $entry eq 'HASH' && ref $entry->{vuln_ids} eq 'ARRAY' && @{ $entry->{vuln_ids} };
+
+				my $raw = $row->{raw};
+				if ( defined $raw && !ref $raw ) {
+					$raw = eval { Mojo::JSON::from_json($raw) };
+				}
+				my $rule_cves = Lilith::CVEDB::rule_cves($raw);
+				next unless @{$rule_cves};
+
+				my %vulnerable = map  { $_ => 1 } @{ $entry->{vuln_ids} };
+				my @matched    = grep { $vulnerable{$_} } @{$rule_cves};
+				$matches{ $row->{id} } = \@matched if @matched;
+			} ## end foreach my $row ( @{$rows} )
+
+			return \%matches;
 		}
 	);
 

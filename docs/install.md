@@ -266,11 +266,13 @@ There is no rc.d script, and should not be: this is a periodic job rather
 than a daemon, so unlike `lilith run` and `mojo_lilith` there is nothing for
 `service` to supervise.
 
-All three run every five minutes with `-s 600`. The `-s` window only bounds
-how far back each run reads; an address's own cache entry is what stops it
-being looked up twice, so a window wider than the interval is safe and is
-what keeps an alert ingested between runs from being missed. CAPE is read on
-its `stop` time, which can lag ingestion, so give it room.
+All three run every minute with `-s 600`, so whoever is in the web UI sees a
+new address's data about as soon as it can exist. The `-s` window only
+bounds how far back each run reads; an address's own cache entry is what
+stops it being looked up twice, so the window being much wider than the
+interval is safe, and is what covers runs that fire late or take longer than
+a minute as well as alerts ingested between runs. CAPE is read on its `stop`
+time, which can lag ingestion, so give it room.
 
 Do the first pass by hand before enabling any of this. Shodan allows about a
 request a second, so a run costs roughly a second per address it looks up —
@@ -279,6 +281,45 @@ while every distinct external address is cold at once:
 
 ```shell
 lilith shodan_cache -s 0 --limit 500
+```
+
+Repeat until it reports nothing left to reach, then install the timer.
+
+### The CVEDB cache timer
+
+With the Shodan cache filling, run `lilith cvedb_cache` periodically too.
+Each run stores what CVEDB — Shodan's free, keyless CVE database — says about
+the CVE ids named by recently cached addresses, which is what annotates the
+CVE chips and badges with scores, EPSS, and the CISA KEV flag; see
+[usage](usage.md#cvedb_cache).
+
+```shell
+# systemd
+cp rc/systemd/lilith-cvedb-cache.service rc/systemd/lilith-cvedb-cache.timer \
+    /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now lilith-cvedb-cache.timer
+
+# cron
+install -m 0644 rc/lilith-cvedb-cache.cron /etc/cron.d/lilith-cvedb-cache
+
+# FreeBSD
+install -m 0644 rc/lilith-cvedb-cache.cron /usr/local/etc/cron.d/lilith-cvedb-cache
+```
+
+All three run every minute with `-s 1200 --limit 200`, the same cadence as
+the Shodan cache timer they feed off. As with that timer, the `-s` window
+only bounds how far back in `shodan_cache` each run reads; an id's own cache
+entry is what stops it being fetched twice, so the window being much wider
+than the interval is safe, and is what covers runs that fire late or take
+longer than a minute.
+
+Do the first pass by hand before enabling any of this, the same as with the
+Shodan cache — on one that has been filling for a while, every id it holds is
+cold at once:
+
+```shell
+lilith cvedb_cache -s 0 --limit 200
 ```
 
 Repeat until it reports nothing left to reach, then install the timer.

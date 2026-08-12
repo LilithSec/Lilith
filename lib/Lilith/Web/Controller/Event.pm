@@ -7,6 +7,8 @@ use File::Temp         ();
 use Time::Piece::Guess ();
 use Mojo::IOLoop       ();
 use URI::Escape        qw(uri_escape);
+use Lilith::Shodan     ();
+use Lilith::CVEDB      ();
 
 =head1 NAME
 
@@ -83,12 +85,20 @@ sub view {
 	my $cape_results_available
 		= ( $table eq 'cape' && $event && $self->cape_results_for( $event->{instance} ) ) ? 1 : 0;
 
+	# What the Shodan cache holds for each end of the flow, rendered as a
+	# summary line per end, and -- the loud one -- whether the rule names a CVE
+	# the destination is cached as vulnerable to. Cache only, never a lookup;
+	# the modal stays the place the full detail lives.
+	my ( $shodan_strip, $cve_match ) = $self->_shodan_strip( $table, $event );
+
 	$self->stash(
 		event                  => $event,
 		table                  => $table,
 		id                     => $id,
 		error                  => $error,
 		pretty_raw             => $pretty_raw,
+		shodan_strip           => $shodan_strip,
+		cve_match              => $cve_match,
 		cape_results_available => $cape_results_available,
 		log_links              => ( $self->allani_enabled ? $self->_log_links($event) : [] ),
 		pcap_available         => $pcap_available,
@@ -99,6 +109,194 @@ sub view {
 		pcap_end               => $pcap_end,
 	);
 } ## end sub view
+
+# The per-end Shodan summary for the event view, plus the CVE match.
+#
+# Reads the cache and nothing else, by way of shodan_cache_info -- an event has
+# two ends, so this is one small query, and an end with no fresh entry simply
+# gets no line. Each end that has one is normalized the same way the modal's
+# data is, so the strip and the modal cannot disagree about what Shodan said.
+#
+# The keyless tier sends no CVSS scores of its own; the CVEDB cache stands in
+# where it holds one, the same way the search badges coalesce. One read covers
+# both ends and the matched ids' KEV flags.
+#
+# The match itself -- the rule naming a CVE the destination's entry lists it
+# as vulnerable to -- is suricata only, since only suricata rules carry CVE
+# metadata. It is the same comparison the search page's cve_matches helper
+# makes; here the ids come annotated so the banner can say how bad.
+#
+# Args:
+#
+#   - $table :: the table the event is from. cape gets nothing -- its
+#     addresses are the submitter's, not an attacker's, the same reasoning
+#     that keeps it out of the dashboard's enrichment dimensions.
+#
+#   - $event :: the loaded event row, raw already decoded, as _load_event
+#     returns it. Its src_ip, dest_ip, and raw are read.
+#
+# Returns: two values, the strip and the match.
+#
+# The strip is a hash ref with a key per end that had a fresh cache entry:
+#
+#     {
+#       dest => {
+#         ip         => '192.0.2.10',
+#         found      => 1,          # 0 = cached as "not on Shodan"
+#         age        => '3d',       # how long ago Lilith fetched it
+#         info       => {...},      # Lilith::Shodan::normalize output
+#         vuln_count => 3,
+#         worst_cvss => 9.8,        # undef when nothing anywhere scored them
+#       },
+#     }
+#
+# The match is undef, or an array ref of the matched ids with what is known
+# of each: [ { cve => 'CVE-2021-44228', cvss => 10.0, kev => 1 }, ... ].
+#
+#     my ( $strip, $match ) = $self->_shodan_strip( $table, $event );
+sub _shodan_strip {
+	my ( $self, $table, $event ) = @_;
+
+	return ( {}, undef ) unless $self->shodan_enable;
+	my $ttl = $self->shodan_cache_ttl;
+	return ( {}, undef ) unless $ttl > 0;
+	return ( {}, undef ) unless defined $table && $table =~ /^(?:suricata|sagan|baphomet)$/;
+	return ( {}, undef ) unless ref $event eq 'HASH';
+
+	# Filtered to what may be handed to Postgres as an inet, the same as the
+	# badges read: one unparseable value would fail the whole statement.
+	my %end_ip;
+	for my $end (qw(src dest)) {
+		my $ip = $event->{ $end . '_ip' };
+		$end_ip{$end} = $ip if defined $ip && $ip =~ /^[0-9a-fA-F:.]+$/;
+	}
+	return ( {}, undef ) unless %end_ip;
+
+	my $cached = eval {
+		$self->lilith->shodan_cache_info(
+			ips    => [ sort values %end_ip ],
+			source => $self->shodan_source,
+			ttl    => $ttl,
+		);
+	};
+	if ($@) {
+		( my $why = $@ ) =~ s/\s+\z//;
+		$self->app->log->warn( 'shodan strip lookup failed: ' . $why );
+		return ( {}, undef );
+	}
+
+	my %strip;
+	for my $end ( keys %end_ip ) {
+		my $entry = $cached->{ $end_ip{$end} };
+		next unless ref $entry eq 'HASH';
+
+		my $info = Lilith::Shodan::normalize( $entry->{raw}, $self->shodan_source, $end_ip{$end} );
+		$strip{$end} = {
+			ip         => $end_ip{$end},
+			found      => $entry->{found},
+			age        => _age_string( $entry->{age_seconds} ),
+			info       => $info,
+			vuln_count => scalar @{ ref $info->{vulns} eq 'ARRAY' ? $info->{vulns} : [] },
+		};
+	} ## end for my $end ( keys %end_ip )
+	return ( {}, undef ) unless %strip;
+
+	# the match: the rule's ids against what the destination is cached as
+	# vulnerable to
+	my @matched;
+	my %dest_vuln;
+	if ( $table eq 'suricata' && ref $strip{dest} eq 'HASH' ) {
+		%dest_vuln = map { $_->{cve} => $_ }
+			grep { ref eq 'HASH' && defined $_->{cve} }
+			@{ ref $strip{dest}{info}{vulns} eq 'ARRAY' ? $strip{dest}{info}{vulns} : [] };
+		@matched = grep { $dest_vuln{$_} } @{ Lilith::CVEDB::rule_cves( $event->{raw} ) };
+	}
+
+	# What the CVEDB cache is wanted for: a score where Shodan sent none, and
+	# the matched ids' KEV flags. Absent rows just leave those blank.
+	my %annotations;
+	{
+		my %want = map { $_ => 1 } @matched;
+		for my $end ( keys %strip ) {
+			for my $vuln ( @{ ref $strip{$end}{info}{vulns} eq 'ARRAY' ? $strip{$end}{info}{vulns} : [] } ) {
+				next unless ref $vuln eq 'HASH' && defined $vuln->{cve};
+				$want{ $vuln->{cve} } = 1 if !defined $vuln->{cvss} || $vuln->{cvss} eq '';
+			}
+		}
+		if (%want) {
+			my $rows = eval { $self->lilith->cvedb_cache_annotations( cves => [ sort keys %want ] ) };
+			if ($@) {
+				( my $why = $@ ) =~ s/\s+\z//;
+				$self->app->log->warn( 'cvedb cache read failed, strip CVEs left unannotated: ' . $why );
+			}
+			%annotations = %{$rows} if ref $rows eq 'HASH';
+		}
+	}
+
+	# the worst score per end, CVEDB standing in for the scoreless
+	for my $end ( keys %strip ) {
+		my $worst;
+		for my $vuln ( @{ ref $strip{$end}{info}{vulns} eq 'ARRAY' ? $strip{$end}{info}{vulns} : [] } ) {
+			next unless ref $vuln eq 'HASH';
+			my $cvss = defined $vuln->{cvss} && $vuln->{cvss} ne '' ? $vuln->{cvss} : undef;
+			if ( !defined($cvss) && defined $vuln->{cve} && ref $annotations{ $vuln->{cve} } eq 'HASH' ) {
+				my $stand_in = $annotations{ $vuln->{cve} }{cvss};
+				$cvss = $stand_in if defined $stand_in && $stand_in ne '';
+			}
+			next unless defined $cvss && $cvss =~ /^[0-9.]+$/;
+			$worst = $cvss if !defined($worst) || $cvss > $worst;
+		} ## end for my $vuln ( @{ ref $strip{$end}{info}{vulns...}})
+		$strip{$end}{worst_cvss} = $worst;
+	} ## end for my $end ( keys %strip )
+
+	my $cve_match;
+	if (@matched) {
+		my @detail;
+		for my $cve (@matched) {
+			my $annotation = ref $annotations{$cve} eq 'HASH' ? $annotations{$cve} : {};
+			my $cvss
+				= defined $dest_vuln{$cve}{cvss} && $dest_vuln{$cve}{cvss} ne ''
+				? $dest_vuln{$cve}{cvss}
+				: $annotation->{cvss};
+			push(
+				@detail,
+				{
+					cve  => $cve,
+					cvss => ( defined $cvss && $cvss ne '' ? $cvss : undef ),
+					kev  => ( $annotation->{kev}           ? 1     : 0 ),
+				}
+			);
+		} ## end for my $cve (@matched)
+		$cve_match = \@detail;
+	} ## end if (@matched)
+
+	return ( \%strip, $cve_match );
+} ## end sub _shodan_strip
+
+# A compact "how old" for the strip's cache age: days once it is a day old,
+# then hours, then minutes. The reader wants "roughly how much to trust this",
+# not a timestamp. Plain function, not a method.
+#
+# Args:
+#
+#   - $seconds :: the age in seconds, as shodan_cache_info returns it.
+#     Anything non-numeric reads as 0.
+#
+# Returns: the age as a short string.
+#
+#     _age_string(259200);   # '3d'
+#     _age_string(7200);     # '2h'
+#     _age_string(90);       # '1m'
+#     _age_string(30);       # '<1m'
+sub _age_string {
+	my $seconds = shift;
+
+	$seconds = 0 unless defined $seconds && $seconds =~ /^[0-9]+$/;
+	return int( $seconds / 86400 ) . 'd' if $seconds >= 86400;
+	return int( $seconds / 3600 ) . 'h'  if $seconds >= 3600;
+	return int( $seconds / 60 ) . 'm'    if $seconds >= 60;
+	return '<1m';
+}
 
 =head2 pcap
 

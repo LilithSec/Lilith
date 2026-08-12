@@ -255,6 +255,42 @@ my %ENRICH_SHAPE = (
 				. " else 4 end";
 		},
 	},
+
+	# The correlation the two halves above only imply: whether the rule that
+	# fired names a CVE the destination's cache entry lists it as vulnerable to
+	# -- "an exploit thrown at a host actually vulnerable to it". The rule's
+	# ids come from the cves generated column (schema 16, suricata only, which
+	# is what tables/needs_cves say), so the comparison is one array overlap
+	# per row and never opens raw. dest only: it is a question about what was
+	# attacked, and the source end of it means nothing.
+	#
+	# 'No CVE in rule' leads the tests because with no ids to compare the
+	# lookup state of the destination is beside the point.
+	cve_match => {
+		tables     => { suricata => 1 },
+		sides      => ['dest'],
+		needs_cves => 1,
+		columns    => [ 'found', 'vulns' ],
+		expr       => sub {
+			my ( $alias, $ip ) = @_;
+			# the cast because cves is text[] while vulns is varchar[], and &&
+			# does not resolve across the two on its own
+			return
+				  "case when $ip is null then null"
+				. " when cves is null then 'No CVE in rule'"
+				. " when $alias.${alias}_found is null then 'Not looked up'"
+				. " when cves && ($alias.${alias}_vulns)::text[] then 'Matched'"
+				. " else 'Not matched' end";
+		},
+		order => sub {
+			my ($alias) = @_;
+			return
+				  "case when cves is null then 3"
+				. " when $alias.${alias}_found is null then 4"
+				. " when cves && ($alias.${alias}_vulns)::text[] then 1"
+				. " else 2 end";
+		},
+	},
 );
 
 # The dimension catalog the rest of this file reads: every shape on every side,
@@ -267,6 +303,10 @@ for my $side ( keys %ENRICH_SIDE ) {
 
 	for my $shape ( keys %ENRICH_SHAPE ) {
 		my $spec = $ENRICH_SHAPE{$shape};
+
+		# a shape that only makes sense on one side (cve_match) is built for
+		# that side alone
+		next if $spec->{sides} && !grep { $_ eq $side } @{ $spec->{sides} };
 
 		$ENRICH{ 'shodan_' . $side . '_' . $shape } = {
 			%{$spec},
@@ -693,9 +733,18 @@ sub columns {
 	my $type = $self->_table($table);
 	my @cols = keys %{ $DIMENSION{$type} };
 	push( @cols, keys %{ $VIRTUAL{$type} } ) if $VIRTUAL{$type};
-	push( @cols, keys %ENRICH )              if $ENRICH_TABLE{$type} && $self->_shodan_available;
+	if ( $ENRICH_TABLE{$type} && $self->_shodan_available ) {
+		push(
+			@cols,
+			grep {
+				my $enrich = $ENRICH{$_};
+				( !$enrich->{tables} || $enrich->{tables}{$type} )
+					&& ( !$enrich->{needs_cves} || $self->_cves_available )
+			} keys %ENRICH
+		);
+	} ## end if ( $ENRICH_TABLE{$type} && $self->_shodan_available)
 	return [ sort @cols ];
-}
+} ## end sub columns
 
 =head2 measures
 
@@ -821,8 +870,10 @@ sub _dimension {
 	my ( $self, $type, $col ) = @_;
 	die("a column is required\n") unless defined $col && $col ne '';
 
-	if ( $ENRICH{$col} && $ENRICH_TABLE{$type} ) {
+	if ( my $enrich = $self->_enrich_for( $type, $col ) ) {
 		die("the shodan_cache table is not present (needs schema version 15)\n") unless $self->_shodan_available;
+		die("the suricata_alerts cves column is not present (needs schema version 16)\n")
+			if $enrich->{needs_cves} && !$self->_cves_available;
 		return $col;
 	}
 
@@ -830,6 +881,64 @@ sub _dimension {
 		unless $DIMENSION{$type}{$col} || ( $VIRTUAL{$type} && $VIRTUAL{$type}{$col} );
 	return $col;
 } ## end sub _dimension
+
+# The %ENRICH entry for a dimension, when that dimension applies to the table
+# in play: the table must be one whose addresses are enriched at all, and the
+# entry must not be scoped to other tables (cve_match is suricata only).
+# Everything reading %ENRICH goes through this so a scoped dimension cannot be
+# joined onto a table it does not describe.
+#
+# Args:
+#
+#   - $type :: the short table type, already through _table.
+#   - $col :: the dimension name as the caller has it. Anything -- undef and
+#     names that are not enrichment dimensions simply return undef.
+#
+# Returns: the catalog entry as a hash ref, or undef when the name is not an
+# enrichment dimension or does not apply to the table.
+#
+#     my $enrich = $self->_enrich_for( 'suricata', 'shodan_dest_cve_match' );
+sub _enrich_for {
+	my ( $self, $type, $col ) = @_;
+
+	my $enrich = defined $col ? $ENRICH{$col} : undef;
+	return undef unless $enrich && $ENRICH_TABLE{$type};
+	return undef if $enrich->{tables} && !$enrich->{tables}{$type};
+	return $enrich;
+}
+
+# Whether suricata_alerts has the cves generated column (schema version 16),
+# and so whether the cve_match dimension can be offered and grouped by.
+#
+# Detected the same way _virtual_base detects its generated columns, and cached
+# the same way _shodan_available caches its answer: only when the question was
+# actually answered, so an unreachable database does not hide the dimension for
+# good once it comes back.
+#
+# Args: none.
+#
+# Returns: 1 when the column is there, 0 when it is not or when the catalog
+# could not be read.
+#
+#     $self->_cves_available;    # 1
+sub _cves_available {
+	my ($self) = @_;
+
+	return $self->{_cves_column_present} if defined $self->{_cves_column_present};
+
+	my $present = eval {
+		my ($found) = $self->_dbh->selectrow_array(
+			'SELECT 1 FROM pg_attribute WHERE attrelid = ?::regclass'
+				. ' AND attname = ? AND attnum > 0 AND NOT attisdropped',
+			undef, 'suricata_alerts', 'cves'
+		);
+		return $found ? 1 : 0;
+	};
+	return 0 unless defined $present;
+
+	$self->{_cves_column_present} = $present;
+	return $present;
+} ## end sub _cves_available
 
 # Whether the database has the shodan_cache table, and so whether the %ENRICH
 # dimensions can be offered and joined.
@@ -895,12 +1004,12 @@ sub _shodan_available {
 sub _from_frag {
 	my ( $self, $type, $col ) = @_;
 
-	my $tbl = $TABLE{$type};
-	return $tbl unless defined $col && $ENRICH{$col} && $ENRICH_TABLE{$type};
+	my $tbl    = $TABLE{$type};
+	my $enrich = $self->_enrich_for( $type, $col );
+	return $tbl unless $enrich;
 
-	my $enrich = $ENRICH{$col};
-	my $alias  = $enrich->{alias};
-	my $on     = ' on ' . $alias . '.' . $alias . '_ip = ' . $tbl . '.' . $enrich->{ip_column};
+	my $alias = $enrich->{alias};
+	my $on    = ' on ' . $alias . '.' . $alias . '_ip = ' . $tbl . '.' . $enrich->{ip_column};
 
 	if ( $enrich->{array} ) {
 		return
@@ -942,11 +1051,13 @@ sub _from_frag {
 sub _order_expr {
 	my ( $self, $type, $col ) = @_;
 
-	return $ENRICH{$col}{order} if $ENRICH{$col} && $ENRICH_TABLE{$type};
+	if ( my $enrich = $self->_enrich_for( $type, $col ) ) {
+		return $enrich->{order};
+	}
 
 	return undef unless $VIRTUAL{$type} && $VIRTUAL{$type}{$col} && $VIRTUAL{$type}{$col}{order};
 	return $VIRTUAL{$type}{$col}{order}->( $self->_virtual_base( $type, $col ) );
-}
+} ## end sub _order_expr
 
 # The SQL aggregate a measure resolves to (count(*) by default). expr/col come
 # from the server-defined %MEASURE catalog, never from the request. A distinct
@@ -1051,7 +1162,9 @@ sub _virtual_base {
 #     $self->_col_expr( 'suricata', 'shodan_src_tag' );  # 'shodan_src_val.v'
 sub _col_expr {
 	my ( $self, $type, $col ) = @_;
-	return $ENRICH{$col}{expr}                 if $ENRICH{$col}   && $ENRICH_TABLE{$type};
+	if ( my $enrich = $self->_enrich_for( $type, $col ) ) {
+		return $enrich->{expr};
+	}
 	return $self->_virtual_base( $type, $col ) if $VIRTUAL{$type} && $VIRTUAL{$type}{$col};
 	return $col;
 }
@@ -1076,9 +1189,9 @@ sub _col_expr {
 #     $self->_value_expr( 'suricata', 'sid' );       # '(sid)::text'
 sub _value_expr {
 	my ( $self, $type, $col ) = @_;
-	if ( $ENRICH{$col} && $ENRICH_TABLE{$type} ) {
+	if ( my $enrich = $self->_enrich_for( $type, $col ) ) {
 		my $expr = $self->_col_expr( $type, $col );
-		return $ENRICH{$col}{text_cast} ? '(' . $expr . ')::text' : $expr;
+		return $enrich->{text_cast} ? '(' . $expr . ')::text' : $expr;
 	}
 	if ( $VIRTUAL{$type} && $VIRTUAL{$type}{$col} ) {
 		my $base = $self->_virtual_base( $type, $col );

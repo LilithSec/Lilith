@@ -150,6 +150,16 @@ sub column_exists {
 	my @baph_missing = grep { !index_exists( $dbh, $_ ) } @V10_BAPHOMET_INDEXES;
 	is_deeply( \@baph_missing, [], 'deploy created all 4 baphomet_alerts indexes' )
 		or diag( 'missing: ' . join( ', ', @baph_missing ) );
+
+	# versions 15 and 16: the two lookup caches.
+	ok( table_exists( $dbh, 'shodan_cache' ), 'deploy created shodan_cache' );
+	ok( table_exists( $dbh, 'cvedb_cache' ),  'deploy created cvedb_cache' );
+
+	# the version-16 suricata side: the cves generated column and the function
+	# behind it
+	ok( column_exists( $dbh, 'suricata_alerts', 'cves' ), 'deploy created the cves column' );
+	my ($cves_fn) = $dbh->selectrow_array(q{select count(*) from pg_proc where proname = 'suricata_alert_cves'});
+	is( $cves_fn, 1, 'deploy created the suricata_alert_cves function' );
 	$dbh->disconnect;
 
 	my ($sv_after) = run_cmd('Lilith::CLI::Command::SchemaVersion');
@@ -197,6 +207,8 @@ sub column_exists {
 	ok( column_exists( $dbh, 'baphomet_alerts', 'username' ), 'the 13 -> 14 upgrade added baphomet_alerts.username' );
 	ok( column_exists( $dbh, 'baphomet_alerts', 'sid' ),      'the 13 -> 14 upgrade added baphomet_alerts.sid' );
 	ok( !column_exists( $dbh, 'baphomet_alerts', 'subject' ), 'the 13 -> 14 upgrade dropped baphomet_alerts.subject' );
+	ok( table_exists( $dbh, 'cvedb_cache' ),                  'the 15 -> 16 upgrade created cvedb_cache' );
+	ok( column_exists( $dbh, 'suricata_alerts', 'cves' ),     'the 15 -> 16 upgrade added the cves column' );
 	$dbh->disconnect;
 
 	my ($sv) = run_cmd('Lilith::CLI::Command::SchemaVersion');
@@ -260,12 +272,21 @@ sub column_exists {
 
 	my $dbh = $pg->dbh($sc_dsn);
 	ok( !table_exists( $dbh, 'shodan_cache' ), 'shodan_cache absent at version 14' );
+	ok( !table_exists( $dbh, 'cvedb_cache' ),  'cvedb_cache absent at version 14' );
 
-	$mig->dbic_dh->upgrade;    # 14 -> 15
+	$mig->dbic_dh->upgrade;    # 14 -> 16, through 15
 	ok( table_exists( $dbh, 'shodan_cache' ), 'the 14 -> 15 upgrade created shodan_cache' );
 	for my $column (qw( ip source found fetched last_update ports tags cpes vulns max_cvss hostnames raw )) {
 		ok( column_exists( $dbh, 'shodan_cache', $column ), "shodan_cache has the $column column" );
 	}
+
+	# and the 15 -> 16 step in the same chain: the CVEDB cache, and the cves
+	# generated column beside it.
+	ok( table_exists( $dbh, 'cvedb_cache' ), 'the 15 -> 16 upgrade created cvedb_cache' );
+	for my $column (qw( cve found fetched cvss epss kev ransomware raw )) {
+		ok( column_exists( $dbh, 'cvedb_cache', $column ), "cvedb_cache has the $column column" );
+	}
+	ok( column_exists( $dbh, 'suricata_alerts', 'cves' ), 'the 15 -> 16 upgrade added the cves column' );
 
 	# A live round trip through the methods the web UI uses.
 	my $lilith = Lilith->new( dsn => $sc_dsn, user => $pg->user, pass => $pg->pass );
@@ -394,6 +415,160 @@ sub column_exists {
 	eval { $lilith->alert_ips( go_back_seconds => 'soon' ) };
 	like( $@, qr/not numeric/, 'alert_ips rejects a non-numeric window' );
 
+	# The CVEDB cache methods against the table the migration actually creates
+	# -- as with shodan_cache_put above, the SQL in cvedb_cache_put is the only
+	# place its column list and upsert have to agree with the DDL.
+	is_deeply(
+		$lilith->cvedb_cache_stale( cves => [ 'CVE-2021-40438', 'CVE-2019-0217' ], ttl => 3600 ),
+		[ 'CVE-2021-40438', 'CVE-2019-0217' ],
+		'ids never cached are all due, in input order'
+	);
+
+	$lilith->cvedb_cache_put(
+		cve  => 'CVE-2021-40438',
+		raw  => { cvss => 9.8, epss => 0.97, kev => 1, ransomware_campaign => 'Known', summary => 'mod_proxy SSRF' },
+		info => { cvss => 9.8, epss => 0.97, kev => 1, ransomware => 1 },
+	);
+	my $notes = $lilith->cvedb_cache_annotations( cves => [ 'CVE-2021-40438', 'CVE-2019-0217' ] );
+	is( scalar keys %{$notes}, 1, 'only ids with a row come back' );
+	ok( !exists $notes->{'CVE-2019-0217'}, 'an id never asked about is absent rather than empty' );
+	is( $notes->{'CVE-2021-40438'}{cvss} + 0,   9.8,              'the annotation carries the score' );
+	is( $notes->{'CVE-2021-40438'}{epss} + 0,   0.97,             'the annotation carries the EPSS' );
+	is( $notes->{'CVE-2021-40438'}{kev},        1,                'the annotation carries the KEV flag' );
+	is( $notes->{'CVE-2021-40438'}{ransomware}, 1,                'the annotation carries the ransomware flag' );
+	is( $notes->{'CVE-2021-40438'}{summary},    'mod_proxy SSRF', 'the summary is read out of the stored response' );
+	is( $notes->{'CVE-2021-40438'}{found},      1,                'a real answer is found' );
+
+	# An id CVEDB has nothing on is cached too, as an empty response, and is a
+	# row marked not found rather than a miss.
+	$lilith->cvedb_cache_put( cve => 'CVE-2019-0217', raw => {}, info => {} );
+	is( $lilith->cvedb_cache_annotations( cves => ['CVE-2019-0217'] )->{'CVE-2019-0217'}{found},
+		0, 'a cached "nothing known" is a row, marked not found' );
+
+	# Freshness: nothing fresh is due, and what is due comes never-seen first,
+	# then oldest first -- the order a --limit capped run truncates.
+	is_deeply( $lilith->cvedb_cache_stale( cves => [ 'CVE-2021-40438', 'CVE-2019-0217' ], ttl => 3600 ),
+		[], 'fresh rows are not due' );
+	$dbh->do(q{update cvedb_cache set fetched = now() - interval '3 hours' where cve = 'CVE-2021-40438'});
+	$dbh->do(q{update cvedb_cache set fetched = now() - interval '2 hours' where cve = 'CVE-2019-0217'});
+	is_deeply(
+		$lilith->cvedb_cache_stale( cves => [ 'CVE-2019-0217', 'CVE-2021-40438', 'CVE-2024-99999' ], ttl => 3600 ),
+		[ 'CVE-2024-99999', 'CVE-2021-40438', 'CVE-2019-0217' ],
+		'never-seen ids lead, then stale rows oldest first'
+	);
+	eval { $lilith->cvedb_cache_stale( cves => ['CVE-2019-0217'], ttl => 'soon' ) };
+	like( $@, qr/not numeric/, 'cvedb_cache_stale rejects a non-numeric ttl' );
+
+	# The upsert replaces rather than duplicating, and re-reads as the new
+	# value.
+	$lilith->cvedb_cache_put( cve => 'CVE-2019-0217', raw => { cvss => 7.5 }, info => { cvss => 7.5 } );
+	my ($cvedb_rows) = $dbh->selectrow_array(q{select count(*) from cvedb_cache where cve = 'CVE-2019-0217'});
+	is( $cvedb_rows, 1, 'a second write for an id replaces the first' );
+	is( $lilith->cvedb_cache_annotations( cves => ['CVE-2019-0217'] )->{'CVE-2019-0217'}{cvss} + 0,
+		7.5, 'the replacement is what is served' );
+
+	# shodan_cache_cves -- what `lilith cvedb_cache` reads: the distinct ids
+	# across every row, sorted.
+	$lilith->shodan_cache_put(
+		ip     => '192.0.2.20',
+		source => 'internetdb',
+		raw    => { vulns => [ 'CVE-2021-40438',            'CVE-2019-0217' ] },
+		info   => { vulns => [ { cve => 'CVE-2021-40438' }, { cve => 'CVE-2019-0217' } ] },
+		ttl    => 3600,
+	);
+	is_deeply(
+		$lilith->shodan_cache_cves,
+		[ 'CVE-2019-0217', 'CVE-2021-40438' ],
+		'shodan_cache_cves reads the distinct ids, sorted'
+	);
+
+	# The badge read falls back to the CVEDB cache for rows Shodan itself did
+	# not score -- the keyless tier never does -- which is what colors the CVE
+	# badge on an InternetDB-only install.
+	my $keyless = $lilith->shodan_cache_badges( ips => ['192.0.2.20'], source => 'internetdb', ttl => 3600 );
+	is( $keyless->{'192.0.2.20'}{max_cvss} + 0, 9.8, 'a keyless row borrows the worst CVEDB score its CVEs carry' );
+
+	# The window: a row fetched outside it contributes nothing, and 0 reads
+	# the whole table.
+	$dbh->do(q{update shodan_cache set fetched = now() - interval '2 days' where ip = '192.0.2.20'});
+	is_deeply( $lilith->shodan_cache_cves, [], 'a row fetched outside the window contributes nothing' );
+	is_deeply(
+		$lilith->shodan_cache_cves( go_back_seconds => 0 ),
+		[ 'CVE-2019-0217', 'CVE-2021-40438' ],
+		'a window of 0 reads the whole table'
+	);
+	eval { $lilith->shodan_cache_cves( go_back_seconds => 'soon' ) };
+	like( $@, qr/not numeric/, 'shodan_cache_cves rejects a non-numeric window' );
+
+	# The version-16 suricata side, live: the cves generated column computes
+	# from raw on insert (the upgrade-created function at work), and everything
+	# comparing it against the cache runs against the real DDL -- the badges'
+	# vuln_ids, the whole-row read the event view strip renders from, the
+	# enrichment search filters, and the cve_match dashboard dimension.
+	$dbh->do(
+		q{insert into suricata_alerts (instance,host,timestamp,event_id,src_ip,dest_ip,classification,signature,raw)
+		  values (?,?,now(),?,?,?,?,?,?)},
+		undef, 's1', 's1.example.org', 'cve1', '203.0.113.60', '198.51.100.60', 'Attempted Admin',
+		'ET EXPLOIT log4j', '{"alert":{"metadata":{"cve":["CVE_2021_44228"]},"signature":"ET EXPLOIT log4j"}}'
+	);
+	$dbh->do(
+		q{insert into suricata_alerts (instance,host,timestamp,event_id,src_ip,dest_ip,classification,signature,raw)
+		  values (?,?,now(),?,?,?,?,?,?)},
+		undef, 's1', 's1.example.org', 'cve2', '203.0.113.61', '198.51.100.60', 'Attempted Admin',
+		'ET EXPLOIT shellshock',
+		'{"alert":{"metadata":{"cve":["CVE-2014-6271"]},"signature":"ET EXPLOIT shellshock"}}'
+	);
+	is_deeply( $dbh->selectrow_arrayref(q{select cves from suricata_alerts where event_id = 'cve1'})->[0],
+		['CVE-2021-44228'], 'the cves generated column normalizes what the rule named' );
+
+	$lilith->shodan_cache_put(
+		ip     => '198.51.100.60',
+		source => 'internetdb',
+		raw    => { ports => [80], tags => ['tor'], vulns => ['CVE-2021-44228'] },
+		info   => { ports => [80], tags => ['tor'], vulns => [ { cve => 'CVE-2021-44228' } ] },
+		ttl    => 3600,
+	);
+
+	# the badges carry the ids themselves, for the CVE-match comparison
+	my $match_badges = $lilith->shodan_cache_badges( ips => ['198.51.100.60'], source => 'internetdb', ttl => 3600 );
+	is_deeply( $match_badges->{'198.51.100.60'}{vuln_ids},
+		['CVE-2021-44228'], 'the badge read carries the ids themselves as vuln_ids' );
+
+	# the whole-row read the event view strip renders from
+	my $strip_info = $lilith->shodan_cache_info( ips => ['198.51.100.60'], source => 'internetdb', ttl => 3600 );
+	is( $strip_info->{'198.51.100.60'}{found}, 1, 'shodan_cache_info reads the row back' );
+	ok( $strip_info->{'198.51.100.60'}{age_seconds} < 60, 'age_seconds carries the age of the fetch' );
+	is_deeply( $strip_info->{'198.51.100.60'}{raw}{tags}, ['tor'], 'and the response as it arrived' );
+	is_deeply( $lilith->shodan_cache_info( ips => ['198.51.100.61'], source => 'internetdb', ttl => 3600 ),
+		{}, 'an address never cached is absent from the info read' );
+
+	# the enrichment search filters against the real tables
+	is_deeply(
+		[
+			sort map { $_->{event_id} }
+				@{ $lilith->search( table => 'suricata', go_back_minutes => 60, shodan_dest_tag => 'tor' ) }
+		],
+		[ 'cve1', 'cve2' ],
+		'shodan_dest_tag finds the alerts against the tagged host'
+	);
+	is_deeply(
+		[
+			map { $_->{event_id} }
+				@{ $lilith->search( table => 'suricata', go_back_minutes => 60, cve => 'cve_2021_44228' ) }
+		],
+		['cve1'],
+		'the cve filter normalizes its value and matches the generated column'
+	);
+
+	# and the dimension correlating the two: cve1 is the exploit thrown at a
+	# host actually vulnerable to it
+	require Lilith::Stats;
+	my $stats         = Lilith::Stats->new( lilith => $lilith );
+	my %match_buckets = map { $_->{value} => $_->{count} }
+		@{ $stats->top( table => 'suricata', column => 'shodan_dest_cve_match', go_back_minutes => 60 ) };
+	is( $match_buckets{'Matched'},     1, 'the cve_match dimension counts the matched alert' );
+	is( $match_buckets{'Not matched'}, 1, 'and buckets the rule whose CVE the host does not carry' );
+
 	# DeploymentHandler downgrades toward the schema's own version; see phase 3.
 	{
 		no warnings qw(redefine once);
@@ -402,9 +577,13 @@ sub column_exists {
 			schema_class => 'Lilith::Schema',
 			schema_args  => [ $sc_dsn, $pg->user, $pg->pass ],
 		);
-		$down->dbic_dh->downgrade;    # 15 -> 14
+		$down->dbic_dh->downgrade;    # 16 -> 14, through 15
 	}
+	ok( !table_exists( $dbh, 'cvedb_cache' ),  'the 16 -> 15 downgrade dropped cvedb_cache' );
 	ok( !table_exists( $dbh, 'shodan_cache' ), 'the 15 -> 14 downgrade dropped shodan_cache' );
+	ok( !column_exists( $dbh, 'suricata_alerts', 'cves' ), 'the 16 -> 15 downgrade dropped the cves column' );
+	my ($cves_fn_after) = $dbh->selectrow_array(q{select count(*) from pg_proc where proname = 'suricata_alert_cves'});
+	is( $cves_fn_after, 0, 'and the function behind it' );
 	$dbh->disconnect;
 }
 

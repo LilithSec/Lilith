@@ -121,14 +121,24 @@ sub index {
 				pkg              => _param_list( $self, 'pkg' ),
 				target           => _param_list( $self, 'target' ),
 				username         => _param_list( $self, 'username' ),
-				src_port         => \@src_port,
-				dest_port        => \@dest_port,
-				gid              => \@gid,
-				sid              => \@sid,
-				rev              => \@rev,
-				malscore         => \@malscore,
-				size             => \@size,
-				task             => \@task,
+
+				# what the Shodan cache says about the alert's ends, and the
+				# ids the rule names -- the enrichment filters
+				shodan_src_tag    => _param_list( $self, 'shodan_src_tag' ),
+				shodan_dest_tag   => _param_list( $self, 'shodan_dest_tag' ),
+				shodan_src_known  => _param_list( $self, 'shodan_src_known' ),
+				shodan_dest_known => _param_list( $self, 'shodan_dest_known' ),
+				shodan_src_cvss   => _param_list( $self, 'shodan_src_cvss' ),
+				shodan_dest_cvss  => _param_list( $self, 'shodan_dest_cvss' ),
+				cve               => _param_list( $self, 'cve' ),
+				src_port          => \@src_port,
+				dest_port         => \@dest_port,
+				gid               => \@gid,
+				sid               => \@sid,
+				rev               => \@rev,
+				malscore          => \@malscore,
+				size              => \@size,
+				task              => \@task,
 			);
 		};
 		$error = $@ if $@;
@@ -158,14 +168,22 @@ sub index {
 		}
 	}
 
+	# What the Shodan cache already holds for the addresses on this page, for
+	# the badges on their cells. One query for the page, and never a lookup --
+	# an address with no cached entry simply gets no badges.
+	my $shodan_badges = $self->shodan_badges($results);
+
 	$self->stash(
 		results   => $results,
 		escalated => $escalated,
 
-		# What the Shodan cache already holds for the addresses on this page, for
-		# the badges on their cells. One query for the page, and never a lookup --
-		# an address with no cached entry simply gets no badges.
-		shodan_badges   => $self->shodan_badges($results),
+		shodan_badges => $shodan_badges,
+
+		# Which rows fired a rule naming a CVE their destination's cached Shodan
+		# entry says it is vulnerable to -- computed from the badges just
+		# fetched, no query of its own.
+		cve_matches => $self->cve_matches( $table, $results, $shodan_badges ),
+
 		error           => $error,
 		table           => $table,
 		go_back_minutes => $go_back_minutes,

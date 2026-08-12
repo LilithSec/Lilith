@@ -1,0 +1,41 @@
+# systemd service for filling Lilith's CVEDB cache.
+#
+# This is a oneshot run driven by lilith-cvedb-cache.timer; it is not a
+# long running daemon. Install both files into /etc/systemd/system/ and
+# enable the timer (not the service):
+#
+#   cp rc/systemd/lilith-cvedb-cache.service rc/systemd/lilith-cvedb-cache.timer \
+#       /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now lilith-cvedb-cache.timer
+#
+# Each run reads the CVE ids named by the Shodan cache rows fetched in the
+# -s window and looks up the ones the CVEDB cache has never seen, then the
+# ones past cvedb_cache_ttl, oldest first -- so the web UI can annotate the
+# CVEs it shows: score, EPSS, the CISA KEV flag, known ransomware use. The
+# -s window only bounds how far back in shodan_cache a run reads; an id's
+# own cache entry is what stops it being fetched twice, so a window wider
+# than the timer's interval is safe and is what keeps an address cached
+# between runs from being missed.
+#
+# The pacing is a lookup a second, so a run costs roughly a second per id it
+# has to fetch -- in steady state a handful. A Shodan cache that has been
+# filling for a while needs a first pass by hand with
+# `lilith cvedb_cache -s 0 --limit 200` before enabling the timer.
+
+[Unit]
+Description=Lilith CVEDB cache fill
+Documentation=man:lilith
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# run as the same low privilege user that holds Lilith's database
+# credentials; this only touches the database and CVEDB, not the EVE logs
+User=lilith
+Group=lilith
+Nice=10
+ExecStart=/usr/local/bin/lilith cvedb_cache -s 1200 --limit 200
+# to use a non default config file, comment the line above and use:
+#ExecStart=/usr/local/bin/lilith --config /usr/local/etc/lilith.toml cvedb_cache -s 1200 --limit 200

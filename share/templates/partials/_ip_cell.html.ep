@@ -37,7 +37,9 @@
 %   if (my $vuln_count = $shodan->{vulns}) {
 %     # Coloured by the worst score rather than by how many, since one critical
 %     # matters more than a long tail of old lows. The keyless tier sends no
-%     # scores at all, which leaves the badge grey and the count still useful.
+%     # scores of its own; the badge read falls back to the CVEDB cache for
+%     # them, so grey means nothing anywhere has scored these -- or that
+%     # `lilith cvedb_cache` has not run yet.
 %     my $max_cvss = $shodan->{max_cvss};
 %     my $cvss_class = !defined($max_cvss) ? 'bg-secondary'
 %       : $max_cvss >= 9 ? 'bg-danger'

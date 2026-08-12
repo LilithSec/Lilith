@@ -489,6 +489,67 @@ SKIP: {
 	# that names no addresses, which is what keeps it off the unconfigured ones.
 	is_deeply( $app->shodan_badges( [] ),  {}, 'no results means no badge lookup' );
 	is_deeply( $app->shodan_badges(undef), {}, 'no result set at all means no badge lookup' );
+
+	# cve_matches -- the rule's ids against the badges' vuln_ids, which is the
+	# whole CVE-match comparison the results table badges by. Pure, so no
+	# database and no mocks: rows and badges in, matched ids out.
+	require Mojo::JSON;
+	my $badges = {
+		'198.51.100.9' => {
+			ports    => [],
+			tags     => [],
+			vulns    => 2,
+			vuln_ids => [ 'CVE-2021-44228', 'CVE-2020-1472' ],
+			max_cvss => 10,
+		},
+	};
+	my $rows = [
+		{
+			id      => 1,
+			dest_ip => '198.51.100.9',
+			raw     => Mojo::JSON::encode_json( { alert => { metadata => { cve => ['CVE_2021_44228'] } } } ),
+		},
+		{
+			id      => 2,
+			dest_ip => '198.51.100.9',
+			raw     => Mojo::JSON::encode_json( { alert => { metadata => { cve => ['CVE-2014-6271'] } } } ),
+		},
+		{
+			id      => 3,
+			dest_ip => '203.0.113.7',
+			raw     => Mojo::JSON::encode_json( { alert => { metadata => { cve => ['CVE-2021-44228'] } } } ),
+		},
+		{
+			id      => 4,
+			dest_ip => '198.51.100.9',
+			raw     => Mojo::JSON::encode_json( { alert => { signature => 'no ids' } } )
+		},
+	];
+
+	is_deeply(
+		$app->cve_matches( 'suricata', $rows, $badges ),
+		{ 1 => ['CVE-2021-44228'] },
+		'only the row whose rule names a CVE its destination is cached as vulnerable to matches'
+	);
+	is_deeply( $app->cve_matches( 'sagan',    $rows, $badges ), {}, 'only suricata rules carry CVE metadata' );
+	is_deeply( $app->cve_matches( 'suricata', $rows, {} ),      {}, 'no badges, no matches' );
+
+	# the event view holds raw already decoded; that is read as it stands
+	is_deeply(
+		$app->cve_matches(
+			'suricata',
+			[
+				{
+					id      => 9,
+					dest_ip => '198.51.100.9',
+					raw     => { alert => { metadata => { cve => ['CVE-2020-1472'] } } },
+				}
+			],
+			$badges
+		),
+		{ 9 => ['CVE-2020-1472'] },
+		'a decoded raw is read as it stands'
+	);
 }
 
 # ---------------------------------------------------------------------------

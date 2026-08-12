@@ -913,4 +913,165 @@ SKIP: {
 		->json_is( '/status' => 'error', 'no-file submit reports an error' );
 }
 
+# ---------------------------------------------------------------------------
+# Shodan enrichment filters — the form offers them and they reach search()
+# ---------------------------------------------------------------------------
+
+{
+	my $t = _make_app('');
+
+	my %captured;
+	no warnings qw(redefine once);
+	local *Lilith::search = sub {
+		my ( $self, %opts ) = @_;
+		%captured = %opts;
+		return [];
+	};
+	use warnings qw(redefine once);
+
+	$t->get_ok( '/search?search=1&shodan_src_tag=tor&shodan_src_tag=vpn'
+			. '&shodan_dest_known=unchecked&shodan_src_cvss=%3E%3D9&cve=CVE-2021-44228' )
+		->status_is( 200, 'a search with enrichment filters renders 200' )
+		->element_exists( 'select#shodan-src-tag-input',    'the src tag field is on the form' )
+		->element_exists( 'select#shodan-dest-known-input', 'the dest known field is on the form' )
+		->element_exists( 'select#cve-input',               'the rule CVE field is on the form' );
+
+	is_deeply( $captured{shodan_src_tag},    [ 'tor', 'vpn' ],   'the tag values reach search()' );
+	is_deeply( $captured{shodan_dest_known}, ['unchecked'],      'the known value reaches search()' );
+	is_deeply( $captured{shodan_src_cvss},   ['>=9'],            'the cvss comparison reaches search()' );
+	is_deeply( $captured{cve},               ['CVE-2021-44228'], 'the cve value reaches search()' );
+	is( $captured{shodan_dest_tag}, undef, 'a filter left blank passes nothing' );
+
+	# the known fields are fixed-vocabulary: they offer exactly their three
+	# states rather than leaving what the filter takes to be guessed at, and
+	# carry the data-fixed mark that turns free typing off
+	$t->get_ok('/search')
+		->element_exists( 'select#shodan-src-known-input[data-fixed="1"]',       'the src known field is marked fixed' )
+		->element_exists( 'select#shodan-src-known-input option[value="known"]', 'and offers known' )
+		->element_exists( 'select#shodan-src-known-input option[value="unknown"]',   'and unknown' )
+		->element_exists( 'select#shodan-src-known-input option[value="unchecked"]', 'and unchecked' )
+		->element_exists( 'select#shodan-dest-known-input option[value="unchecked"]',
+			'the dest twin offers the same set' )
+		->element_exists_not( 'select#shodan-src-tag-input[data-fixed]', 'an open field is not marked fixed' );
+
+	# a submitted state comes back selected on its fixed option, and a value
+	# outside the set -- a negation written into the URL by hand -- still
+	# round-trips instead of being dropped from the search the page describes
+	$t->get_ok('/search?search=1&shodan_src_known=unchecked')
+		->element_exists( 'select#shodan-src-known-input option[value="unchecked"][selected]',
+			'a submitted state is selected on its fixed option' );
+	my $known_options
+		= $t->tx->res->dom->find('select#shodan-src-known-input option')->map( sub { $_->attr('value') } )->to_array;
+	is_deeply(
+		$known_options,
+		[ 'known', 'unknown', 'unchecked' ],
+		'a submitted state is not doubled into the option list'
+	);
+	$t->get_ok('/search?search=1&shodan_src_known=!known')
+		->element_exists( 'select#shodan-src-known-input option[value="!known"][selected]',
+			'a hand-written negation still round-trips' );
+}
+
+# ---------------------------------------------------------------------------
+# CVE-match badge on the results table — the rule's ids against the cached
+# vuln_ids of the destination
+# ---------------------------------------------------------------------------
+
+{
+	my $t = _make_app("enable_shodan = true\n");
+
+	no warnings qw(redefine once);
+	# two rows against the same destination; only the first names a CVE the
+	# cache lists it as vulnerable to
+	local *Lilith::search = sub {
+		return [
+			{
+				id      => 7,
+				src_ip  => '203.0.113.5',
+				dest_ip => '198.51.100.9',
+				raw     => encode_json( { alert => { metadata => { cve => ['CVE_2021_44228'] } } } ),
+			},
+			{
+				id      => 8,
+				src_ip  => '203.0.113.5',
+				dest_ip => '198.51.100.9',
+				raw     => encode_json( { alert => { metadata => { cve => ['CVE-2014-6271'] } } } ),
+			},
+		];
+	}; ## end *Lilith::search = sub
+	local *Lilith::shodan_cache_badges = sub {
+		return {
+			'198.51.100.9' => {
+				ports    => [80],
+				tags     => [],
+				vulns    => 1,
+				vuln_ids => ['CVE-2021-44228'],
+				max_cvss => 10,
+			},
+		};
+	}; ## end *Lilith::shodan_cache_badges = sub
+	use warnings qw(redefine once);
+
+	$t->get_ok('/search?search=1')->status_is( 200, 'search with a CVE match renders 200' );
+
+	my $match_badges = $t->tx->res->dom->find('span.badge.bg-danger')->grep( sub { $_->text eq 'CVE match' } );
+	is( $match_badges->size, 1, 'exactly the matching row carries the CVE match badge' );
+	like( $match_badges->first->attr('title'), qr/CVE-2021-44228/, 'the matched id is in the tooltip' );
+}
+
+# ---------------------------------------------------------------------------
+# Event view Shodan strip + CVE-match banner — cache-only, rendered per end
+# ---------------------------------------------------------------------------
+
+{
+	my $t = _make_app("enable_shodan = true\n");
+
+	no warnings qw(redefine once);
+	local *Lilith::search = sub {
+		return [
+			{
+				id      => 7,
+				src_ip  => '203.0.113.5',
+				dest_ip => '198.51.100.9',
+				raw     =>
+					encode_json( { alert => { metadata => { cve => ['CVE_2021_44228'] }, signature => 'log4j' } } ),
+			}
+		];
+	}; ## end *Lilith::search = sub
+	 # only the destination has a fresh cache entry: a keyless-tier row three
+	 # days old, tor-tagged, vulnerable to the rule's CVE
+	local *Lilith::shodan_cache_info = sub {
+		return {
+			'198.51.100.9' => {
+				found       => 1,
+				age_seconds => 259200,
+				raw         =>
+					{ ports => [80], tags => ['tor'], vulns => ['CVE-2021-44228'], hostnames => ['iron.example'] },
+			},
+		};
+	}; ## end *Lilith::shodan_cache_info = sub
+	 # the keyless tier sends no scores; the CVEDB cache stands in
+	local *Lilith::cvedb_cache_annotations = sub {
+		return { 'CVE-2021-44228' =>
+				{ cvss => 10, epss => 0.97, kev => 1, ransomware => 1, summary => 'log4shell', found => 1 }, };
+	};
+	use warnings qw(redefine once);
+
+	$t->get_ok('/event/suricata/7')
+		->status_is( 200, 'event with a CVE match renders 200' )
+		->content_like( qr/shodan dest/, 'the destination strip renders' )
+		->content_unlike( qr/shodan src/, 'an end with no cache entry gets no strip' )
+		->content_like( qr/cached 3d ago/,  'the strip carries the cache age' )
+		->content_like( qr/iron\.example/,  'the strip carries the hostnames' )
+		->content_like( qr/CVE match/,      'the banner is on the page' )
+		->content_like( qr/CVE-2021-44228/, 'the banner names the matched id' )
+		->content_like( qr/CVSS 10/,        'the banner carries the CVEDB score' )
+		->content_like( qr/KEV/,            'and the KEV flag' );
+
+	# the strip's CVE badge is red: the worst score came from the CVEDB
+	# stand-in even though the keyless tier sent none
+	my $strip_cve = $t->tx->res->dom->find('span.badge.bg-danger')->grep( sub { $_->text =~ /1 CVE/ } );
+	is( $strip_cve->size, 1, 'the strip CVE badge is colored by the stood-in worst score' );
+}
+
 done_testing();

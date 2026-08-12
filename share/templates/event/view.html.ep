@@ -10,6 +10,22 @@
 <div class="alert alert-warning py-2">Event #<%= $id %> not found in the <em><%= $table %></em> table.</div>
 % } else {
 
+% # The strongest thing this page can say: the rule names a CVE the
+% # destination's cached Shodan entry lists it as vulnerable to. Loud and
+% # first, since it changes what the analyst does next.
+% if (my $cve_match = stash('cve_match')) {
+<div class="alert alert-danger py-2 mb-3">
+  <strong>CVE match</strong> &mdash; the rule names <%= @$cve_match == 1 ? 'a CVE' : 'CVEs' %> Shodan lists the destination as vulnerable to:
+  % my $last = $cve_match->[-1];
+  % for my $m (@$cve_match) {
+  %   my @notes;
+  %   push(@notes, 'CVSS ' . $m->{cvss}) if defined $m->{cvss};
+  %   push(@notes, 'KEV') if $m->{kev};
+  <a class="alert-link" href="https://nvd.nist.gov/vuln/detail/<%= $m->{cve} %>" target="_blank" rel="noopener"><%= $m->{cve} %></a><% if (@notes) { %> (<%= join(', ', @notes) %>)<% } %><%= $m == $last ? '' : ',' %>
+  % }
+</div>
+% }
+
 <div class="card border-secondary mb-3">
   <div class="card-header d-flex justify-content-between align-items-center">
     <span>
@@ -145,6 +161,43 @@
         <span><%= $event->{$flow_key} %></span>
       </span>
       % }
+    </div>
+    % }
+    % # What the Shodan cache holds for each end -- the summary worth seeing
+    % # without opening the modal, which keeps the detail. Cache only, so an
+    % # end with no fresh entry gets no line rather than a lookup, and the
+    % # cache age says how much to trust what the line reads.
+    % my $shodan_strip = stash('shodan_strip') || {};
+    % for my $strip_end (qw(src dest)) {
+    %   my $s = $shodan_strip->{$strip_end};
+    %   next unless $s;
+    <div class="event-info-flow font-monospace d-flex flex-wrap align-items-baseline gap-2 mt-1">
+      <span class="text-muted">shodan <%= $strip_end %></span>
+      % if (!$s->{found}) {
+      <span class="text-muted">not on Shodan</span>
+      % } else {
+      %   for my $tag (@{ $s->{info}{tags} || [] }) {
+      <span class="badge <%= $self->shodan_tag_class($tag) %>"><%= $tag %></span>
+      %   }
+      %   if (my $port_count = scalar @{ $s->{info}{ports} || [] }) {
+      <span class="badge bg-secondary" title="open ports: <%= join(', ', @{ $s->{info}{ports} }) %>"><%= $port_count %> port<%= $port_count == 1 ? '' : 's' %></span>
+      %   }
+      %   if ($s->{vuln_count}) {
+      %     my $worst = $s->{worst_cvss};
+      %     my $cvss_class = !defined($worst) ? 'bg-secondary'
+      %       : $worst >= 9 ? 'bg-danger'
+      %       : $worst >= 7 ? 'bg-warning text-dark' : 'bg-secondary';
+      <span class="badge <%= $cvss_class %>" title="<%= defined($worst) ? 'worst CVSS ' . $worst : 'no scores cached' %>"><%= $s->{vuln_count} %> CVE</span>
+      %   }
+      %   if (defined $s->{info}{os} && $s->{info}{os} ne '') {
+      <span><span class="text-muted">os</span> <%= $s->{info}{os} %></span>
+      %   }
+      %   if (my @hostnames = @{ $s->{info}{hostnames} || [] }) {
+      %     my @shown = @hostnames > 2 ? @hostnames[0 .. 1] : @hostnames;
+      <span title="<%= join(', ', @hostnames) %>"><span class="text-muted">host</span> <%= join(', ', @shown) %><%= @hostnames > 2 ? ', …' : '' %></span>
+      %   }
+      % }
+      <span class="text-muted small">cached <%= $s->{age} %> ago</span>
     </div>
     % }
   </div>

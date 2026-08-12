@@ -102,6 +102,31 @@ And for the `cape` table:
 | `--task`     | the task ID of the run                |
 | `--subip` / `--subhost` | the IP / host it was submitted from |
 
+Suricata, Sagan, and Baphomet searches can also filter on what the
+[Shodan cache](configuration.md#shodan) holds for the alert's ends — the same
+data the web UI's badges and the dashboard's enrichment dimensions read, so
+they match whatever the cache currently holds. Each may be given several
+times or comma separated, and negates with `!`. An end with no cached entry
+never matches a positive filter.
+
+| switch | matches |
+|--------|---------|
+| `--shodan_src_tag` / `--shodan_dest_tag` | a Shodan tag on that end (`tor`, `compromised`, ...) |
+| `--shodan_src_known` / `--shodan_dest_known` | the cache state for that end: `known` (on Shodan), `unknown` (crawled, nothing there), or `unchecked` (never looked up) |
+| `--shodan_src_cvss` / `--shodan_dest_cvss` | the worst CVSS of that end's CVEs (CVEDB standing in where the keyless tier sent no scores); takes `<`, `<=`, `>`, `>=` |
+| `--cve` | a CVE id the rule names (Suricata, schema 16). Normalized before matching, so `cve_2021_44228` finds what `CVE-2021-44228` does |
+
+```shell
+# alerts from tor exits or hosts Shodan tags compromised, last day
+lilith search --shodan_src_tag tor,compromised
+
+# exploit attempts against hosts with a critical CVE
+lilith search --shodan_dest_cvss '>=9'
+
+# everything the rule ties to Log4Shell
+lilith search --cve CVE-2021-44228
+```
+
 ### event
 
 Fetch a single event, by row ID or event ID.
@@ -171,7 +196,8 @@ hand first. See [configuration](configuration.md#shodan) for the settings.
 # what a run would ask about, without asking
 lilith shodan_cache --dry-run
 
-# the last ten minutes, for a five minute timer
+# the last ten minutes, for a timer run every minute -- wide so late or
+# long runs cost nothing
 lilith shodan_cache -s 600
 
 # the whole database, five hundred addresses at a time
@@ -209,6 +235,59 @@ Unlike the web frontend's Shodan section, this is not gated on
 reasoning that leaves the CLI escalation actions ungated. It does need
 `shodan_cache_ttl` to be non-zero; with caching off there would be nowhere to
 put an answer.
+
+### cvedb_cache
+
+Look up the CVE ids the Shodan cache names and store what CVEDB — Shodan's
+free, keyless CVE database — says about each in the `cvedb_cache` table:
+CVSS, the EPSS exploitation probability, the CISA KEV flag, known ransomware
+use. That is what the IP info modal's CVE chips and the results tables' CVE
+badges are annotated from; the web never asks CVEDB itself. See
+[configuration](configuration.md#cvedb) for the settings.
+
+```shell
+# what a run would ask about, without asking
+lilith cvedb_cache --dry-run
+
+# the last twenty minutes of shodan_cache, for a timer run every minute --
+# wide so late or long runs cost nothing
+lilith cvedb_cache -s 1200
+
+# the whole table, two hundred ids at a time
+lilith cvedb_cache -s 0 --limit 200
+```
+
+| option      | what                                                          |
+|-------------|----------------------------------------------------------------|
+| `-s`        | How far back to read `shodan_cache`, in seconds, against each row's fetched time. Default `360` — twice `shodan_cache`'s default window; `0` reads everything. |
+| `--limit`   | Stop after this many lookups. `0`, the default, is no limit.   |
+| `--dry-run` | Report what would be looked up without asking CVEDB.           |
+
+Each run reads the distinct CVE ids named by the `shodan_cache` rows fetched
+in the `-s` window — a newly cached or freshly refreshed address is what
+introduces new ids — drops anything that is not a CVE id in canonical form
+(the ids come out of other people's data), and fetches what the cache has
+never seen, then what is older than `cvedb_cache_ttl`, oldest first. A run
+capped by `--limit` therefore spends its lookups on what the cache knows
+least about. The summary line accounts for every id scanned, so a run that
+did nothing says why.
+
+`-s` only bounds how far back in `shodan_cache` a run reads. What stops an
+id being fetched twice is its own cache entry, so a window wider than the
+interval it runs on is safe, and it defaults to twice `shodan_cache`'s so a
+run of this sees everything a run of that cached between the two. Stale rows
+are served while they wait; the refresh is about drift (EPSS moves a little
+daily, KEV grows), not correctness, and an id past `cvedb_cache_ttl` gets
+its refresh when an address naming it is fetched or refreshed inside the
+window — which `shodan_cache`'s own TTL cycle sees to. A `-s 0` run sweeps
+everything on demand.
+
+The pacing is a lookup a second out of politeness, so a run costs roughly a
+second per id it fetches. In steady state that is a handful; the first pass
+over a Shodan cache that has been filling for a while is every id it holds —
+do that by hand, in bounded chunks, before putting it on a timer. Ready made
+systemd units and a cron.d entry ship under `rc/`; see
+[install](install.md#the-cvedb-cache-timer).
 
 ### And the rest
 

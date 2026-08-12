@@ -33,41 +33,48 @@ sub opt_spec {
 	return (
 		[ 't=s', 'table to operate on', { default => 'suricata' } ],
 		$class->output_opt_spec,
-		[ 'm=s',              'how far back to search, in minutes' ],
-		[ 'order=s',          'column to sort by' ],
-		[ 'orderdir=s',       'sort direction, ASC or DESC' ],
-		[ 'limit=s',          'row limit' ],
-		[ 'offset=s',         'row offset' ],
-		[ 'columns=s',        'comma separated list of columns' ],
-		[ 'columnset=s',      'named column set', { default => 'default' } ],
-		[ 'si=s',             'source IP' ],
-		[ 'di=s',             'destination IP' ],
-		[ 'ip=s',             'IP, either source or destination' ],
-		[ 'sp=s@',            'source port' ],
-		[ 'dp=s@',            'destination port' ],
-		[ 'p=s',              'port, either source or destination' ],
-		[ 'host=s',           'host' ],
-		[ 'ih=s',             'instance host' ],
-		[ 'i=s',              'instance' ],
-		[ 'c=s@',             'classification' ],
-		[ 'class_not|cN=s@',  'classification to exclude; appended to the class list with a leading !' ],
-		[ 'class_like|cl=s@', 'classification to match using like; wrapped in % unless the value contains one' ],
-		[ 's=s',              'signature' ],
-		[ 'if=s',             'in interface' ],
-		[ 'proto=s',          'proto' ],
-		[ 'ap=s',             'app proto' ],
-		[ 'gid=s@',           'GID' ],
-		[ 'sid=s@',           'SID' ],
-		[ 'rev=s@',           'rev' ],
-		[ 'subip=s',          'the IP the sample was submitted from' ],
-		[ 'subhost=s',        'the host the sample was submitted from' ],
-		[ 'slug=s',           'the slug it was submitted with' ],
-		[ 'pkg=s',            'the detonation package used with CAPEv2' ],
-		[ 'malscore=s@',      'the malscore of the sample' ],
-		[ 'size=s@',          'the size of the sample' ],
-		[ 'target=s',         'the detonation target' ],
-		[ 'task=s@',          'the task ID of the run' ],
-		[ 'user=s',           'the username the line was about' ],
+		[ 'm=s',                  'how far back to search, in minutes' ],
+		[ 'order=s',              'column to sort by' ],
+		[ 'orderdir=s',           'sort direction, ASC or DESC' ],
+		[ 'limit=s',              'row limit' ],
+		[ 'offset=s',             'row offset' ],
+		[ 'columns=s',            'comma separated list of columns' ],
+		[ 'columnset=s',          'named column set', { default => 'default' } ],
+		[ 'si=s',                 'source IP' ],
+		[ 'di=s',                 'destination IP' ],
+		[ 'ip=s',                 'IP, either source or destination' ],
+		[ 'sp=s@',                'source port' ],
+		[ 'dp=s@',                'destination port' ],
+		[ 'p=s',                  'port, either source or destination' ],
+		[ 'host=s',               'host' ],
+		[ 'ih=s',                 'instance host' ],
+		[ 'i=s',                  'instance' ],
+		[ 'c=s@',                 'classification' ],
+		[ 'class_not|cN=s@',      'classification to exclude; appended to the class list with a leading !' ],
+		[ 'class_like|cl=s@',     'classification to match using like; wrapped in % unless the value contains one' ],
+		[ 's=s',                  'signature' ],
+		[ 'if=s',                 'in interface' ],
+		[ 'proto=s',              'proto' ],
+		[ 'ap=s',                 'app proto' ],
+		[ 'gid=s@',               'GID' ],
+		[ 'sid=s@',               'SID' ],
+		[ 'rev=s@',               'rev' ],
+		[ 'subip=s',              'the IP the sample was submitted from' ],
+		[ 'subhost=s',            'the host the sample was submitted from' ],
+		[ 'slug=s',               'the slug it was submitted with' ],
+		[ 'pkg=s',                'the detonation package used with CAPEv2' ],
+		[ 'malscore=s@',          'the malscore of the sample' ],
+		[ 'size=s@',              'the size of the sample' ],
+		[ 'target=s',             'the detonation target' ],
+		[ 'task=s@',              'the task ID of the run' ],
+		[ 'user=s',               'the username the line was about' ],
+		[ 'shodan_src_tag=s@',    'Shodan tag on the source' ],
+		[ 'shodan_dest_tag=s@',   'Shodan tag on the destination' ],
+		[ 'shodan_src_known=s@',  'Shodan cache state for the source: known, unknown, or unchecked' ],
+		[ 'shodan_dest_known=s@', 'Shodan cache state for the destination: known, unknown, or unchecked' ],
+		[ 'shodan_src_cvss=s@',   'worst CVSS on the source; takes the numeric comparison operators' ],
+		[ 'shodan_dest_cvss=s@',  'worst CVSS on the destination; takes the numeric comparison operators' ],
+		[ 'cve=s@',               'CVE id the rule names (suricata)' ],
 	);
 } ## end sub opt_spec
 
@@ -113,10 +120,24 @@ sub execute {
 		push( @class, $class_like_value );
 	}
 
+	# The shodan/cve filters may be given multiple times and/or comma
+	# separated, the same as class. Only the ones actually used go into the
+	# search, so a blank one adds nothing.
+	my %enrich_filter;
+	foreach my $enrich_name (
+		qw( shodan_src_tag shodan_dest_tag shodan_src_known
+		shodan_dest_known shodan_src_cvss shodan_dest_cvss cve )
+		)
+	{
+		my @values = split( /\s*,\s*/, join( ',', @{ $opt->{$enrich_name} // [] } ) );
+		$enrich_filter{$enrich_name} = \@values if @values;
+	}
+
 	#
 	# run the search
 	#
 	my $returned = $lilith->search(
+		%enrich_filter,
 		src_ip           => $opt->{si},
 		src_port         => $opt->{sp} // [],
 		dest_ip          => $opt->{di},

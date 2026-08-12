@@ -54,6 +54,21 @@ and describe only the addresses it holds; see
 [dashboard](dashboard.md#shodan-enrichment). Run `lilith shodan_cache` on a
 timer to fill it ahead of time; see [usage](usage.md).
 
+### CVEDB
+
+Shodan's free CVE database ([cvedb.shodan.io](https://cvedb.shodan.io)),
+which needs no key or account. `lilith cvedb_cache` looks up the CVE ids the
+Shodan cache names and stores what CVEDB says about each — CVSS, the EPSS
+exploitation probability, the CISA KEV flag, known ransomware use — in the
+`cvedb_cache` table (schema version 16). The web reads only the table: the IP
+info modal's CVE chips gain their KEV marker and tooltip detail from it, and
+it is what gives the keyless InternetDB tier's bare CVE ids scores at all,
+on the chips and on the results tables' CVE badges alike.
+
+| key               | description                                      |
+|-------------------|--------------------------------------------------|
+| `cvedb_cache_ttl` | Seconds before a cached CVEDB answer is due a refresh. Default `604800` (7 days). Unlike `shodan_cache_ttl` this never gates a read — CVE detail only firms up, so a stale row is served until its replacement lands, and the TTL only decides what a `cvedb_cache` run refetches. `0` is refused by the command, since it would mean refetching everything every run. |
+
 ### The web frontend
 
 All optional; all default off / unset. Read [security](security.md)

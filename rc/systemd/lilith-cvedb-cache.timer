@@ -1,0 +1,26 @@
+# systemd timer for filling Lilith's CVEDB cache.
+#
+# Fires lilith-cvedb-cache.service a few minutes after boot and then every
+# minute, the same cadence as the Shodan cache timer it feeds off, so a
+# newly cached address's CVEs are annotated about as soon as they can be.
+# The service's -s window is much wider than this interval on purpose: a
+# run that takes a while (systemd holds the timer while one is still going)
+# or fires late leaves nothing missed, and an id's own cache entry keeps
+# the wide window from causing second lookups.
+#
+# Enable with:
+#   systemctl enable --now lilith-cvedb-cache.timer
+
+[Unit]
+Description=Fill Lilith's CVEDB cache periodically
+Documentation=man:lilith
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+AccuracySec=15s
+# after downtime just run once when back, rather than firing every missed slot
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,20 @@
+# cron.d entry for filling Lilith's CVEDB cache, for systems not using
+# systemd. Install as its own file rather than appended to a shared crontab:
+# /etc/cron.d/lilith-cvedb-cache, or /usr/local/etc/cron.d/lilith-cvedb-cache
+# on FreeBSD. The sixth field is the user to run as.
+#
+# Runs every minute, the same cadence as the Shodan cache entry it feeds
+# off. Each run reads the CVE ids named by the Shodan cache rows fetched in
+# the last -s 1200 seconds and looks up what the CVEDB cache lacks or holds
+# past cvedb_cache_ttl, oldest first, --limit 200 at a time. The -s window
+# only bounds how far back in shodan_cache a run reads; an id's own cache
+# entry is what stops it being fetched twice, so the window being much wider
+# than the interval is safe and is what covers runs that fire late or take
+# longer than a minute. Add `--config /path/to/lilith.toml` (before the
+# subcommand) for a non default config file.
+#
+# The pacing is a lookup a second, so a run costs roughly a second per id it
+# fetches. Do the first pass by hand with
+# `lilith cvedb_cache -s 0 --limit 200` before installing this.
+
+* * * * * lilith /usr/local/bin/lilith cvedb_cache -s 1200 --limit 200

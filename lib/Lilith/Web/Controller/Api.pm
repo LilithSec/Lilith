@@ -327,6 +327,11 @@ blocking lookups run in a subprocess so the web server's event loop stays
 responsive; the Shodan half is served from the shodan_cache table when a fresh
 entry is held, and cached back when it is not.
 
+The Shodan section's CVEs are annotated from the C<cvedb_cache> table on the
+way out -- score, EPSS, the CISA KEV flag, known ransomware use -- which is
+also what gives the keyless tier's bare CVE ids their scores. Cache only:
+nothing here asks CVEDB, that being C<lilith cvedb_cache>'s job.
+
 =cut
 
 sub ipinfo {
@@ -359,6 +364,12 @@ sub ipinfo {
 			# skipped, failed, or never made.
 			my $raw = delete $result->{shodan_raw};
 			$self->_shodan_cache_put( $ip, $result->{shodan}, $raw ) if $raw;
+
+			# Annotated here in the parent rather than in the gather: the
+			# subprocess is forked from this process, where a DBI handle does
+			# not survive being shared -- the same reason the Shodan cache read
+			# happens out here.
+			$self->_cvedb_annotate( $result->{shodan} );
 
 			$self->render( json => $result );
 		},
@@ -439,6 +450,68 @@ sub _shodan_cache_put {
 
 	return;
 } ## end sub _shodan_cache_put
+
+# Annotate a normalized Shodan result's vulnerability list from the
+# cvedb_cache table, in place: each CVE the cache knows gains kev, ransomware,
+# and epss, and -- when Shodan itself sent none -- a cvss and summary. That
+# last part is what gives the keyless InternetDB tier's bare ids their scores.
+#
+# The list is then re-sorted KEV first, since "known to be exploited" outranks
+# any unexploited score, then by score and id the same way the normalizer
+# sorts.
+#
+# Cache only, and soft: nothing here asks CVEDB (that is `lilith cvedb_cache`'s
+# job, on its own timer), and a cache that cannot be read -- no database, or a
+# schema still without the table -- costs only the annotation, logged the same
+# way the Shodan cache failures are.
+#
+# Args:
+#
+#   - $shodan :: the normalized Shodan result, as Lilith::Shodan::gather or
+#     normalize returned it. Anything without a non-empty vulns array is left
+#     untouched.
+#
+# Returns: nothing. The result is the change to $shodan->{vulns}.
+#
+#     $self->_cvedb_annotate( $result->{shodan} );
+#     # $result->{shodan}{vulns}[0]{kev} is 1 when its CVE is on the KEV list
+sub _cvedb_annotate {
+	my ( $self, $shodan ) = @_;
+
+	return unless ref $shodan eq 'HASH' && ref $shodan->{vulns} eq 'ARRAY' && @{ $shodan->{vulns} };
+
+	my @ids = map { $_->{cve} } grep { ref $_ eq 'HASH' && defined $_->{cve} && $_->{cve} ne '' } @{ $shodan->{vulns} };
+	return unless @ids;
+
+	my $notes = eval { $self->lilith->cvedb_cache_annotations( cves => \@ids ) };
+	if ($@) {
+		( my $why = $@ ) =~ s/\s+\z//;
+		$self->app->log->warn( 'cvedb cache read failed, CVEs left unannotated: ' . $why );
+		return;
+	}
+
+	for my $vuln ( @{ $shodan->{vulns} } ) {
+		next unless ref $vuln eq 'HASH' && defined $vuln->{cve};
+		my $note = $notes->{ $vuln->{cve} };
+		next unless ref $note eq 'HASH' && $note->{found};
+
+		$vuln->{kev}        = $note->{kev};
+		$vuln->{ransomware} = $note->{ransomware};
+		$vuln->{epss}       = defined $note->{epss} ? $note->{epss} + 0 : '';
+
+		# Shodan's own detail wins where it exists -- these fill, not overwrite.
+		$vuln->{cvss}    = $note->{cvss} + 0 if $vuln->{cvss} eq ''    && defined $note->{cvss};
+		$vuln->{summary} = $note->{summary}  if $vuln->{summary} eq '' && $note->{summary} ne '';
+	} ## end for my $vuln ( @{ $shodan->{vulns} } )
+
+	@{ $shodan->{vulns} } = sort {
+			   ( $b->{kev} || 0 ) <=> ( $a->{kev} || 0 )
+			|| ( $b->{cvss} eq '' ? -1 : $b->{cvss} ) <=> ( $a->{cvss} eq '' ? -1 : $a->{cvss} )
+			|| $a->{cve} cmp $b->{cve}
+	} @{ $shodan->{vulns} };
+
+	return;
+} ## end sub _cvedb_annotate
 
 # Everything the IP info modal shows, gathered in one go: reverse DNS, whois,
 # whatever the configured GeoIP databases know, and -- when enable_shodan is set

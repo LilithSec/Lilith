@@ -539,4 +539,53 @@ SKIP: {
 	ok( !exists $json->{shodan_raw}, 'the raw response is stripped before rendering' );
 }
 
+# ---------------------------------------------------------------------------
+# 18.  CVEDB — the Shodan section's CVEs are annotated from the cache
+# ---------------------------------------------------------------------------
+
+{
+	# The keyless tier's bare ids, with the annotation source stubbed at the
+	# Lilith method: what is under test is the controller's merge and re-sort,
+	# not the SQL behind it -- that is pg-migrate.t's business. Nothing here
+	# reaches the network or a database.
+	no warnings qw(redefine once);
+	local *Lilith::Shodan::fetch = sub {
+		return ( { ports => [443], vulns => [ 'CVE-2019-0217', 'CVE-2021-40438' ] }, '' );
+	};
+	local *Lilith::cvedb_cache_annotations = sub {
+		return {
+			'CVE-2021-40438' => {
+				cvss       => 9.8,
+				epss       => 0.97,
+				kev        => 1,
+				ransomware => 1,
+				summary    => 'mod_proxy SSRF',
+				found      => 1,
+			},
+		};
+	}; ## end *Lilith::cvedb_cache_annotations = sub
+	use warnings qw(redefine once);
+
+	my $t = _make_app(qq{enable_shodan = true\n});
+	my $json
+		= $t->get_ok('/api/ipinfo/8.8.8.8')
+		->status_is( 200, 'ipinfo renders 200 with CVE annotation on' )
+		->tx->res->json;
+
+	my $vulns = $json->{shodan}{vulns};
+	is( scalar @{$vulns}, 2, 'both CVEs render' );
+
+	# The ids sort 0217 first; the KEV entry outranking it is the re-sort.
+	is( $vulns->[0]{cve},        'CVE-2021-40438', 'the KEV CVE sorts first however the ids sort' );
+	is( $vulns->[0]{kev},        1,                'the KEV flag rides on the entry' );
+	is( $vulns->[0]{ransomware}, 1,                'so does the ransomware flag' );
+	is( $vulns->[0]{epss} + 0,   0.97,             'and the EPSS' );
+	is( $vulns->[0]{cvss} + 0,   9.8,              'a bare keyless-tier id gains its score from the cache' );
+	is( $vulns->[0]{summary},    'mod_proxy SSRF', 'and its summary' );
+
+	is( $vulns->[1]{cve},  'CVE-2019-0217', 'a CVE the cache does not know keeps its place' );
+	is( $vulns->[1]{cvss}, '',              'and is left as Shodan sent it' );
+	ok( !exists $vulns->[1]{kev}, 'and gains no flags it has no answer for' );
+}
+
 done_testing();

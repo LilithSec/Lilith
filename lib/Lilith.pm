@@ -1596,6 +1596,47 @@ and negated items are ANDed.
     #                    or src_port = '80' or dest_port = '80' )"
     port => '22,80'
 
+Below are the Shodan enrichment filters, for the suricata, sagan, and baphomet
+tables (cape is skipped -- its addresses describe the submitter). Each filters
+on what the C<shodan_cache> table (schema version 15) holds for that end of the
+alert, the same data the results badges and the dashboard's enrichment
+dimensions read, and like the dimensions they match whatever the cache
+currently holds -- running C<lilith shodan_cache> on a timer is what keeps
+that current. An end with no cached entry never matches a positive filter.
+
+    - shodan_src_tag / shodan_dest_tag :: Shodan's tags for the host. A '!'
+      prefix negates; positives read "any of these", negations "none of
+      those". No LIKE.
+    - shodan_src_known / shodan_dest_known :: the cache state for the host,
+      one of 'known' (crawled and on Shodan), 'unknown' (crawled, nothing
+      there), or 'unchecked' (never looked up). '!' negates; anything else
+      dies.
+    - shodan_src_cvss / shodan_dest_cvss :: the worst CVSS of the host's
+      CVEs, with the CVEDB cache standing in where Shodan sent no scores --
+      the same value the results badges color by. Takes the numeric
+      comparison operators; several terms AND together.
+
+    # alerts whose source is tagged tor or vpn
+    shodan_src_tag => [ 'tor', 'vpn' ],
+
+    # alerts whose source has a critical CVE
+    shodan_src_cvss => ['>=9'],
+
+    # alerts against destinations Shodan has never crawled
+    shodan_dest_known => 'unchecked',
+
+Last is the rule CVE filter, for suricata only (elsewhere it is skipped like
+any other filter naming a column the table lacks):
+
+    - cve :: the CVE ids the rule that fired names, from the cves generated
+      column (schema version 16). Values are normalized before matching, so
+      'cve_2021_44228' finds what 'CVE-2021-44228' does; anything that does
+      not normalize to an id dies. '!' negates, and a rule naming no ids
+      counts as not naming any given one.
+
+    # alerts whose rule names Log4Shell
+    cve => 'CVE-2021-44228',
+
 =cut
 
 # Validate and normalize a search start/end time to a canonical
@@ -1700,6 +1741,27 @@ sub _string_filter_clauses {
 
 	return @clauses;
 } ## end sub _string_filter_clauses
+
+# Flatten a filter's submitted value or values into the non-blank list, the
+# shared first step of the enrichment filters below: a filter may arrive as a
+# scalar or an array ref, and blanks mean "left empty" rather than "match
+# empty". Plain function, not a method.
+#
+# Args:
+#
+#   - $values :: the value or values as the caller passed the filter -- a
+#     scalar, an array ref, or undef.
+#
+# Returns: the values as a list, undefs and empty strings dropped. Empty when
+# there was nothing.
+#
+#     _filter_values( [ 'tor', '', undef ] );   # ( 'tor' )
+sub _filter_values {
+	my $values = shift;
+
+	my @values = ref $values eq 'ARRAY' ? @{$values} : ($values);
+	return grep { defined($_) && $_ ne '' } @values;
+}
 
 # Dies if the passed table name is not one of the known alert table types. The
 # short type picks both the DBIx::Class result class and the real table name, so
@@ -2016,6 +2078,196 @@ sub search {
 			}
 		}
 	}
+
+	#
+	# Shodan enrichment filters
+	#
+
+	# These filter on what the shodan_cache table says about an alert's ends
+	# rather than on the alert itself, each as an EXISTS against the end's
+	# address -- the search-filter form of the dashboard's enrichment
+	# dimensions, and like them they match whatever the cache currently holds,
+	# with no freshness gate of their own: the cache prunes itself on every
+	# write, and the `lilith shodan_cache` timer is what keeps it current.
+	# cape is skipped for the same reason Lilith::Stats offers it no
+	# enrichment dimensions: a detonation's addresses describe the submitter.
+	if ( $opts{table} =~ /^(?:suricata|sagan|baphomet)$/ ) {
+		my @shodan_clauses;
+		my $shodan_max_cvss;
+
+		for my $side (qw(src dest)) {
+			my $ip_column = $side . '_ip';
+			next unless $table_has_column{$ip_column};
+
+			# tag: which of Shodan's tags the end's entry carries. The
+			# positives are one overlap test, so they read "any of these";
+			# the negations are one NOT of the same, "none of those".
+			my @tag_values = _filter_values( $opts{ 'shodan_' . $side . '_tag' } );
+			if (@tag_values) {
+				my ( @tag_positive, @tag_negative );
+				for my $value (@tag_values) {
+					if ( $value =~ s/^\!// ) { push( @tag_negative, $value ) if $value ne ''; }
+					else                     { push( @tag_positive, $value ); }
+				}
+				my $tag_exists
+					= 'exists (select 1 from shodan_cache where shodan_cache.ip = me.'
+					. $ip_column
+					. ' and shodan_cache.tags && ?::varchar[])';
+				push( @shodan_clauses, \[ $tag_exists, $self->_pg_text_array( \@tag_positive ) ] )
+					if @tag_positive;
+				push( @shodan_clauses, \[ 'not ' . $tag_exists, $self->_pg_text_array( \@tag_negative ) ] )
+					if @tag_negative;
+			} ## end if (@tag_values)
+
+			# known: what state the cache is in for the end. 'known' is
+			# crawled and on Shodan, 'unknown' is crawled with nothing there,
+			# 'unchecked' is never looked up -- the same three states the
+			# dashboard's known dimension buckets by. Positives are ORed,
+			# negations ANDed as complements, and anything else dies rather
+			# than silently matching nothing.
+			my %known_sql = (
+				known => 'exists (select 1 from shodan_cache where shodan_cache.ip = me.'
+					. $ip_column
+					. ' and shodan_cache.found)',
+				unknown => 'exists (select 1 from shodan_cache where shodan_cache.ip = me.'
+					. $ip_column
+					. ' and not shodan_cache.found)',
+				unchecked => 'not exists (select 1 from shodan_cache where shodan_cache.ip = me.'
+					. $ip_column . ')',
+			);
+			my @known_values = _filter_values( $opts{ 'shodan_' . $side . '_known' } );
+			if (@known_values) {
+				my ( @known_positive, @known_negative );
+				for my $value (@known_values) {
+					my $negated = $value =~ s/^\!//;
+					if ( !$known_sql{$value} ) {
+						die(      '"'
+								. $value
+								. '" for shodan_'
+								. $side
+								. '_known is not one of known, unknown, or unchecked' );
+					}
+					if   ($negated) { push( @known_negative, $value ); }
+					else            { push( @known_positive, $value ); }
+				} ## end for my $value (@known_values)
+				if ( defined( $known_positive[0] ) && !defined( $known_positive[1] ) ) {
+					push( @shodan_clauses, \[ $known_sql{ $known_positive[0] } ] );
+				} elsif ( defined( $known_positive[1] ) ) {
+					push( @shodan_clauses, { '-or' => [ map { \[ $known_sql{$_} ] } @known_positive ] } );
+				}
+				push( @shodan_clauses, map { \[ 'not (' . $known_sql{$_} . ')' ] } @known_negative );
+			} ## end if (@known_values)
+
+			# cvss: comparisons against the worst score of the end's CVEs,
+			# the CVEDB cache standing in where Shodan sent no scores -- the
+			# same expression the results badges color by, so the filter
+			# matches what the badge shows. The terms AND together inside one
+			# row test, the same as the other numeric filters, so '>=7, <9'
+			# reads "worst is in the High band". An end with no cache row
+			# never matches.
+			my @cvss_values = _filter_values( $opts{ 'shodan_' . $side . '_cvss' } );
+			if (@cvss_values) {
+				$shodan_max_cvss = $self->_shodan_max_cvss_expr( $schema->storage->dbh )
+					if !defined($shodan_max_cvss);
+
+				my ( @cvss_terms, @cvss_binds );
+				for my $value (@cvss_values) {
+					$value =~ s/[\ \t]//g;
+
+					my $equality;
+					my $number;
+					if ( $value =~ /^([0-9]+(?:\.[0-9]+)?)$/ ) {
+						( $equality, $number ) = ( '=', $1 );
+					} elsif ( $value =~ /^\<\=([0-9]+(?:\.[0-9]+)?)$/ ) {
+						( $equality, $number ) = ( '<=', $1 );
+					} elsif ( $value =~ /^\<([0-9]+(?:\.[0-9]+)?)$/ ) {
+						( $equality, $number ) = ( '<', $1 );
+					} elsif ( $value =~ /^\>\=([0-9]+(?:\.[0-9]+)?)$/ ) {
+						( $equality, $number ) = ( '>=', $1 );
+					} elsif ( $value =~ /^\>([0-9]+(?:\.[0-9]+)?)$/ ) {
+						( $equality, $number ) = ( '>', $1 );
+					} elsif ( $value =~ /^\!([0-9]+(?:\.[0-9]+)?)$/ ) {
+						( $equality, $number ) = ( '!=', $1 );
+					} else {
+						die(      '"'
+								. $value
+								. '" does not appear to be a valid item for a numeric search for shodan_'
+								. $side
+								. '_cvss' );
+					}
+					push( @cvss_terms, '(' . $shodan_max_cvss . ') ' . $equality . ' ?' );
+					push( @cvss_binds, $number );
+				} ## end for my $value (@cvss_values)
+
+				push(
+					@shodan_clauses,
+					\[
+						'exists (select 1 from shodan_cache where shodan_cache.ip = me.'
+							. $ip_column . ' and '
+							. join( ' and ', @cvss_terms ) . ')',
+						@cvss_binds
+					]
+				);
+			} ## end if (@cvss_values)
+		} ## end for my $side (qw(src dest))
+
+		if (@shodan_clauses) {
+
+			# a clear death beats "relation does not exist" out of the driver
+			# when the database is still on an older schema
+			my ($has_shodan) = $schema->storage->dbh->selectrow_array(q{select to_regclass('shodan_cache')});
+			die("the shodan_* search filters need the shodan_cache table (schema version 15)\n")
+				unless $has_shodan;
+
+			$search->{'-and'} = [] if !defined( $search->{'-and'} );
+			push( @{ $search->{'-and'} }, @shodan_clauses );
+		} ## end if (@shodan_clauses)
+	} ## end if ( $opts{table} =~ /^(?:suricata|sagan|baphomet)$/)
+
+	# cve: the ids the rule that fired names, out of the cves generated column
+	# -- schema version 16 and suricata only, any other table skipping it the
+	# same way it skips filters on columns it lacks. Values are normalized to
+	# the canonical form first, so 'cve_2021_44228' finds what 'CVE-2021-44228'
+	# does, and anything that does not normalize to an id dies rather than
+	# silently matching nothing. Positives are one overlap test; a negated id
+	# must be absent, with a rule naming no ids at all counting as absent.
+	if ( defined( $opts{cve} ) && $opts{table} eq 'suricata' ) {
+		my @cve_values = _filter_values( $opts{cve} );
+
+		require Lilith::CVEDB;
+		my ( @cve_positive, @cve_negative );
+		for my $value (@cve_values) {
+			my $negated = $value =~ s/^\!//;
+			$value = uc($value);
+			$value =~ tr/_/-/;
+			$value = 'CVE-' . $value if $value =~ /^[0-9]{4}-[0-9]{4,}$/;
+			die( '"' . $value . '" for cve is not a CVE id' ) unless Lilith::CVEDB::is_cve_id($value);
+			if   ($negated) { push( @cve_negative, $value ); }
+			else            { push( @cve_positive, $value ); }
+		}
+
+		if ( @cve_positive || @cve_negative ) {
+
+			# same reasoning as the shodan_cache probe above
+			my ($has_cves) = $schema->storage->dbh->selectrow_array(
+				'SELECT 1 FROM pg_attribute WHERE attrelid = ?::regclass'
+					. ' AND attname = ? AND attnum > 0 AND NOT attisdropped',
+				undef, 'suricata_alerts', 'cves'
+			);
+			die("the cve search filter needs the suricata_alerts cves column (schema version 16)\n")
+				unless $has_cves;
+
+			$search->{'-and'} = [] if !defined( $search->{'-and'} );
+			push( @{ $search->{'-and'} }, \[ 'me.cves && ?::text[]', $self->_pg_text_array( \@cve_positive ) ] )
+				if @cve_positive;
+
+			# coalesce so a rule naming no ids at all counts as not naming it
+			push(
+				@{ $search->{'-and'} },
+				\[ 'not coalesce(me.cves && ?::text[], false)', $self->_pg_text_array( \@cve_negative ) ]
+			) if @cve_negative;
+		} ## end if ( @cve_positive || @cve_negative )
+	} ## end if ( defined( $opts{cve} ) && $opts{table}...)
 
 	my %result_attrs = (
 		order_by     => $opts{order_by} . ' ' . $opts{order_dir},
@@ -3683,10 +3935,17 @@ C<ttl> in seconds. Returns a hash ref keyed by address:
       '192.0.2.10' => {
         ports    => [ 22, 443 ],
         tags     => [ 'cloud' ],
-        vulns    => 12,      # how many, not which -- the cell shows a count
-        max_cvss => 9.8,     # undef when nothing scored, as on the keyless tier
+        vulns    => 12,      # how many -- the cell badge shows a count
+        vuln_ids => [ 'CVE-2021-44228', ... ],   # which -- for the CVE-match
+                                                 # check against a rule's ids
+        max_cvss => 9.8,     # undef when nothing anywhere scored them
       },
     }
+
+C<max_cvss> is the worst score Shodan itself sent, and when it sent none --
+the keyless tier never does -- the worst score the C<cvedb_cache> table holds
+for the row's CVEs, which is what colors the CVE badge on an InternetDB-only
+install once C<lilith cvedb_cache> has run.
 
 Addresses with no fresh entry are absent rather than present and empty, so the
 caller can tell "nothing cached" from "cached, and Shodan knows nothing". Dies
@@ -3705,9 +3964,12 @@ sub shodan_cache_badges {
 	return {} unless @{$ips} && $ttl > 0;
 
 	my $dbh = $self->_escalation_dbh;
+
 	my $sth
-		= $dbh->prepare( 'select host(ip) as ip, ports, tags, max_cvss,'
-			. ' coalesce(array_length(vulns, 1), 0) as vuln_count from shodan_cache'
+		= $dbh->prepare( 'select host(ip) as ip, ports, tags, '
+			. $self->_shodan_max_cvss_expr($dbh)
+			. ' as max_cvss'
+			. ', vulns, coalesce(array_length(vulns, 1), 0) as vuln_count from shodan_cache'
 			. ' where ip = any(?::inet[]) and source = ? and fetched > now() - (? || \' seconds\')::interval;' );
 	$sth->execute( $self->_pg_text_array($ips), ( defined $opts{source} ? $opts{source} : '' ), $ttl );
 
@@ -3717,12 +3979,311 @@ sub shodan_cache_badges {
 			ports    => ( ref $row->{ports} eq 'ARRAY' ? $row->{ports} : [] ),
 			tags     => ( ref $row->{tags} eq 'ARRAY'  ? $row->{tags}  : [] ),
 			vulns    => ( $row->{vuln_count} || 0 ),
+			vuln_ids => ( ref $row->{vulns} eq 'ARRAY' ? $row->{vulns} : [] ),
 			max_cvss => $row->{max_cvss},
 		};
 	}
 
 	return \%badges;
 } ## end sub shodan_cache_badges
+
+# The SQL expression for the worst CVSS of a shodan_cache row's CVEs. The
+# keyless tier stores no scores, so its rows hold a null max_cvss however bad
+# their CVEs are; when the cvedb_cache table is present (schema version 16)
+# the worst score it holds for the row's CVEs stands in. Checked with
+# to_regclass rather than assumed so a database still on an older schema keeps
+# working with the bare column.
+#
+# One definition shared by the badges read and the shodan_*_cvss search
+# filters, so a filter matches what the badge it filters on shows.
+#
+# Args:
+#
+#   - $dbh :: the handle to probe for cvedb_cache with, from whichever
+#     connection the caller is already on.
+#
+# Returns: the expression as a string, referencing max_cvss and vulns
+# unqualified -- so it is only usable where those resolve to shodan_cache.
+#
+#     my $expr = $self->_shodan_max_cvss_expr($dbh);
+sub _shodan_max_cvss_expr {
+	my ( $self, $dbh ) = @_;
+
+	my ($has_cvedb) = $dbh->selectrow_array(q{select to_regclass('cvedb_cache')});
+	return $has_cvedb
+		? 'coalesce(max_cvss, (select max(cvedb.cvss) from unnest(vulns) as vuln_id'
+		. ' join cvedb_cache as cvedb on cvedb.cve = vuln_id))'
+		: 'max_cvss';
+}
+
+=head2 shodan_cache_info
+
+The cached Shodan entries for a handful of addresses, whole: the response as it
+arrived plus the row's own bookkeeping. What the event view's per-end summary
+renders from -- the badges read (C<shodan_cache_badges>) carries only the
+queryable projection, and this is for the one page that wants the rest (OS,
+hostnames, per-CVE scores) without a network lookup.
+
+Takes C<ips> (array ref of addresses -- an event has two ends, so this is built
+for few rather than a page's hundred), C<source> (C<api> or C<internetdb>), and
+C<ttl> in seconds. The same freshness rule as every other cache read: a row
+from the other tier or older than the TTL is a miss.
+
+Returns a hash ref keyed by address:
+
+    {
+      '192.0.2.10' => {
+        found       => 1,      # 0 when Shodan has never crawled it
+        age_seconds => 93600,  # since Lilith fetched it, for a "cached 1d ago"
+        raw         => {...},  # the response as it arrived; {} when found is 0
+      },
+    }
+
+Addresses with no fresh entry are absent rather than present and empty, the
+same as the badges read. Dies only if the database itself cannot be reached.
+
+    my $info = $lilith->shodan_cache_info(
+        ips => [ '192.0.2.10', '192.0.2.11' ], source => 'api', ttl => 2592000 );
+
+=cut
+
+sub shodan_cache_info {
+	my ( $self, %opts ) = @_;
+
+	my $ips = ref $opts{ips} eq 'ARRAY' ? $opts{ips} : [];
+	my $ttl = defined $opts{ttl} && $opts{ttl} =~ /^[0-9]+$/ ? $opts{ttl} : 0;
+	return {} unless @{$ips} && $ttl > 0;
+
+	my $dbh = $self->_escalation_dbh;
+	my $sth
+		= $dbh->prepare( 'select host(ip) as ip, found,'
+			. ' extract(epoch from now() - fetched)::bigint as age_seconds, raw from shodan_cache'
+			. ' where ip = any(?::inet[]) and source = ? and fetched > now() - (? || \' seconds\')::interval;' );
+	$sth->execute( $self->_pg_text_array($ips), ( defined $opts{source} ? $opts{source} : '' ), $ttl );
+
+	my %info;
+	while ( my $row = $sth->fetchrow_hashref ) {
+		# jsonb comes back inflated or as text depending on how the row was
+		# fetched, the same as shodan_cache_get.
+		my $raw = $self->_auto_decode_rule( $row->{raw} );
+		$info{ $row->{ip} } = {
+			found       => ( $row->{found}               ? 1                   : 0 ),
+			age_seconds => ( defined $row->{age_seconds} ? $row->{age_seconds} : 0 ),
+			raw         => ( ref $raw eq 'HASH'          ? $raw                : {} ),
+		};
+	} ## end while ( my $row = $sth->fetchrow_hashref )
+
+	return \%info;
+} ## end sub shodan_cache_info
+
+=head2 shodan_cache_cves
+
+Every distinct CVE id named by the C<shodan_cache> rows fetched in a window,
+sorted. What C<lilith cvedb_cache> works through: a newly cached or freshly
+refreshed address is what introduces ids worth checking the CVEDB cache for,
+and the window is what keeps a run on a timer from rescanning every row the
+table holds to find them.
+
+Takes:
+
+- C<go_back_seconds> :: how far back to read, against each row's C<fetched>
+  time. C<0> means no bound at all, for a first pass over a cache that has
+  been filling for a while. Default 360 -- twice the C<shodan_cache>
+  command's own default window, so a run of this sees everything a run of
+  that cached between the two, with room to spare.
+
+Returns an array ref of ids as strings. The ids are returned as stored --
+Shodan's are already canonical -- and it is the caller's business to drop
+anything L<Lilith::CVEDB>'s C<is_cve_id> rejects before asking the network
+about it. Dies on a non-numeric window, or if the database cannot be reached.
+
+    my $cves = $lilith->shodan_cache_cves( go_back_seconds => 1200 );
+
+=cut
+
+sub shodan_cache_cves {
+	my ( $self, %opts ) = @_;
+
+	my $seconds = defined $opts{go_back_seconds} ? $opts{go_back_seconds} : 360;
+	die( '"' . $seconds . '" for go_back_seconds is not numeric' ) if $seconds !~ /^[0-9]+$/;
+
+	my $dbh = $self->_escalation_dbh;
+	my $sth
+		= $dbh->prepare( 'select distinct unnest(vulns) as cve from shodan_cache'
+			. ( $seconds ? ' where fetched >= now() - (? || \' seconds\')::interval' : '' )
+			. ' order by cve;' );
+	$sth->execute( $seconds ? ($seconds) : () );
+
+	my @cves;
+	while ( my $row = $sth->fetchrow_hashref ) {
+		push( @cves, $row->{cve} ) if defined $row->{cve} && $row->{cve} ne '';
+	}
+
+	return \@cves;
+} ## end sub shodan_cache_cves
+
+=head2 cvedb_cache_put
+
+Store CVEDB's answer for a CVE, replacing whatever was held for it.
+
+The response is stored as it arrived rather than in the form the web renders,
+for the same reason C<shodan_cache_put> does it that way. The columns beside
+it -- cvss, epss, kev, ransomware -- are the queryable projection of that
+response and are passed in already worked out.
+
+Unlike C<shodan_cache_put> nothing is pruned on the way through: a stale row
+here is still served (CVE detail only firms up), so age is never a reason to
+drop one.
+
+Takes:
+
+- C<cve> :: the id the answer is for. Required.
+- C<raw> :: the response as a hash ref, as it arrived from
+  C<Lilith::CVEDB::fetch>. An empty hash ref is stored as C<found = false>,
+  so an id CVEDB has nothing on is not re-asked every run.
+- C<info> :: the normalized form, as C<Lilith::CVEDB::normalize> returns it.
+  Only its cvss/epss/kev/ransomware are read.
+
+Returns 1. Dies if the database cannot be reached or the statement fails.
+
+    $lilith->cvedb_cache_put( cve => 'CVE-2021-44228', raw => $raw, info => $info );
+
+=cut
+
+sub cvedb_cache_put {
+	my ( $self, %opts ) = @_;
+
+	my $cve = defined $opts{cve} ? $opts{cve} : '';
+	die('cvedb cache: a cve is required') if $cve eq '';
+
+	my $raw  = ref $opts{raw} eq 'HASH'  ? $opts{raw}  : {};
+	my $info = ref $opts{info} eq 'HASH' ? $opts{info} : {};
+
+	my $cvss = ( defined $info->{cvss} && $info->{cvss} =~ /^[0-9.]+$/ ) ? $info->{cvss} + 0 : undef;
+	my $epss = ( defined $info->{epss} && $info->{epss} =~ /^[0-9.]+$/ ) ? $info->{epss} + 0 : undef;
+
+	my $dbh = $self->_escalation_dbh;
+	my $sth
+		= $dbh->prepare( 'insert into cvedb_cache ( cve, found, fetched, cvss, epss, kev, ransomware, raw )'
+			. ' values ( ?, ?, now(), ?, ?, ?, ?, ?::jsonb )'
+			. ' on conflict (cve) do update set'
+			. ' found = excluded.found, fetched = excluded.fetched, cvss = excluded.cvss,'
+			. ' epss = excluded.epss, kev = excluded.kev, ransomware = excluded.ransomware, raw = excluded.raw;' );
+	$sth->execute(
+		$cve, ( keys %{$raw} ? 1 : 0 ),
+		$cvss, $epss,
+		( $info->{kev}        ? 1 : 0 ),
+		( $info->{ransomware} ? 1 : 0 ),
+		encode_json($raw),
+	);
+
+	return 1;
+} ## end sub cvedb_cache_put
+
+=head2 cvedb_cache_annotations
+
+The cached CVEDB summary for a set of CVE ids at once, for annotating
+wherever the web UI shows them -- one statement for a whole modal or page.
+
+Served however old the rows are: CVE detail only firms up, so a stale answer
+beats an empty chip, and freshness is C<lilith cvedb_cache>'s business rather
+than the reader's.
+
+Takes C<cves> (array ref of ids). Returns a hash ref keyed by id:
+
+    {
+      'CVE-2021-44228' => {
+        cvss       => 9.8,          # undef when never scored
+        epss       => 0.94321,      # undef when absent
+        kev        => 1,
+        ransomware => 1,
+        summary    => '...',        # '' when there is none
+        found      => 1,            # 0 for a cached "CVEDB has nothing"
+      },
+    }
+
+Ids with no row at all are absent rather than present and empty, so the
+caller can tell "never asked" from "asked, nothing known". Dies only if the
+database itself cannot be reached.
+
+    my $notes = $lilith->cvedb_cache_annotations( cves => [ 'CVE-2021-44228' ] );
+
+=cut
+
+sub cvedb_cache_annotations {
+	my ( $self, %opts ) = @_;
+
+	my $cves = ref $opts{cves} eq 'ARRAY' ? $opts{cves} : [];
+	return {} unless @{$cves};
+
+	my $dbh = $self->_escalation_dbh;
+	my $sth
+		= $dbh->prepare( 'select cve, found, cvss, epss, kev, ransomware,'
+			. ' coalesce(raw->>\'summary\', \'\') as summary'
+			. ' from cvedb_cache where cve = any(?::varchar[]);' );
+	$sth->execute( $self->_pg_text_array($cves) );
+
+	my %annotations;
+	while ( my $row = $sth->fetchrow_hashref ) {
+		$annotations{ $row->{cve} } = {
+			cvss       => $row->{cvss},
+			epss       => $row->{epss},
+			kev        => ( $row->{kev}             ? 1               : 0 ),
+			ransomware => ( $row->{ransomware}      ? 1               : 0 ),
+			summary    => ( defined $row->{summary} ? $row->{summary} : '' ),
+			found      => ( $row->{found}           ? 1               : 0 ),
+		};
+	} ## end while ( my $row = $sth->fetchrow_hashref )
+
+	return \%annotations;
+} ## end sub cvedb_cache_annotations
+
+=head2 cvedb_cache_stale
+
+Which of a set of CVE ids are due a CVEDB lookup: the ones with no row at
+all, followed by the ones whose row is older than the refresh window, oldest
+first. What C<lilith cvedb_cache> uses to decide what a run fetches -- ordered
+so that when a run is capped by C<--limit>, what it spends its lookups on is
+what the cache knows least about.
+
+Takes:
+
+- C<cves> :: array ref of ids to consider.
+- C<ttl> :: the refresh window in seconds. A row older than this is due;
+  nothing here deletes it, since a stale row is still served until its
+  replacement lands.
+
+Returns an array ref of ids. Dies on a non-numeric C<ttl>, or if the database
+cannot be reached.
+
+    my $wanted = $lilith->cvedb_cache_stale( cves => $cves, ttl => 604800 );
+
+=cut
+
+sub cvedb_cache_stale {
+	my ( $self, %opts ) = @_;
+
+	my $ttl = defined $opts{ttl} ? $opts{ttl} : '';
+	die( '"' . $ttl . '" for ttl is not numeric' ) if $ttl !~ /^[0-9]+$/;
+
+	my $cves = ref $opts{cves} eq 'ARRAY' ? $opts{cves} : [];
+	return [] unless @{$cves};
+
+	my $dbh = $self->_escalation_dbh;
+	my $sth = $dbh->prepare( 'select cve, extract(epoch from (now() - fetched)) as age'
+			. ' from cvedb_cache where cve = any(?::varchar[]);' );
+	$sth->execute( $self->_pg_text_array($cves) );
+
+	my %age;
+	while ( my $row = $sth->fetchrow_hashref ) {
+		$age{ $row->{cve} } = $row->{age};
+	}
+
+	my @missing = grep { !exists $age{$_} } @{$cves};
+	my @stale   = sort { $age{$b} <=> $age{$a} } grep { exists $age{$_} && $age{$_} > $ttl } @{$cves};
+
+	return [ @missing, @stale ];
+} ## end sub cvedb_cache_stale
 
 =head1 AUTHOR
 

@@ -3,10 +3,11 @@
 # /etc/cron.d/lilith-shodan-cache, or /usr/local/etc/cron.d/lilith-shodan-cache
 # on FreeBSD. The fifth field is the user to run as.
 #
-# Runs every five minutes. The -s 600 window only bounds how far back each
-# run reads; an address's own cache entry is what stops it being looked up
-# twice, so a window wider than the interval is safe and is what keeps an
-# alert ingested between runs from being missed. Add
+# Runs every minute, so whoever is in the web UI sees a new address's data
+# about as soon as it can exist. The -s 600 window only bounds how far back
+# each run reads; an address's own cache entry is what stops it being looked
+# up twice, so the window being much wider than the interval is safe and is
+# what covers runs that fire late or take longer than a minute. Add
 # `--config /path/to/lilith.toml` (before the subcommand) for a non default
 # config file.
 #
@@ -14,4 +15,4 @@
 # per address it has to look up. Do the first pass by hand with
 # `lilith shodan_cache -s 0 --limit 500` before installing this.
 
-*/5 * * * * lilith /usr/local/bin/lilith shodan_cache -s 600
+* * * * * lilith /usr/local/bin/lilith shodan_cache -s 600

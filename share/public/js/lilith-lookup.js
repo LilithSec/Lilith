@@ -64,25 +64,37 @@
   }
 
   // One CVE as a chip linking to its NVD entry, colored by severity and
-  // carrying Shodan's summary as its tooltip.
+  // carrying the detail that will not fit on it as its tooltip.
   //
   // Chips rather than a table because the count varies wildly — a long-lived
   // Apache host can carry over a hundred CVEs, and a hundred table rows would
-  // be the whole modal. The summary only exists on the API tier, and is long
-  // enough that a tooltip is the right place for it either way.
+  // be the whole modal.
+  //
+  // The score and summary come from Shodan on the API tier and from the CVEDB
+  // cache otherwise; kev, ransomware, and epss come from the CVEDB cache alone
+  // and are simply absent until `lilith cvedb_cache` has run. A CVE on the
+  // CISA KEV list is red whatever its score — known-exploited outranks any
+  // unexploited severity — and says KEV on the chip; EPSS and known ransomware
+  // use go in the tooltip with the summary.
   function vulnChip(container, vuln) {
     var cssClass = 'bg-secondary';
-    if (vuln.cvss !== '' && vuln.cvss >= 9)      { cssClass = 'bg-danger'; }
+    if (vuln.kev)                                { cssClass = 'bg-danger'; }
+    else if (vuln.cvss !== '' && vuln.cvss >= 9) { cssClass = 'bg-danger'; }
     else if (vuln.cvss !== '' && vuln.cvss >= 7) { cssClass = 'bg-warning text-dark'; }
 
-    var label = vuln.cve + (vuln.cvss !== '' ? ' ' + vuln.cvss : '') + (vuln.verified ? ' ✓' : '');
+    var label = vuln.cve + (vuln.cvss !== '' ? ' ' + vuln.cvss : '')
+      + (vuln.kev ? ' KEV' : '') + (vuln.verified ? ' ✓' : '');
     var linkEl = document.createElement('a');
     linkEl.className = 'badge me-1 mb-1 text-decoration-none ' + cssClass;
     linkEl.href = 'https://nvd.nist.gov/vuln/detail/' + encodeURIComponent(vuln.cve);
     linkEl.target = '_blank';
     linkEl.rel = 'noopener noreferrer';
     linkEl.textContent = label;
-    if (vuln.summary) { linkEl.title = vuln.summary; }
+    var tooltip = [];
+    if (vuln.epss !== undefined && vuln.epss !== null && vuln.epss !== '') { tooltip.push('EPSS ' + vuln.epss); }
+    if (vuln.ransomware) { tooltip.push('known ransomware use'); }
+    if (vuln.summary)    { tooltip.push(vuln.summary); }
+    if (tooltip.length)  { linkEl.title = tooltip.join(' — '); }
     container.appendChild(linkEl);
   }
 

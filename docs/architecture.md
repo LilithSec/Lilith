@@ -85,6 +85,7 @@ and `lilith migrate` commands that wrap it).
 | `receiver_apikeys`   | the EVE receiver's bearer keys — the SHA-256 of each key, its IP and instance scopes, enabled flag, last use |
 | `dashboards`         | saved dashboard boards — the widget layout and view settings as jsonb, and which board is the default |
 | `shodan_cache`       | what Shodan last said about an address — its response as jsonb, plus the ports, tags, CPEs, CVEs, and worst CVSS worth querying without opening it |
+| `cvedb_cache`        | what CVEDB last said about a CVE — its response as jsonb, plus the CVSS, EPSS, KEV flag, and ransomware flag worth querying without opening it |
 
 Each alert table also carries an `escalations bigint[]` column (the IDs of
 escalations recorded for that row, appended in the same transaction as the

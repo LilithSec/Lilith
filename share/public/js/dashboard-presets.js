@@ -130,7 +130,13 @@ var PRESETS = [
     { type: 'stat', config: { metric: 'distinct', column: 'dest_ip', label: 'Unique destinations' },         x: 8, y: 17, w: 4, h: 1 },
     { type: 'top',        config: { column: 'shodan_dest_tag' },                 x: 0, y: 18, w: 4, h: 4 },
     { type: 'top',        config: { column: 'shodan_dest_cpe' },                 x: 4, y: 18, w: 4, h: 4 },
-    { type: 'top',        config: { column: 'shodan_dest_known', style: 'pie' }, x: 8, y: 18, w: 4, h: 4 }
+    { type: 'top',        config: { column: 'shodan_dest_known', style: 'pie' }, x: 8, y: 18, w: 4, h: 4 },
+    // the correlation: rules naming a CVE the destination is cached as
+    // actually vulnerable to. 'Matched' here is the loudest thing the
+    // enrichment can say; the same comparison badges the search rows. Needs
+    // schema version 16 (the suricata cves column).
+    { type: 'top',        config: { column: 'shodan_dest_cve_match', style: 'pie' }, x: 0, y: 22, w: 4, h: 4 },
+    { type: 'timeseries', config: { group_by: 'shodan_dest_cve_match' },             x: 4, y: 22, w: 8, h: 4 }
   ] },
   // Syslog (Allani log store).
   { key: 'syslog', label: 'Syslog', widgets: [
