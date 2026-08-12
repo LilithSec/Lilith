@@ -93,6 +93,45 @@ var PRESETS = [
     { type: 'top',        config: { column: 'dest_ip', measure: 'max_score' }, x: 8, y: 17, w: 4, h: 4 },
     { type: 'timeseries', config: { measure: 'avg_score' },                    x: 0, y: 21, w: 12, h: 4 }
   ] },
+  // Shodan enrichment -- Suricata alerts cut by what Shodan knows about the
+  // hosts at either end of them, rather than by the alert's own columns.
+  //
+  // The coverage and staleness stats lead deliberately. Every other panel here
+  // describes only the addresses shodan_cache has a current answer for, so
+  // without them a board of these reads as if it covered the whole window. Run
+  // `lilith shodan_cache` on a timer to keep coverage up and staleness down.
+  //
+  // The source panels come first because on inbound traffic that is the outside
+  // host; the destination band at the bottom is what the alerts reached out to,
+  // which is where the command and control and download side shows up. On a
+  // sensor watching inbound traffic only, those panels are mostly "not looked
+  // up" -- the destination is your own asset, which is private and never sent
+  // to Shodan -- and the destination coverage stat beside them says so.
+  { key: 'shodan', label: 'Shodan (host enrichment)', table: 'suricata', widgets: [
+    { type: 'stat', config: { metric: 'shodan_src_coverage' },                                            x: 0, y: 0, w: 3, h: 1 },
+    { type: 'stat', config: { metric: 'shodan_src_staleness' },                                           x: 3, y: 0, w: 3, h: 1 },
+    { type: 'stat', config: { metric: 'total' },                                                          x: 6, y: 0, w: 2, h: 1 },
+    { type: 'stat', config: { metric: 'distinct', column: 'src_ip', label: 'Unique sources' },            x: 8, y: 0, w: 2, h: 1 },
+    { type: 'stat', config: { metric: 'distinct', column: 'shodan_src_vuln', label: 'CVEs on sources' },  x: 10, y: 0, w: 2, h: 1 },
+    { type: 'timeseries', config: { group_by: 'shodan_src_tag' },                x: 0, y: 1, w: 8, h: 4 },
+    { type: 'top',        config: { column: 'shodan_src_known', style: 'pie' },  x: 8, y: 1, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'shodan_src_tag' },                  x: 0, y: 5, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'shodan_src_vuln' },                 x: 4, y: 5, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'shodan_src_cvss', style: 'pie' },   x: 8, y: 5, w: 4, h: 4 },
+    // what the attacking hosts are themselves running -- one appliance model or
+    // one exposed service across many addresses is a botnet's fingerprint
+    { type: 'top',        config: { column: 'shodan_src_cpe' },                  x: 0, y: 9, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'shodan_src_port' },                 x: 4, y: 9, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'src_ip' },                          x: 8, y: 9, w: 4, h: 4 },
+    { type: 'timeseries', config: { group_by: 'shodan_src_known' },              x: 0, y: 13, w: 12, h: 4 },
+    // the far end
+    { type: 'stat', config: { metric: 'shodan_dest_coverage' },                                              x: 0, y: 17, w: 4, h: 1 },
+    { type: 'stat', config: { metric: 'shodan_dest_staleness' },                                             x: 4, y: 17, w: 4, h: 1 },
+    { type: 'stat', config: { metric: 'distinct', column: 'dest_ip', label: 'Unique destinations' },         x: 8, y: 17, w: 4, h: 1 },
+    { type: 'top',        config: { column: 'shodan_dest_tag' },                 x: 0, y: 18, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'shodan_dest_cpe' },                 x: 4, y: 18, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'shodan_dest_known', style: 'pie' }, x: 8, y: 18, w: 4, h: 4 }
+  ] },
   // Syslog (Allani log store).
   { key: 'syslog', label: 'Syslog', widgets: [
     { type: 'stat', config: { table: 'syslog', metric: 'total' },                                       x: 0, y: 0, w: 2, h: 1 },

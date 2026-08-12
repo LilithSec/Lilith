@@ -54,6 +54,7 @@
             <li><a class="dropdown-item" href="#" data-preset="suricata">Suricata</a></li>
             <li><a class="dropdown-item" href="#" data-preset="cape">CAPE</a></li>
             <li><a class="dropdown-item" href="#" data-preset="baphomet">Baphomet</a></li>
+            <li><a class="dropdown-item" href="#" data-preset="shodan">Shodan enrichment</a></li>
             % if ($self->allani_enabled) {
             <li><hr class="dropdown-divider"></li>
             <li><h6 class="dropdown-header">Logs (Allani)</h6></li>
@@ -122,6 +123,10 @@
             <option value="distinct">Distinct values (of a column)</option>
             <option value="escalated">Escalated count</option>
             <option value="busiest">Busiest value (of a column)</option>
+            <option value="shodan_src_coverage">Shodan coverage (sources)</option>
+            <option value="shodan_src_staleness">Shodan staleness (sources)</option>
+            <option value="shodan_dest_coverage">Shodan coverage (destinations)</option>
+            <option value="shodan_dest_staleness">Shodan staleness (destinations)</option>
           </select>
         </div>
         <div class="mb-2" id="wm-column-wrap">

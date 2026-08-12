@@ -197,7 +197,13 @@ sub index {
 
 C<GET /api/dashboard/stat?metric=&column=> -- a single number for a stat (text)
 widget, as C<< { value, label } >>. C<metric> is C<total>, C<distinct> (of
-C<column>), C<escalated>, or C<busiest> (the top value of C<column>).
+C<column>), C<escalated>, C<busiest> (the top value of C<column>), or one of the
+Shodan pair for either end -- C<shodan_src_coverage> / C<shodan_dest_coverage>
+(how many of the window's addresses on that end C<shodan_cache> has an answer
+for, which is what says how much of it the matching C<shodan_*> dimensions
+describe) and C<shodan_src_staleness> / C<shodan_dest_staleness> (how many of
+those answers are past the configured TTL, or from the other Shodan tier, and so
+would no longer be read).
 
 =cut
 
@@ -223,6 +229,36 @@ sub stat {
 					label => 'Escalated',
 				};
 			}
+			if ( $metric =~ /\Ashodan_(src|dest)_(coverage|staleness)\z/ ) {
+				my ( $side, $half ) = ( $1, $2 );
+
+				# The freshness rule is the config's, not this page's: an answer
+				# counts as held only while the reads elsewhere would still use it.
+				my $cov = $stats->shodan_coverage(
+					table           => $table,
+					go_back_minutes => $mins,
+					side            => $side,
+					ttl             => $self->shodan_cache_ttl,
+					source          => $self->shodan_source,
+					@filter,
+				);
+				my $end = ( $side eq 'src' ) ? 'sources' : 'destinations';
+
+				# both halves, not just the percentage: 60% of five addresses and
+				# 60% of five thousand are not the same statement about how much
+				# the enrichment panels beside it describe
+				if ( $half eq 'staleness' ) {
+					return {
+						value => $cov->{stale_percent} . '% (' . $cov->{stale} . '/' . $cov->{enriched} . ')',
+						label => 'Shodan staleness (' . $end . ')',
+					};
+				}
+
+				return {
+					value => $cov->{percent} . '% (' . $cov->{enriched} . '/' . $cov->{addresses} . ')',
+					label => 'Shodan coverage (' . $end . ')',
+				};
+			} ## end if ( $metric =~ /\Ashodan_(src|dest)_(coverage|staleness)\z/)
 			if ( $metric eq 'busiest' ) {
 				my $rows
 					= $stats->top( table => $table, column => $column, limit => 1, go_back_minutes => $mins, @filter );
@@ -462,7 +498,8 @@ sub layout_save {
 					$cfg{$k} = '' . $v if $v =~ /\A(?:suricata|sagan|cape|baphomet|syslog|http|http_error)\z/;
 				} elsif ( $k eq 'metric' ) {
 					# the stat (text) widget's metric; invalid values are dropped
-					$cfg{$k} = '' . $v if $v =~ /\A(?:total|distinct|escalated|busiest)\z/;
+					$cfg{$k} = '' . $v
+						if $v =~ /\A(?:total|distinct|escalated|busiest|shodan_(?:src|dest)_(?:coverage|staleness))\z/;
 				} elsif ( $k eq 'label' ) {
 					$cfg{$k} = substr( '' . $v, 0, 60 );
 				} elsif ( $k eq 'abbrev' ) {

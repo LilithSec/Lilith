@@ -53,7 +53,8 @@ editing controls:
 - **+ Add widget** :: opens the widget picker (see below).
 - **Reset to…** :: replaces this board's widgets with a built-in **preset**
   (after a confirm). The menu offers **Suricata** (the SIEM overview seeded on
-  the default board), **CAPE**, and **Baphomet** (a judgments overview); when an
+  the default board), **CAPE**, **Baphomet** (a judgments overview), and
+  **Shodan enrichment** (see [below](#shodan-enrichment)); when an
   [Allani](#allani-log-widgets) store is
   configured it also offers **Syslog**, **HTTP (access + error)** — a combined
   overview — **HTTP Access**, and **HTTP Error**. An alert preset also points the
@@ -82,7 +83,9 @@ widget set below).
   GeoIP databases (needs an MMDB configured, see [configuration](configuration.md);
   otherwise the panel notes it is unavailable).
 - **Stat (text)** :: a single big number: the **Total** count, **Distinct** values
-  of a column, **Escalated** count, or the **Busiest** value of a column, with an
+  of a column, **Escalated** count, the **Busiest** value of a column, or
+  **Shodan coverage** / **Shodan staleness** for either end (see
+  [below](#shodan-enrichment)), with an
   optional custom label (defaulting from the metric). Numbers are shown in full
   with thousands separators by default; tick **Abbreviate large numbers** to
   shorten them (2010 → 2k) instead. The row of numbers at the
@@ -109,6 +112,82 @@ aggregate, instead of just counting rows:
 - **Average / Max score, Distinct source / destination IPs** (Baphomet) :: so
   "Top values of `src_ip` by Max score" ranks the worst offenders by their
   harshest judgment.
+
+## Shodan enrichment
+
+Alongside the columns an alert carries, Suricata, Sagan, and Baphomet offer
+columns describing the *hosts at either end of it*, read from the
+`shodan_cache` table by matching on `src_ip` and `dest_ip`. The charts keep
+alert volume and time on the axes and cut them by what those hosts are:
+
+- `shodan_src_tag` :: Shodan's tags for the host — `compromised`, `scanner`,
+  `vpn`, `tor`, and the rest.
+- `shodan_src_vuln` :: the CVEs Shodan attributes to it.
+- `shodan_src_cpe` :: what it is running. One appliance model or one exposed
+  service across many addresses is a botnet's fingerprint.
+- `shodan_src_port` :: what it has open.
+- `shodan_src_known` :: *Known to Shodan* / *Not on Shodan* (crawled, nothing
+  there) / *Not looked up*.
+- `shodan_src_cvss` :: the worst CVSS against the host, banded *Critical (9+)* /
+  *High* / *Medium* / *Low* / *None known* / *Not looked up*, ordered
+  worst-first rather than by count.
+
+Each has a `shodan_dest_*` twin reading `dest_ip` — same six, same meanings, the
+far end of the alert. Which end an outside host lands on is up to the rule that
+fired, so a source-only board hides everything about traffic going the other
+way: on inbound alerts the source is the attacker, while the destination is what
+was reached out to, which is where the command-and-control and download side
+shows up. The two are separate joins, so a board can panel both at once.
+
+Expect the destination panels to read mostly *Not looked up* on a sensor
+watching inbound traffic: there the destination is your own asset, which is a
+private address, and Lilith never sends those to Shodan. The destination
+coverage stat below says so plainly rather than leaving it to be guessed at.
+
+CAPE is offered none of them: a detonation's `src_ip` is whoever submitted the
+sample, not an offender. The columns appear in the pickers only when the
+database has the `shodan_cache` table (schema version 15).
+
+### Coverage and staleness
+
+The cache holds what has been looked up — addresses someone opened the IP info
+modal for, plus whatever `lilith shodan_cache` has warmed — so **an enrichment
+panel describes that subset, not the whole window**. Four stat metrics say how
+much of a subset, a pair per end, and the matching pair belongs on any board of
+these; the built-in preset leads each of its two halves with one.
+
+- **Shodan coverage (sources)** / **(destinations)** :: reads `62% (124/200)` —
+  the window's distinct addresses on that end, and how many of them the cache
+  answers for at all.
+- **Shodan staleness (sources)** / **(destinations)** :: reads `12% (15/124)` —
+  of those answers, how many have gone off. An answer is stale once it is older
+  than `shodan_cache_ttl`, and also when it came from the other Shodan tier (a
+  keyless summary once an API key is configured, or the reverse), the two
+  differing too much in depth for one to stand in for the other. That is the
+  same rule the IP info modal and the results-table badges read by, so a stale
+  answer is one nothing else would use either. With `shodan_cache_ttl = 0` —
+  caching off — everything reads as stale, which is what it is.
+
+The two ends are counted separately because they are cached to very different
+depths — `lilith shodan_cache` warms both, but only the public addresses among
+them, and on inbound traffic the destinations are not public.
+
+Run `lilith shodan_cache` on a timer to raise the coverage numbers and hold the
+staleness ones down — see [configuration](configuration.md#shodan). The
+dashboard only ever reads the cache, so no widget costs a lookup, and none of
+these numbers goes anywhere on its own.
+
+Two things to read the charts by:
+
+- `tag`, `vuln`, `cpe`, and `port` — either end — come from lists, so **one
+  alert counts once per value** and the slices sum to more than the alert
+  total. An address with nothing cached drops out of these entirely.
+- `known` and `cvss` keep every alert, putting the addresses with nothing cached
+  in their own bucket.
+
+Either way an alert that names no address on the end being read — a Baphomet
+judgment passed on a username, or an alert with no destination — is left out,
+there being nothing to describe.
 
 ## Allani log widgets
 
@@ -141,6 +220,10 @@ selected table (e.g. `classification` on CAPE) simply notes so.
 | Alert evolution by severity/class | Alerts over time | group by `severity` / `classification` |
 | Sagan programs / facilities | Top values | `program`, `facility` |
 | Sagan priority / level | Top values | `priority`, `level` |
+| What the sources are tagged as | Top values | `shodan_src_tag` |
+| CVEs / software on the sources | Top values | `shodan_src_vuln`, `shodan_src_cpe` |
+| Alerts from crawled vs unseen hosts | Alerts over time | group by `shodan_src_known` |
+| What the alerts reached out to | Top values | `shodan_dest_tag`, `shodan_dest_cpe` |
 
 ### CAPE
 

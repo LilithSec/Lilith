@@ -29,6 +29,14 @@
   function isLogSource(source) { return !!LOG_SOURCES[source]; }
   function apiBase(source) { return isLogSource(source) ? '/api/logs' : '/api/dashboard'; }
   var PALETTE = ['#dc3545','#0d6efd','#fd7e14','#20c997','#6f42c1','#ffc107','#0dcaf0','#d63384','#198754','#adb5bd'];
+  // The Shodan stat metrics and the titles they default to. Each reads as a
+  // "percent (of)" string rather than a number, so none of them abbreviates.
+  var SHODAN_METRIC = {
+    shodan_src_coverage:   'Shodan coverage (sources)',
+    shodan_src_staleness:  'Shodan staleness (sources)',
+    shodan_dest_coverage:  'Shodan coverage (destinations)',
+    shodan_dest_staleness: 'Shodan staleness (destinations)'
+  };
 
   // Built-in dashboard presets the Reset menu offers. Each is a list of ordinary
   // widgets, so anything seeded can still be reconfigured, moved, or removed. An
@@ -136,9 +144,11 @@
     if (widget.type === 'stat') {
       if (widget.config.label) { return widget.config.label; }
       var metric = widget.config.metric || 'total';
+      var shodanMetric = SHODAN_METRIC[metric];
       var label = metric === 'distinct'  ? ('Unique ' + (widget.config.column || '')) :
                 metric === 'escalated' ? 'Escalated' :
                 metric === 'busiest'   ? ('Busiest ' + (widget.config.column || '')) :
+                shodanMetric ? shodanMetric :
                 (isLogSource(widgetTable) ? 'Total rows' : 'Total alerts');
       return label + suffix;
     }
@@ -386,8 +396,10 @@
     var statNeedsColumn = isStat && (metric === 'distinct' || metric === 'busiest');
     document.getElementById('wm-metric-wrap').style.display = isStat ? '' : 'none';
     document.getElementById('wm-label-wrap').style.display  = isStat ? '' : 'none';
-    // abbreviation only applies to numeric metrics; busiest is a "value (count)" string
-    document.getElementById('wm-abbrev-wrap').style.display = (isStat && metric !== 'busiest') ? '' : 'none';
+    // abbreviation only applies to numeric metrics; busiest is a "value (count)"
+    // string and the Shodan ones "percent (of)" ones
+    var isTextMetric = (metric === 'busiest' || !!SHODAN_METRIC[metric]);
+    document.getElementById('wm-abbrev-wrap').style.display = (isStat && !isTextMetric) ? '' : 'none';
     document.getElementById('wm-column-wrap').style.display = (type === 'top' || statNeedsColumn) ? '' : 'none';
     document.getElementById('wm-style-wrap').style.display   = (type === 'top') ? '' : 'none';
     document.getElementById('wm-limit-wrap').style.display   = (type === 'top') ? '' : 'none';
@@ -459,7 +471,8 @@
       if (metric === 'distinct' || metric === 'busiest') { config.column = document.getElementById('wm-column').value; }
       var label = document.getElementById('wm-label').value.trim();
       if (label) { config.label = label; }
-      if (metric !== 'busiest' && document.getElementById('wm-abbrev').checked) { config.abbrev = 1; }
+      if (metric !== 'busiest' && !SHODAN_METRIC[metric]
+          && document.getElementById('wm-abbrev').checked) { config.abbrev = 1; }
     }
     // a concrete table pins the widget (even if it equals the current default);
     // the empty "Follow default table" option leaves it following the board

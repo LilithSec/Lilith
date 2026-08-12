@@ -60,6 +60,17 @@ use_ok('Lilith::Stats') or BAIL_OUT('Lilith::Stats failed to load');
 		'columns(baphomet) lists the reused dimensions' );
 	ok( !$bc{raw}, 'columns(baphomet) omits non-dimension columns' );
 
+	# Shodan enrichment. cape is not enriched, so shodan_src_tag is simply not one of
+	# its columns and is refused before anything reaches the database. On the
+	# tables that are enriched, whether the columns are offered depends on the
+	# shodan_cache table being there, which cannot be checked with the database
+	# down -- so they are left out rather than offered and then failing.
+	eval { $s->top( table => 'cape', column => 'shodan_src_tag' ) };
+	like( $@, qr/not an aggregatable column/, 'an enrichment column is refused for cape' );
+	ok( !$sc{shodan_src_tag}, 'enrichment columns are omitted when the database cannot be asked about shodan_cache' );
+	eval { $s->shodan_coverage( table => 'cape' ) };
+	like( $@, qr/no Shodan enrichment/, 'shodan_coverage is refused for cape' );
+
 	# measures() catalog (no database).
 	my %sm = map { $_->{name} => $_->{label} } @{ $s->measures('suricata') };
 	ok( $sm{count} && $sm{bytes} && $sm{distinct_dest_port}, 'suricata measures include count/bytes/fan-out' );
@@ -339,6 +350,203 @@ SKIP: {
 	is( $s->escalated( table => 'baphomet' ), 0, 'no baphomet rows escalated yet' );
 	$dbh->do("update baphomet_alerts set escalations = '{1}' where event_type = 'found'");
 	is( $s->escalated( table => 'baphomet' ), 1, 'escalated counts the flagged baphomet row' );
+
+	# ---- shodan enrichment ------------------------------------------------
+	# Alerts cut by what shodan_cache holds about the addresses at either end. A
+	# fresh database keeps the counts clean.
+	#
+	# sources:
+	#   203.0.113.1  3 alerts, cached: tags compromised + scanner, one CVE at 9.5
+	#   203.0.113.2  2 alerts, cached: tag vpn, no vulns
+	#   203.0.113.3  1 alert,  cached as never crawled (found false)
+	#   198.51.100.9 1 alert,  no cache row at all
+	#
+	# destinations: 192.0.2.50 on the first five, cached; 192.0.2.51 on the
+	# sixth, uncached; and the seventh names none at all.
+	my $edsn = $pg->create_db('lilith_enrich');
+	my $ed   = $pg->dbh($edsn);
+	DBIx::Class::Migration->new( schema_class => 'Lilith::Schema', schema_args => [ $edsn, $pg->user, $pg->pass ] )
+		->install;
+
+	my @ends = (
+		( [ '203.0.113.1', '192.0.2.50' ] ) x 3,
+		( [ '203.0.113.2', '192.0.2.50' ] ) x 2,
+		[ '203.0.113.3',  '192.0.2.51' ],
+		[ '198.51.100.9', undef ],
+	);
+	for my $end (@ends) {
+		$ed->do(
+			"insert into suricata_alerts (instance,host,timestamp,event_id,src_ip,dest_ip,classification)"
+				. " values ('i','h', now(), 'e', ?, ?, 'A')",
+			undef, @{$end}
+		);
+	}
+	my @cache = (
+		[ '203.0.113.1', 1, '{compromised,scanner}', '{CVE-2021-1}', '{22,80}', '{cpe:/a:vendor:thing}', '9.5' ],
+		[ '203.0.113.2', 1, '{vpn}',                 '{}',           '{443}',   '{}',                    undef ],
+		[ '203.0.113.3', 0, undef,                   undef,          undef,     undef,                   undef ],
+		[ '192.0.2.50',  1, '{cloud}',               '{}',           '{443}',   '{cpe:/a:vendor:web}',   undef ],
+	);
+	for my $c (@cache) {
+		$ed->do(
+			"insert into shodan_cache (ip,source,found,fetched,tags,vulns,ports,cpes,max_cvss)"
+				. " values (?, 'api', ?, now(), ?, ?, ?, ?, ?)",
+			undef, @$c
+		);
+	}
+
+	my $es = Lilith::Stats->new( dsn => $edsn, user => $pg->user, pass => $pg->pass );
+
+	my %ec = map { $_ => 1 } @{ $es->columns('suricata') };
+	ok(
+		$ec{shodan_src_tag}
+			&& $ec{shodan_src_vuln}
+			&& $ec{shodan_src_cpe}
+			&& $ec{shodan_src_port}
+			&& $ec{shodan_src_known}
+			&& $ec{shodan_src_cvss},
+		'enrichment columns are offered once the database has shodan_cache'
+	);
+	ok(
+		$ec{shodan_dest_tag}
+			&& $ec{shodan_dest_vuln}
+			&& $ec{shodan_dest_cpe}
+			&& $ec{shodan_dest_port}
+			&& $ec{shodan_dest_known}
+			&& $ec{shodan_dest_cvss},
+		'and the same set for the far end'
+	);
+	my %ecc = map { $_ => 1 } @{ $es->columns('cape') };
+	ok( !$ecc{shodan_src_tag} && !$ecc{shodan_dest_tag}, 'cape is not offered enrichment columns even so' );
+
+	# An array dimension counts an alert once per element, so the three alerts
+	# from a doubly tagged address land under both of its tags.
+	is_deeply(
+		$es->top( table => 'suricata', column => 'shodan_src_tag' ),
+		[
+			{ value => 'compromised', count => 3 },
+			{ value => 'scanner',     count => 3 },
+			{ value => 'vpn',         count => 2 }
+		],
+		'top shodan_src_tag unnests the tags of each alert\'s source'
+	);
+	is_deeply(
+		$es->top( table => 'suricata', column => 'shodan_src_port' ),
+		[ { value => '22', count => 3 }, { value => '80', count => 3 }, { value => '443', count => 2 } ],
+		'top shodan_src_port renders the integer array as text'
+	);
+	is_deeply(
+		$es->top( table => 'suricata', column => 'shodan_src_cpe' ),
+		[ { value => 'cpe:/a:vendor:thing', count => 3 } ],
+		'top shodan_src_cpe covers only the sources that have one'
+	);
+	is( $es->distinct( table => 'suricata', column => 'shodan_src_vuln' ),
+		1, 'distinct shodan_src_vuln counts the CVEs seen' );
+	is( $es->distinct( table => 'suricata', column => 'shodan_src_tag' ),
+		3, 'distinct shodan_src_tag counts the tags seen' );
+
+	# A scalar dimension joins outward, so every alert lands somewhere -- and
+	# orders by its own rank rather than by count.
+	is_deeply(
+		$es->top( table => 'suricata', column => 'shodan_src_known' ),
+		[
+			{ value => 'Known to Shodan', count => 5 },
+			{ value => 'Not on Shodan',   count => 1 },
+			{ value => 'Not looked up',   count => 1 }
+		],
+		'top shodan_src_known accounts for every alert, ordered by rank'
+	);
+	is_deeply(
+		$es->top( table => 'suricata', column => 'shodan_src_cvss' ),
+		[
+			{ value => 'Critical (9+)', count => 3 },
+			{ value => 'None known',    count => 3 },
+			{ value => 'Not looked up', count => 1 }
+		],
+		'top shodan_src_cvss bands the worst CVSS of each source, worst first'
+	);
+
+	# The far end is enriched from the same cache by its own join, so the two
+	# sides of one alert answer differently -- and an alert naming no
+	# destination drops out of a destination panel the way a source-less one
+	# does out of a source panel.
+	is_deeply(
+		$es->top( table => 'suricata', column => 'shodan_dest_tag' ),
+		[ { value => 'cloud', count => 5 } ],
+		'top shodan_dest_tag reads the tags of what the alerts reached'
+	);
+	is_deeply(
+		$es->top( table => 'suricata', column => 'shodan_dest_known' ),
+		[ { value => 'Known to Shodan', count => 5 }, { value => 'Not looked up', count => 1 } ],
+		'top shodan_dest_known leaves out the alert that names no destination'
+	);
+	is_deeply(
+		$es->top( table => 'suricata', column => 'shodan_dest_cpe' ),
+		[ { value => 'cpe:/a:vendor:web', count => 5 } ],
+		'the two sides of the same alert resolve to different hosts'
+	);
+
+	# coverage: three of the four distinct sources have a cache row, and all
+	# three were just written, so none of them has gone off yet
+	is_deeply(
+		$es->shodan_coverage( table => 'suricata' ),
+		{ addresses => 4, enriched => 3, percent => 75, stale => 0, stale_percent => 0 },
+		'shodan_coverage counts the enriched share of the window\'s sources'
+	);
+	is_deeply(
+		$es->shodan_coverage( table => 'suricata', side => 'dest' ),
+		{ addresses => 2, enriched => 1, percent => 50, stale => 0, stale_percent => 0 },
+		'side => dest counts the same for the far end'
+	);
+	eval { $es->shodan_coverage( table => 'suricata', side => 'either' ) };
+	like( $@, qr/is not a known side/, 'an unknown side dies' );
+
+	# staleness follows the same rule the reads do: past the TTL, or from the
+	# other tier than the one now configured.
+	$ed->do("update shodan_cache set fetched = now() - interval '40 days' where ip = '203.0.113.1'");
+	my $aged = $es->shodan_coverage( table => 'suricata', ttl => 2592000 );
+	is( $aged->{stale},         1,  'an answer past the TTL is stale' );
+	is( $aged->{stale_percent}, 33, 'stale_percent is of the answers held, not of the sources' );
+	is( $es->shodan_coverage( table => 'suricata', ttl => 5184000 )->{stale},
+		0, 'a longer TTL leaves the same answer standing' );
+	is( $es->shodan_coverage( table => 'suricata', ttl => 0 )->{stale_percent},
+		100, 'caching turned off leaves every answer stale' );
+	is( $es->shodan_coverage( table => 'suricata', source => 'internetdb' )->{stale},
+		3, 'every answer is stale against the tier it was not written by' );
+	is( $es->shodan_coverage( table => 'suricata', source => 'api' )->{stale},
+		1, 'and only the aged one against the tier it was' );
+	eval { $es->shodan_coverage( table => 'suricata', ttl => 'soon' ) };
+	like( $@, qr/for ttl is not a non-negative integer/, 'a non-numeric ttl dies' );
+	$ed->do("update shodan_cache set fetched = now() where ip = '203.0.113.1'");
+
+	# the timeseries splits the same way, and the array split is the one that
+	# sums past the alert total
+	my $known_ts    = $es->timeseries( table => 'suricata', bucket => 'hour', group_by => 'shodan_src_known' );
+	my $known_total = 0;
+	$known_total += $_->{count} for @$known_ts;
+	is( $known_total, 7, 'a shodan_src_known timeseries covers every alert' );
+	my $tag_ts    = $es->timeseries( table => 'suricata', bucket => 'hour', group_by => 'shodan_src_tag' );
+	my $tag_total = 0;
+	$tag_total += $_->{count} for @$tag_ts;
+	is( $tag_total, 8, 'a shodan_src_tag timeseries counts an alert once per tag' );
+
+	# a judgment naming no address has nothing for Shodan to describe, so it is
+	# left out rather than counted as one that was never looked up
+	$ed->do(  "insert into baphomet_alerts (instance,host,timestamp,event_id,event_type,src_ip,username,score,raw)"
+			. " values ('k','h', now(), 'e', 'banish', '203.0.113.1', NULL, 5, '{}')" );
+	$ed->do(  "insert into baphomet_alerts (instance,host,timestamp,event_id,event_type,src_ip,username,score,raw)"
+			. " values ('k','h', now(), 'e', 'sighted', NULL, 'baduser', 2, '{}')" );
+	is_deeply(
+		$es->top( table => 'baphomet', column => 'shodan_src_known' ),
+		[ { value => 'Known to Shodan', count => 1 } ],
+		'a judgment with no source address is left out of an enrichment panel'
+	);
+	is_deeply(
+		$es->shodan_coverage( table => 'baphomet' ),
+		{ addresses => 1, enriched => 1, percent => 100, stale => 0, stale_percent => 0 },
+		'shodan_coverage counts only the judgments that name an address'
+	);
+	$ed->disconnect;
 
 	$dbh->disconnect;
 	$pg->stop;

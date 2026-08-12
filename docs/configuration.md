@@ -48,8 +48,11 @@ why these sit outside the web-only settings below. All optional.
 
 The badges on the results tables read this cache and never trigger a
 lookup, so on their own they only appear for addresses someone has already
-opened the modal for. Run `lilith shodan_cache` on a timer to fill it
-ahead of time; see [usage](usage.md).
+opened the modal for. The dashboard's Shodan panels — alerts cut by what
+Shodan knows about the hosts at either end of them — read it the same way,
+and describe only the addresses it holds; see
+[dashboard](dashboard.md#shodan-enrichment). Run `lilith shodan_cache` on a
+timer to fill it ahead of time; see [usage](usage.md).
 
 ### The web frontend
 

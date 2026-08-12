@@ -58,6 +58,13 @@ sub app_for {
 		->element_exists( '[data-preset="suricata"]',                         'reset menu offers the Suricata preset' )
 		->element_exists( '[data-preset="cape"]',                             'reset menu offers the CAPE preset' )
 		->element_exists( '[data-preset="baphomet"]',                         'reset menu offers the Baphomet preset' )
+		->element_exists( '[data-preset="shodan"]', 'reset menu offers the Shodan enrichment preset' )
+		->element_exists( '#wm-metric option[value="shodan_src_coverage"]',
+			'stat widget offers the Shodan coverage metric' )
+		->element_exists( '#wm-metric option[value="shodan_src_staleness"]',
+			'stat widget offers the Shodan staleness metric' )
+		->element_exists( '#wm-metric option[value="shodan_dest_coverage"]',  'and both of them for the far end' )
+		->element_exists( '#wm-metric option[value="shodan_dest_staleness"]', 'staleness included' )
 		->element_exists_not( '[data-preset="syslog"]', 'no log presets in the reset menu without Allani' )
 		->element_exists( 'select#db-board',                                  'has the dashboard selector' )
 		->element_exists( '#db-edit',                                         'has the Edit toggle' )
@@ -215,6 +222,65 @@ SKIP: {
 	$t->get_ok('/api/dashboard/stat?table=suricata&metric=total')->json_is( '/value', 3, 'GPCD hidden by default' );
 	$t->get_ok('/api/dashboard/stat?table=suricata&metric=total&show_gpcd=1')
 		->json_is( '/value', 4, 'GPCD included when show_gpcd=1' );
+
+	# Shodan enrichment: the shodan_* dimensions are offered for the tables that
+	# name an outside host, and the coverage metric says how much of the window
+	# they actually describe -- nothing at all until something has been looked up.
+	$t->get_ok('/api/dashboard/columns?table=suricata')
+		->status_is( 200, 'columns ok' )
+		->json_has( '/columns', 'columns returns a list' );
+	my %cols = map { $_ => 1 } @{ $t->tx->res->json->{columns} };
+	ok( $cols{shodan_src_tag}  && $cols{shodan_src_known},  'the picker is offered the enrichment columns' );
+	ok( $cols{shodan_dest_tag} && $cols{shodan_dest_known}, 'for both ends' );
+	$t->get_ok('/api/dashboard/columns?table=cape')->status_is( 200, 'cape columns ok' );
+	my %ccols = map { $_ => 1 } @{ $t->tx->res->json->{columns} };
+	ok( !$ccols{shodan_src_tag} && !$ccols{shodan_dest_tag}, 'cape is offered none of them' );
+
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=shodan_src_coverage')
+		->status_is( 200, 'stat shodan_src_coverage ok' )
+		->json_is( '/value', '0% (0/2)',                  'no source looked up yet' )
+		->json_is( '/label', 'Shodan coverage (sources)', 'stat shodan_src_coverage label' );
+	# internetdb, that being the tier a config with no API key selects and so the
+	# only one whose rows this app would read
+	$dbh->do( "insert into shodan_cache (ip,source,found,fetched,tags)"
+			. " values ('1.1.1.1', 'internetdb', true, now(), '{scanner}')" );
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=shodan_src_coverage')
+		->json_is( '/value', '50% (1/2)', 'coverage follows what the cache holds' );
+
+	# staleness is of the answers held, against the configured TTL and tier: a
+	# row just written by the tier in use stands, one a month older does not.
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=shodan_src_staleness')
+		->status_is( 200, 'stat shodan_src_staleness ok' )
+		->json_is( '/value', '0% (0/1)',                   'a fresh answer is not stale' )
+		->json_is( '/label', 'Shodan staleness (sources)', 'stat shodan_src_staleness label' );
+	$dbh->do("update shodan_cache set fetched = now() - interval '60 days' where ip = '1.1.1.1'");
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=shodan_src_staleness')
+		->json_is( '/value', '100% (1/1)', 'an answer past the default TTL is stale' );
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=shodan_src_coverage')
+		->json_is( '/value', '50% (1/2)', 'a stale answer is still one the cache holds' );
+	$dbh->do("update shodan_cache set fetched = now(), source = 'api' where ip = '1.1.1.1'");
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=shodan_src_staleness')
+		->json_is( '/value', '100% (1/1)', 'so is a fresh one from the tier this config does not read' );
+	$dbh->do("update shodan_cache set source = 'internetdb' where ip = '1.1.1.1'");
+
+	# the far end is counted on its own: these alerts carry no dest_ip at all,
+	# so there is nothing there to have looked up
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=shodan_dest_coverage')
+		->status_is( 200, 'stat shodan_dest_coverage ok' )
+		->json_is( '/value', '0% (0/0)',                       'no destination named by these alerts' )
+		->json_is( '/label', 'Shodan coverage (destinations)', 'stat shodan_dest_coverage label' );
+	$dbh->do( "insert into suricata_alerts (instance,host,timestamp,event_id,src_ip,dest_ip,classification)"
+			. " values ('i','h', now(), 'e', '4.4.4.4', '1.1.1.1', 'A')" );
+	$t->get_ok('/api/dashboard/stat?table=suricata&metric=shodan_dest_coverage')
+		->json_is( '/value', '100% (1/1)', 'a destination the cache holds counts on the far side' );
+	$t->get_ok('/api/dashboard/top?table=suricata&column=shodan_dest_tag')
+		->status_is( 200, 'top shodan_dest_tag ok' )
+		->json_is( '/rows/0/value', 'scanner', 'and its tags panel reads that end' );
+	$t->get_ok('/api/dashboard/top?table=suricata&column=shodan_src_known')
+		->status_is( 200, 'top shodan_src_known ok' )
+		->json_is( '/rows/0/value', 'Known to Shodan', 'the looked-up source leads' )
+		->json_is( '/rows/0/count', 2,                 'with its alerts' )
+		->json_is( '/rows/1/value', 'Not looked up',   'the rest fall in their own bucket' );
 
 	# Layout persistence: the seeded default board is empty; a POST is stored and
 	# read back (exercises Lilith::dashboard_get/save and the version-6 table).
