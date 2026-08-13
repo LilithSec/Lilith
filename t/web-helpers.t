@@ -461,6 +461,7 @@ SKIP: {
 	is( $app->shodan_api_key(),   '',           'a key is optional -- without one the keyless tier is used' );
 	is( $app->shodan_source(),    'internetdb', 'no key selects the keyless tier' );
 	is( $app->shodan_cache_ttl(), 2592000,      'the cache ttl defaults to a month' );
+	is( $app->shodan_history(),   0,            'history is off unless asked for' );
 }
 
 {
@@ -469,6 +470,7 @@ SKIP: {
 	print $fh "enable_shodan = true\n";
 	print $fh qq{shodan_api_key = "abc123"\n};
 	print $fh "shodan_cache_ttl = 900\n";
+	print $fh "shodan_history = true\n";
 	close $fh;
 
 	local $ENV{LILITH_CONFIG} = $cf;
@@ -477,6 +479,7 @@ SKIP: {
 	is( $app->shodan_api_key(),   'abc123', 'shodan_api_key is read from the config' );
 	is( $app->shodan_source(),    'api',    'a key selects the host API tier' );
 	is( $app->shodan_cache_ttl(), 900,      'shodan_cache_ttl is read from the config' );
+	is( $app->shodan_history(),   1,        'shodan_history = true turns history on' );
 
 	# The tags that change what an alert means are coloured on the results
 	# tables; everything else Shodan tags a host with stays grey.
@@ -489,6 +492,19 @@ SKIP: {
 	# that names no addresses, which is what keeps it off the unconfigured ones.
 	is_deeply( $app->shodan_badges( [] ),  {}, 'no results means no badge lookup' );
 	is_deeply( $app->shodan_badges(undef), {}, 'no result set at all means no badge lookup' );
+
+	# the TOML parser yields booleans as the strings 'true'/'false' -- both
+	# truthy in Perl -- so the history switch coerces like cape_enable does
+	{
+		my ( $false_fh, $false_cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+		print $false_fh "dsn = \"dbi:Pg:dbname=test\"\n";
+		print $false_fh "shodan_history = false\n";
+		close $false_fh;
+
+		local $ENV{LILITH_CONFIG} = $false_cf;
+		my $false_app = Test::Mojo->new('Lilith::Web')->app;
+		is( $false_app->shodan_history(), 0, 'shodan_history = false reads as off' );
+	}
 
 	# cve_matches -- the rule's ids against the badges' vuln_ids, which is the
 	# whole CVE-match comparison the results table badges by. Pure, so no
@@ -524,12 +540,20 @@ SKIP: {
 			dest_ip => '198.51.100.9',
 			raw     => Mojo::JSON::encode_json( { alert => { signature => 'no ids' } } )
 		},
+
+		# the cached-vulnerable host on the source end: which end it lands on
+		# is up to the rule that fired, so both are compared
+		{
+			id     => 5,
+			src_ip => '198.51.100.9',
+			raw    => Mojo::JSON::encode_json( { alert => { metadata => { cve => ['CVE-2020-1472'] } } } ),
+		},
 	];
 
 	is_deeply(
 		$app->cve_matches( 'suricata', $rows, $badges ),
-		{ 1 => ['CVE-2021-44228'] },
-		'only the row whose rule names a CVE its destination is cached as vulnerable to matches'
+		{ 1 => { dest => ['CVE-2021-44228'] }, 5 => { src => ['CVE-2020-1472'] } },
+		'each row matches on the end whose cached entry carries a rule CVE'
 	);
 	is_deeply( $app->cve_matches( 'sagan',    $rows, $badges ), {}, 'only suricata rules carry CVE metadata' );
 	is_deeply( $app->cve_matches( 'suricata', $rows, {} ),      {}, 'no badges, no matches' );
@@ -547,7 +571,7 @@ SKIP: {
 			],
 			$badges
 		),
-		{ 9 => ['CVE-2020-1472'] },
+		{ 9 => { dest => ['CVE-2020-1472'] } },
 		'a decoded raw is read as it stands'
 	);
 }

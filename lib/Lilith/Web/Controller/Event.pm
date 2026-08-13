@@ -86,8 +86,8 @@ sub view {
 		= ( $table eq 'cape' && $event && $self->cape_results_for( $event->{instance} ) ) ? 1 : 0;
 
 	# What the Shodan cache holds for each end of the flow, rendered as a
-	# summary line per end, and -- the loud one -- whether the rule names a CVE
-	# the destination is cached as vulnerable to. Cache only, never a lookup;
+	# summary line per end, and -- the loud one -- whether the rule names a
+	# CVE either end is cached as vulnerable to. Cache only, never a lookup;
 	# the modal stays the place the full detail lives.
 	my ( $shodan_strip, $cve_match ) = $self->_shodan_strip( $table, $event );
 
@@ -121,19 +121,22 @@ sub view {
 # where it holds one, the same way the search badges coalesce. One read covers
 # both ends and the matched ids' KEV flags.
 #
-# The match itself -- the rule naming a CVE the destination's entry lists it
-# as vulnerable to -- is suricata only, since only suricata rules carry CVE
+# The match itself -- the rule naming a CVE an end's entry lists it as
+# vulnerable to -- is suricata only, since only suricata rules carry CVE
 # metadata. It is the same comparison the search page's cve_matches helper
-# makes; here the ids come annotated so the banner can say how bad.
+# makes; here the ids come annotated so the banner can say how bad. Both
+# ends are compared, like everything else here: src and dest are the
+# triggering packet's direction, not attacker and victim, so which end the
+# vulnerable host lands on is up to the rule that fired.
 #
 # Args:
 #
 #   - $table :: the table the event is from. cape gets nothing -- its
-#     addresses are the submitter's, not an attacker's, the same reasoning
+#     addresses are the submitter's, not an offender's, the same reasoning
 #     that keeps it out of the dashboard's enrichment dimensions.
 #
 #   - $event :: the loaded event row, raw already decoded, as _load_event
-#     returns it. Its src_ip, dest_ip, and raw are read.
+#     returns it. Its addresses, ports, proto, and raw are read.
 #
 # Returns: two values, the strip and the match.
 #
@@ -147,11 +150,24 @@ sub view {
 #         info       => {...},      # Lilith::Shodan::normalize output
 #         vuln_count => 3,
 #         worst_cvss => 9.8,        # undef when nothing anywhere scored them
+#
+#         # only when the flow names a port at this end:
+#         flow_port     => 80,            # that port, for the labels
+#         port_open     => 1,             # it is on the entry's open list
+#         service       => {...},         # normalize's block for that port
+#         service_label => 'nginx 1.18',  # what to call it (API tier only)
+#         ja3s_match    => 1,             # the alert's TLS ja3s against the
+#                                         # crawled service's; absent unless
+#                                         # both sides carry one
 #       },
 #     }
 #
-# The match is undef, or an array ref of the matched ids with what is known
-# of each: [ { cve => 'CVE-2021-44228', cvss => 10.0, kev => 1 }, ... ].
+# The match is undef, or a hash ref with a key per end that matched, each an
+# array ref of the matched ids with what is known of each -- on_port marking
+# the ids carried by the service block on that end's flow port:
+#
+#     { dest => [ { cve => 'CVE-2021-44228', cvss => 10.0, kev => 1,
+#                   on_port => 1 } ] }
 #
 #     my ( $strip, $match ) = $self->_shodan_strip( $table, $event );
 sub _shodan_strip {
@@ -186,39 +202,100 @@ sub _shodan_strip {
 	}
 
 	my %strip;
+	my %end_vulns;    # end => the entry's normalized vulns array, its shape
+					  # checked once here for the several walks below
 	for my $end ( keys %end_ip ) {
 		my $entry = $cached->{ $end_ip{$end} };
 		next unless ref $entry eq 'HASH';
 
 		my $info = Lilith::Shodan::normalize( $entry->{raw}, $self->shodan_source, $end_ip{$end} );
-		$strip{$end} = {
+		$end_vulns{$end} = ref $info->{vulns} eq 'ARRAY' ? $info->{vulns} : [];
+		$strip{$end}     = {
 			ip         => $end_ip{$end},
 			found      => $entry->{found},
 			age        => _age_string( $entry->{age_seconds} ),
 			info       => $info,
-			vuln_count => scalar @{ ref $info->{vulns} eq 'ARRAY' ? $info->{vulns} : [] },
+			vuln_count => scalar @{ $end_vulns{$end} },
 		};
 	} ## end for my $end ( keys %end_ip )
 	return ( {}, undef ) unless %strip;
 
-	# the match: the rule's ids against what the destination is cached as
-	# vulnerable to
-	my @matched;
-	my %dest_vuln;
-	if ( $table eq 'suricata' && ref $strip{dest} eq 'HASH' ) {
-		%dest_vuln = map { $_->{cve} => $_ }
-			grep { ref eq 'HASH' && defined $_->{cve} }
-			@{ ref $strip{dest}{info}{vulns} eq 'ARRAY' ? $strip{dest}{info}{vulns} : [] };
-		@matched = grep { $dest_vuln{$_} } @{ Lilith::CVEDB::rule_cves( $event->{raw} ) };
-	}
+	# The alert's own TLS server fingerprint, for comparing against the crawled
+	# one per end below. Out of the event, so the same whichever end it is
+	# compared at.
+	my $alert_ja3s
+		= (    ref $event->{raw} eq 'HASH'
+			&& ref $event->{raw}{tls} eq 'HASH'
+			&& ref $event->{raw}{tls}{ja3s} eq 'HASH'
+			&& defined $event->{raw}{tls}{ja3s}{hash}
+			&& !ref $event->{raw}{tls}{ja3s}{hash} )
+		? $event->{raw}{tls}{ja3s}{hash}
+		: '';
+
+	# The port half: is the port the flow names at an end one Shodan sees open
+	# on that end's host, and what did the crawl see running there? Both come
+	# out of the entry already read -- the keyless tier carries no service
+	# blocks, so the service detail is API-tier depth degrading to nothing.
+	for my $end ( keys %strip ) {
+		next unless $strip{$end}{found};
+		my $flow_port = $event->{ $end . '_port' };
+		next unless defined $flow_port && $flow_port =~ /^[0-9]+$/;
+
+		$strip{$end}{flow_port} = $flow_port;
+		my $ports = ref $strip{$end}{info}{ports} eq 'ARRAY' ? $strip{$end}{info}{ports} : [];
+		$strip{$end}{port_open} = ( grep { $_ == $flow_port } @{$ports} ) ? 1 : 0;
+
+		# the service block for that port; both transports can hold the same
+		# number, so the alert's proto picks between them when it can
+		my $services  = ref $strip{$end}{info}{services} eq 'ARRAY' ? $strip{$end}{info}{services} : [];
+		my @on_port   = grep { ref eq 'HASH' && defined $_->{port} && $_->{port} == $flow_port } @{$services};
+		my $proto     = defined $event->{proto} && !ref $event->{proto} ? lc( $event->{proto} ) : '';
+		my ($service) = ( ( grep { defined $_->{transport} && $_->{transport} eq $proto } @on_port ), @on_port );
+		next unless $service;
+
+		$strip{$end}{service} = $service;
+
+		# what to call it comes with the block (normalize's label), the same
+		# name the modal's service headings show
+		$strip{$end}{service_label} = $service->{label}
+			if defined $service->{label} && $service->{label} ne '';
+
+		# The alert's TLS server fingerprint against the crawled one.
+		# Agreement says the sensor watched the same service Shodan described,
+		# so the rest of the entry applies to this very connection;
+		# disagreement says the service changed since the crawl or that a
+		# proxy answered one of the two.
+		my $crawl_ja3s
+			= ( ref $service->{ssl} eq 'HASH' && defined $service->{ssl}{ja3s} ) ? $service->{ssl}{ja3s} : '';
+		if ( $alert_ja3s ne '' && $crawl_ja3s ne '' ) {
+			$strip{$end}{ja3s_match} = lc($alert_ja3s) eq lc($crawl_ja3s) ? 1 : 0;
+		}
+	} ## end for my $end ( keys %strip )
+
+	# the match: the rule's ids against what each end is cached as vulnerable to
+	my %matched;     # end => the matched ids
+	my %end_vuln;    # end => { cve => its normalized entry }
+	if ( $table eq 'suricata' ) {
+		my $rule_cves = Lilith::CVEDB::rule_cves( $event->{raw} );
+		if ( @{$rule_cves} ) {
+			for my $end ( keys %strip ) {
+				my %vulnerable = map { $_->{cve} => $_ }
+					grep { ref eq 'HASH' && defined $_->{cve} } @{ $end_vulns{$end} };
+				my @hit = grep { $vulnerable{$_} } @{$rule_cves};
+				next unless @hit;
+				$matched{$end}  = \@hit;
+				$end_vuln{$end} = \%vulnerable;
+			}
+		} ## end if ( @{$rule_cves} )
+	} ## end if ( $table eq 'suricata' )
 
 	# What the CVEDB cache is wanted for: a score where Shodan sent none, and
 	# the matched ids' KEV flags. Absent rows just leave those blank.
 	my %annotations;
 	{
-		my %want = map { $_ => 1 } @matched;
+		my %want = map { $_ => 1 } map { @{$_} } values %matched;
 		for my $end ( keys %strip ) {
-			for my $vuln ( @{ ref $strip{$end}{info}{vulns} eq 'ARRAY' ? $strip{$end}{info}{vulns} : [] } ) {
+			for my $vuln ( @{ $end_vulns{$end} } ) {
 				next unless ref $vuln eq 'HASH' && defined $vuln->{cve};
 				$want{ $vuln->{cve} } = 1 if !defined $vuln->{cvss} || $vuln->{cvss} eq '';
 			}
@@ -236,7 +313,7 @@ sub _shodan_strip {
 	# the worst score per end, CVEDB standing in for the scoreless
 	for my $end ( keys %strip ) {
 		my $worst;
-		for my $vuln ( @{ ref $strip{$end}{info}{vulns} eq 'ARRAY' ? $strip{$end}{info}{vulns} : [] } ) {
+		for my $vuln ( @{ $end_vulns{$end} } ) {
 			next unless ref $vuln eq 'HASH';
 			my $cvss = defined $vuln->{cvss} && $vuln->{cvss} ne '' ? $vuln->{cvss} : undef;
 			if ( !defined($cvss) && defined $vuln->{cve} && ref $annotations{ $vuln->{cve} } eq 'HASH' ) {
@@ -245,30 +322,39 @@ sub _shodan_strip {
 			}
 			next unless defined $cvss && $cvss =~ /^[0-9.]+$/;
 			$worst = $cvss if !defined($worst) || $cvss > $worst;
-		} ## end for my $vuln ( @{ ref $strip{$end}{info}{vulns...}})
+		} ## end for my $vuln ( @{ $end_vulns{$end} } )
 		$strip{$end}{worst_cvss} = $worst;
 	} ## end for my $end ( keys %strip )
 
 	my $cve_match;
-	if (@matched) {
-		my @detail;
-		for my $cve (@matched) {
+	for my $end ( keys %matched ) {
+
+		# shodan_cache.vulns is host level, but the API tier's service blocks
+		# each carry their own ids -- so a match can also say whether the
+		# vulnerable service is the one on the very port the flow names at
+		# that end, which is the strongest statement this data can make
+		my %on_port_vuln;
+		if ( ref $strip{$end}{service} eq 'HASH' && ref $strip{$end}{service}{vulns} eq 'ARRAY' ) {
+			%on_port_vuln = map { $_ => 1 } @{ $strip{$end}{service}{vulns} };
+		}
+
+		for my $cve ( @{ $matched{$end} } ) {
 			my $annotation = ref $annotations{$cve} eq 'HASH' ? $annotations{$cve} : {};
 			my $cvss
-				= defined $dest_vuln{$cve}{cvss} && $dest_vuln{$cve}{cvss} ne ''
-				? $dest_vuln{$cve}{cvss}
+				= defined $end_vuln{$end}{$cve}{cvss} && $end_vuln{$end}{$cve}{cvss} ne ''
+				? $end_vuln{$end}{$cve}{cvss}
 				: $annotation->{cvss};
 			push(
-				@detail,
+				@{ $cve_match->{$end} },
 				{
-					cve  => $cve,
-					cvss => ( defined $cvss && $cvss ne '' ? $cvss : undef ),
-					kev  => ( $annotation->{kev}           ? 1     : 0 ),
+					cve     => $cve,
+					cvss    => ( defined $cvss && $cvss ne '' ? $cvss : undef ),
+					kev     => ( $annotation->{kev}           ? 1     : 0 ),
+					on_port => ( $on_port_vuln{$cve}          ? 1     : 0 ),
 				}
 			);
-		} ## end for my $cve (@matched)
-		$cve_match = \@detail;
-	} ## end if (@matched)
+		} ## end for my $cve ( @{ $matched{$end} } )
+	} ## end for my $end ( keys %matched )
 
 	return ( \%strip, $cve_match );
 } ## end sub _shodan_strip

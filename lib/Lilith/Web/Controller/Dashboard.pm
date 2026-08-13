@@ -312,6 +312,12 @@ C<GET /api/dashboard/timeseries?bucket=&group_by=&top_groups=> -- alert counts
 bucketed over time, optionally split by a column. Returns
 C<< { grouped => 0|1, rows => [ ... ] } >>.
 
+With C<metric=shodan_src_coverage> or C<metric=shodan_dest_coverage> the widget
+becomes the coverage stat over time instead: per bucket, that end's distinct
+addresses split into C<Enriched> / C<Stale> / C<Not looked up> -- has the
+C<lilith shodan_cache> timer been keeping up. Same row shape, so the same
+chart renders it.
+
 =cut
 
 sub timeseries {
@@ -321,11 +327,28 @@ sub timeseries {
 	my $group_by   = $self->param('group_by');
 	my $top_groups = $self->param('top_groups');
 	my $measure    = $self->param('measure');
+	my $metric     = $self->param('metric');
 
 	my $grouped = ( defined $group_by && $group_by ne '' ) ? 1 : 0;
 
 	return $self->_json(
 		sub {
+			if ( defined $metric && $metric =~ /\Ashodan_(src|dest)_coverage\z/ ) {
+				my $side = $1;
+
+				# the freshness rule is the config's, the same as the stat tile
+				my $rows = $self->lilith->stats->shodan_coverage_series(
+					table           => $table,
+					go_back_minutes => $mins,
+					side            => $side,
+					ttl             => $self->shodan_cache_ttl,
+					source          => $self->shodan_source,
+					( defined $bucket && $bucket ne '' ? ( bucket => $bucket ) : () ),
+					@filter,
+				);
+				return { grouped => 1, rows => $rows };
+			} ## end if ( defined $metric && $metric =~ /\Ashodan_(src|dest)_coverage\z/)
+
 			my $rows = $self->lilith->stats->timeseries(
 				table           => $table,
 				go_back_minutes => $mins,

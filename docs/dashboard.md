@@ -131,24 +131,41 @@ alert volume and time on the axes and cut them by what those hosts are:
 - `shodan_src_cvss` :: the worst CVSS against the host, banded *Critical (9+)* /
   *High* / *Medium* / *Low* / *None known* / *Not looked up*, ordered
   worst-first rather than by count.
+- `shodan_src_os` :: what the host runs, per Shodan's fingerprinting. One
+  appliance OS across many addresses is a fleet's fingerprint.
+- `shodan_src_org` / `shodan_src_isp` / `shodan_src_asn` :: who the address
+  belongs to, per Shodan itself — "top attacking ASNs" is one hosting
+  provider or bulletproof AS lighting up across hundreds of sources.
 
-Each has a `shodan_dest_*` twin reading `dest_ip` — same six, same meanings, the
+The last four are API tier only — on an InternetDB-only install their panels
+stay empty — and describe only the addresses with a cached answer: nulls drop
+out rather than forming a bucket.
+
+Each has a `shodan_dest_*` twin reading `dest_ip` — same set, same meanings, the
 far end of the alert. Which end an outside host lands on is up to the rule that
 fired, so a source-only board hides everything about traffic going the other
 way: on inbound alerts the source is the attacker, while the destination is what
 was reached out to, which is where the command-and-control and download side
 shows up. The two are separate joins, so a board can panel both at once.
 
-One column crosses the two halves instead of describing one:
+Two column pairs cross the two halves instead of describing one, and for the
+reason above they too exist for both ends:
 
-- `shodan_dest_cve_match` :: whether the rule that fired names a CVE the
-  destination's cache entry lists it as vulnerable to — *Matched* / *Not
-  matched* / *No CVE in rule* / *Not looked up*, *Matched* first. An exploit
-  thrown at a host actually vulnerable to it is the loudest thing this data
-  can say, and the same comparison badges the search rows and the event view.
-  Suricata and destination only — the rule's ids come from its metadata and
-  signature, and the question is about what was attacked. Needs the `cves`
-  column (schema version 16).
+- `shodan_src_cve_match` / `shodan_dest_cve_match` :: whether the rule that
+  fired names a CVE that end's cache entry lists it as vulnerable to —
+  *Matched* / *Not matched* / *No CVE in rule* / *Not looked up*, *Matched*
+  first. An exploit thrown at a host actually vulnerable to it is the loudest
+  thing this data can say, and the same comparison badges the search rows and
+  the event view. Suricata only — the rule's ids come from its metadata and
+  signature.
+- `shodan_src_port_match` / `shodan_dest_port_match` :: whether the port the
+  flow names at that end is one Shodan sees open there — *Hit an exposed
+  port* / *Port not seen open* / *No port* / *Not looked up*. An exploit at a
+  confirmed listener is an attempt against a live service; the same at a
+  closed port is scan noise. It reads *not seen open* rather than *closed*
+  deliberately: Shodan's port coverage is protocol-weighted rather than a
+  full sweep, so absence from the list is weaker evidence than presence on
+  it. Every enriched table, both tiers.
 
 Expect the destination panels to read mostly *Not looked up* on a sensor
 watching inbound traffic: there the destination is your own asset, which is a
@@ -156,8 +173,7 @@ private address, and Lilith never sends those to Shodan. The destination
 coverage stat below says so plainly rather than leaving it to be guessed at.
 
 CAPE is offered none of them: a detonation's `src_ip` is whoever submitted the
-sample, not an offender. The columns appear in the pickers only when the
-database has the `shodan_cache` table (schema version 15).
+sample, not an offender.
 
 ### Coverage and staleness
 
@@ -183,18 +199,29 @@ The two ends are counted separately because they are cached to very different
 depths — `lilith shodan_cache` warms both, but only the public addresses among
 them, and on inbound traffic the destinations are not public.
 
+Coverage also charts over time: an **Alerts over time** widget whose *Group by*
+is one of the Shodan coverage entries splits each bucket's distinct addresses
+into *Enriched* / *Stale* / *Not looked up* — whether the `lilith shodan_cache`
+timer has been keeping up, and when it fell behind, rather than where the cache
+stands now. The Shodan preset ends with one.
+
 Run `lilith shodan_cache` on a timer to raise the coverage numbers and hold the
 staleness ones down — see [configuration](configuration.md#shodan). The
 dashboard only ever reads the cache, so no widget costs a lookup, and none of
 these numbers goes anywhere on its own.
+
+There is also a **Shodan × Baphomet** preset: the judgments cut by what Shodan
+knows about the judged host, with average judgment score per tag and per CVSS
+band leading — whether Baphomet's own scoring agrees with Shodan's view of the
+host.
 
 Two things to read the charts by:
 
 - `tag`, `vuln`, `cpe`, and `port` — either end — come from lists, so **one
   alert counts once per value** and the slices sum to more than the alert
   total. An address with nothing cached drops out of these entirely.
-- `known`, `cvss`, and `cve_match` keep every alert, putting the addresses with
-  nothing cached in their own bucket.
+- `known`, `cvss`, `cve_match`, and `port_match` keep every alert, putting the
+  addresses with nothing cached in their own bucket.
 
 Either way an alert that names no address on the end being read — a Baphomet
 judgment passed on a username, or an alert with no destination — is left out,
@@ -235,7 +262,8 @@ selected table (e.g. `classification` on CAPE) simply notes so.
 | CVEs / software on the sources | Top values | `shodan_src_vuln`, `shodan_src_cpe` |
 | Alerts from crawled vs unseen hosts | Alerts over time | group by `shodan_src_known` |
 | What the alerts reached out to | Top values | `shodan_dest_tag`, `shodan_dest_cpe` |
-| Exploits against hosts vulnerable to them (Suricata) | Top values (pie) / Alerts over time | `shodan_dest_cve_match` |
+| Exploits against hosts vulnerable to them (Suricata) | Top values (pie) / Alerts over time | `shodan_dest_cve_match`, `shodan_src_cve_match` |
+| Flows hitting confirmed-open vs closed ports | Top values (pie) / Alerts over time | `shodan_dest_port_match`, `shodan_src_port_match` |
 
 ### CAPE
 

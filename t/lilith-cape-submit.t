@@ -9,6 +9,7 @@ use File::Temp     qw( tempfile );
 use HTTP::Response ();
 
 use_ok('Lilith::CapeSubmit') or BAIL_OUT('Lilith::CapeSubmit failed to load');
+use_ok('Lilith::ConfigUtil') or BAIL_OUT('Lilith::ConfigUtil failed to load');
 
 # A sample file to submit. Starts with the DOS "MZ" magic so file(1) recognizes
 # it as an executable, giving fileinfo.magic something non-empty.
@@ -189,11 +190,11 @@ qr/does not exist/, 'submit dies for an unreadable file';
 # them rather than take them at face value.
 # ===========================================================================
 {
-	is( Lilith::CapeSubmit::to_bool('true'),  1, 'to_bool("true") is 1' );
-	is( Lilith::CapeSubmit::to_bool('false'), 0, 'to_bool("false") is 0' );
-	is( Lilith::CapeSubmit::to_bool('0'),     0, 'to_bool("0") is 0' );
-	is( Lilith::CapeSubmit::to_bool(undef),   0, 'to_bool(undef) is 0' );
-	is( Lilith::CapeSubmit::to_bool(1),       1, 'to_bool(1) is 1' );
+	is( Lilith::ConfigUtil::to_bool('true'),  1, 'to_bool("true") is 1' );
+	is( Lilith::ConfigUtil::to_bool('false'), 0, 'to_bool("false") is 0' );
+	is( Lilith::ConfigUtil::to_bool('0'),     0, 'to_bool("0") is 0' );
+	is( Lilith::ConfigUtil::to_bool(undef),   0, 'to_bool(undef) is 0' );
+	is( Lilith::ConfigUtil::to_bool(1),       1, 'to_bool(1) is 1' );
 
 	# enabled given the TOML string 'false' really is disabled
 	throws_ok {

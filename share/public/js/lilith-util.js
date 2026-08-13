@@ -59,20 +59,19 @@
   // One label/value row of a detail table. Skips blank values entirely, so
   // callers can list every possible field and let the absent ones drop out.
   // An empty list counts as blank, since a field the source had nothing for
-  // arrives as one just as often as it arrives missing.
+  // arrives as one just as often as it arrives missing. A DOM node value is
+  // appended as-is, for the rows whose value is a link.
   function kvRow(tbody, label, value, cssClass) {
     if (value === undefined || value === null || value === '') { return; }
     if (Array.isArray(value) && !value.length) { return; }
     var row = document.createElement('tr');
     var headerCell = document.createElement('th');
-    headerCell.className = 'text-muted fw-normal ps-0';
-    headerCell.style.width = '170px';
-    headerCell.style.whiteSpace = 'nowrap';
+    headerCell.className = 'text-muted fw-normal ps-0 kv-key';
     headerCell.textContent = label;
     var valueCell = document.createElement('td');
-    valueCell.className = 'font-monospace small' + (cssClass ? (' ' + cssClass) : '');
-    valueCell.style.wordBreak = 'break-all';
-    valueCell.textContent = Array.isArray(value) ? value.join(', ') : value;
+    valueCell.className = 'font-monospace small kv-val' + (cssClass ? (' ' + cssClass) : '');
+    if (value instanceof Node) { valueCell.appendChild(value); }
+    else { valueCell.textContent = Array.isArray(value) ? value.join(', ') : value; }
     row.appendChild(headerCell);
     row.appendChild(valueCell);
     tbody.appendChild(row);

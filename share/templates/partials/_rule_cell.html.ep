@@ -1,0 +1,6 @@
+% # Contents of one results-table Rule cell: gid:sid:rev, each part a filter
+% # link when it is set. Expects $row. Shared by the suricata and sagan result
+% # tables. Kept on one line because the colons must sit flush against the
+% # parts either side: breaking it would put the indentation of the next line
+% # into the cell, rendering as "1 : 2000123 : 4".
+<% if (my $gid = $row->{gid}) { %><a href="#" class="gid-filter" data-gid="<%= $gid %>"><%= $gid %></a><% } %>:<% if (my $sid = $row->{sid}) { %><a href="#" class="sid-filter" data-sid="<%= $sid %>"><%= $sid %></a><% } %>:<% if (my $rev = $row->{rev}) { %><a href="#" class="rev-filter" data-rev="<%= $rev %>"><%= $rev %></a><% } %>

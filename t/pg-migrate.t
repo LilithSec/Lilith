@@ -160,6 +160,12 @@ sub column_exists {
 	ok( column_exists( $dbh, 'suricata_alerts', 'cves' ), 'deploy created the cves column' );
 	my ($cves_fn) = $dbh->selectrow_array(q{select count(*) from pg_proc where proname = 'suricata_alert_cves'});
 	is( $cves_fn, 1, 'deploy created the suricata_alert_cves function' );
+
+	# version 17: what the host runs and who it belongs to, as columns
+	for my $host_column (qw( os org isp asn )) {
+		ok( column_exists( $dbh, 'shodan_cache', $host_column ),
+			"deploy created the shodan_cache $host_column column" );
+	}
 	$dbh->disconnect;
 
 	my ($sv_after) = run_cmd('Lilith::CLI::Command::SchemaVersion');
@@ -209,6 +215,7 @@ sub column_exists {
 	ok( !column_exists( $dbh, 'baphomet_alerts', 'subject' ), 'the 13 -> 14 upgrade dropped baphomet_alerts.subject' );
 	ok( table_exists( $dbh, 'cvedb_cache' ),                  'the 15 -> 16 upgrade created cvedb_cache' );
 	ok( column_exists( $dbh, 'suricata_alerts', 'cves' ),     'the 15 -> 16 upgrade added the cves column' );
+	ok( column_exists( $dbh, 'shodan_cache', 'org' ),         'the 16 -> 17 upgrade added the org column' );
 	$dbh->disconnect;
 
 	my ($sv) = run_cmd('Lilith::CLI::Command::SchemaVersion');
@@ -274,7 +281,7 @@ sub column_exists {
 	ok( !table_exists( $dbh, 'shodan_cache' ), 'shodan_cache absent at version 14' );
 	ok( !table_exists( $dbh, 'cvedb_cache' ),  'cvedb_cache absent at version 14' );
 
-	$mig->dbic_dh->upgrade;    # 14 -> 16, through 15
+	$mig->dbic_dh->upgrade;    # 14 -> 17, through 15 and 16
 	ok( table_exists( $dbh, 'shodan_cache' ), 'the 14 -> 15 upgrade created shodan_cache' );
 	for my $column (qw( ip source found fetched last_update ports tags cpes vulns max_cvss hostnames raw )) {
 		ok( column_exists( $dbh, 'shodan_cache', $column ), "shodan_cache has the $column column" );
@@ -287,6 +294,11 @@ sub column_exists {
 		ok( column_exists( $dbh, 'cvedb_cache', $column ), "cvedb_cache has the $column column" );
 	}
 	ok( column_exists( $dbh, 'suricata_alerts', 'cves' ), 'the 15 -> 16 upgrade added the cves column' );
+
+	# and the 16 -> 17 step: what the host runs and who it belongs to.
+	for my $host_column (qw( os org isp asn )) {
+		ok( column_exists( $dbh, 'shodan_cache', $host_column ), "the 16 -> 17 upgrade added the $host_column column" );
+	}
 
 	# A live round trip through the methods the web UI uses.
 	my $lilith = Lilith->new( dsn => $sc_dsn, user => $pg->user, pass => $pg->pass );
@@ -506,15 +518,15 @@ sub column_exists {
 	# vuln_ids, the whole-row read the event view strip renders from, the
 	# enrichment search filters, and the cve_match dashboard dimension.
 	$dbh->do(
-		q{insert into suricata_alerts (instance,host,timestamp,event_id,src_ip,dest_ip,classification,signature,raw)
-		  values (?,?,now(),?,?,?,?,?,?)},
-		undef, 's1', 's1.example.org', 'cve1', '203.0.113.60', '198.51.100.60', 'Attempted Admin',
+		q{insert into suricata_alerts (instance,host,timestamp,event_id,src_ip,dest_ip,dest_port,classification,signature,raw)
+		  values (?,?,now(),?,?,?,?,?,?,?)},
+		undef, 's1', 's1.example.org', 'cve1', '203.0.113.60', '198.51.100.60', 80, 'Attempted Admin',
 		'ET EXPLOIT log4j', '{"alert":{"metadata":{"cve":["CVE_2021_44228"]},"signature":"ET EXPLOIT log4j"}}'
 	);
 	$dbh->do(
-		q{insert into suricata_alerts (instance,host,timestamp,event_id,src_ip,dest_ip,classification,signature,raw)
-		  values (?,?,now(),?,?,?,?,?,?)},
-		undef, 's1', 's1.example.org', 'cve2', '203.0.113.61', '198.51.100.60', 'Attempted Admin',
+		q{insert into suricata_alerts (instance,host,timestamp,event_id,src_ip,dest_ip,dest_port,classification,signature,raw)
+		  values (?,?,now(),?,?,?,?,?,?,?)},
+		undef, 's1', 's1.example.org', 'cve2', '203.0.113.61', '198.51.100.60', 8443, 'Attempted Admin',
 		'ET EXPLOIT shellshock',
 		'{"alert":{"metadata":{"cve":["CVE-2014-6271"]},"signature":"ET EXPLOIT shellshock"}}'
 	);
@@ -525,9 +537,22 @@ sub column_exists {
 		ip     => '198.51.100.60',
 		source => 'internetdb',
 		raw    => { ports => [80], tags => ['tor'], vulns => ['CVE-2021-44228'] },
-		info   => { ports => [80], tags => ['tor'], vulns => [ { cve => 'CVE-2021-44228' } ] },
-		ttl    => 3600,
+		info   => {
+			ports => [80],
+			tags  => ['tor'],
+			vulns => [ { cve => 'CVE-2021-44228' } ],
+			os    => 'Linux 5.x',
+			org   => 'Example Hosting LLC',
+			isp   => 'Example Carrier Inc',
+			asn   => 'AS64496',
+		},
+		ttl => 3600,
 	);
+
+	# the version-17 columns round-trip through the put, and back the
+	# dashboard dimensions built on them
+	my ($stored_org) = $dbh->selectrow_array(q{select org from shodan_cache where ip = '198.51.100.60'});
+	is( $stored_org, 'Example Hosting LLC', 'the put stores the org column' );
 
 	# the badges carry the ids themselves, for the CVE-match comparison
 	my $match_badges = $lilith->shodan_cache_badges( ips => ['198.51.100.60'], source => 'internetdb', ttl => 3600 );
@@ -569,6 +594,37 @@ sub column_exists {
 	is( $match_buckets{'Matched'},     1, 'the cve_match dimension counts the matched alert' );
 	is( $match_buckets{'Not matched'}, 1, 'and buckets the rule whose CVE the host does not carry' );
 
+	# the port half of the same correlation: cve1 hit the port the cache holds
+	# open, cve2 one it does not
+	my %port_buckets = map { $_->{value} => $_->{count} }
+		@{ $stats->top( table => 'suricata', column => 'shodan_dest_port_match', go_back_minutes => 60 ) };
+	is( $port_buckets{'Hit an exposed port'}, 1, 'the port_match dimension counts the exposed-port alert' );
+	is( $port_buckets{'Port not seen open'},  1, 'and buckets the port the cache does not hold open' );
+
+	# and the version-17 bare-column dimensions: both alerts against the host
+	# whose org the cache now holds, addresses with nothing cached dropping out
+	my %org_buckets = map { $_->{value} => $_->{count} }
+		@{ $stats->top( table => 'suricata', column => 'shodan_dest_org', go_back_minutes => 60 ) };
+	is_deeply( \%org_buckets, { 'Example Hosting LLC' => 2 }, 'the org dimension groups by the stored value' );
+
+	# the cve_match filters answer the dimensions' slices as lists
+	is_deeply(
+		[
+			map { $_->{event_id} }
+				@{ $lilith->search( table => 'suricata', go_back_minutes => 60, shodan_dest_cve_match => 'matched' ) }
+		],
+		['cve1'],
+		'shodan_dest_cve_match matched lists the exploit against the vulnerable host'
+	);
+	is_deeply(
+		[
+			map { $_->{event_id} }
+				@{ $lilith->search( table => 'suricata', go_back_minutes => 60, shodan_dest_cve_match => 'unmatched' ) }
+		],
+		['cve2'],
+		'shodan_dest_cve_match unmatched lists the rule whose CVE the host does not carry'
+	);
+
 	# DeploymentHandler downgrades toward the schema's own version; see phase 3.
 	{
 		no warnings qw(redefine once);
@@ -577,7 +633,7 @@ sub column_exists {
 			schema_class => 'Lilith::Schema',
 			schema_args  => [ $sc_dsn, $pg->user, $pg->pass ],
 		);
-		$down->dbic_dh->downgrade;    # 16 -> 14, through 15
+		$down->dbic_dh->downgrade;    # 17 -> 14, through 16 and 15
 	}
 	ok( !table_exists( $dbh, 'cvedb_cache' ),  'the 16 -> 15 downgrade dropped cvedb_cache' );
 	ok( !table_exists( $dbh, 'shodan_cache' ), 'the 15 -> 14 downgrade dropped shodan_cache' );

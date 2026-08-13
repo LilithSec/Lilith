@@ -248,6 +248,7 @@ sub _add_vulns {
 #       module    => 'https',            # the Shodan crawler module that found it
 #       product   => 'nginx',
 #       version   => '1.18.0',
+#       label     => 'nginx 1.18.0',     # what to call it; see below
 #       cpes      => [ 'cpe:2.3:a:nginx:nginx:1.18.0:...' ],
 #       timestamp => '2026-06-14T02:11:33.123456',
 #       banner    => "HTTP/1.1 200 OK\r\n...",   # capped at 4000 characters
@@ -266,6 +267,12 @@ sub _add_vulns {
 # The banner is capped because Shodan stores whatever the service sent, which
 # for some HTTP servers is the whole page -- and this one lives in a modal
 # beside three other sections.
+#
+# label is the one display name every renderer of a service block should use --
+# the identified product first, then the crawler module that answered, then the
+# HTTP server header, empty when none of those are known. Derived here rather
+# than by each renderer so the modal's headings and the event view's strip
+# cannot drift.
 #
 #     my $service = _service( $raw->{data}[0] );
 #     # $service->{port} is 443, $service->{ssl}{jarm} is the JARM fingerprint
@@ -360,6 +367,12 @@ sub _service {
 		};
 	}
 
+	$service{label}
+		= $service{product} ne '' ? $service{product} . ( $service{version} ne '' ? ' ' . $service{version} : '' )
+		: $service{module} ne ''  ? $service{module}
+		: ( defined $service{http}{server} && $service{http}{server} ne '' ) ? $service{http}{server}
+		:                                                                      '';
+
 	return \%service;
 } ## end sub _service
 
@@ -395,6 +408,9 @@ sub _service {
 #   - $source :: the name of the tier that key selects, from the shodan_source
 #     helper. Passed in rather than worked out again here, so the name a cached
 #     row is written under and the name it is read back by cannot drift.
+#   - $history :: passed through to fetch: ask the host API for every banner
+#     it has ever crawled rather than only the current ones, which is what
+#     puts a first_seen on the services. Needs a membership plan; see fetch.
 #
 # Returns: three values -- the result, an error string, and the response the
 # result was built from:
@@ -405,6 +421,9 @@ sub _service {
 #         url         => 'https://www.shodan.io/host/192.0.2.10',
 #         last_update => '2026-06-14T02:11:33.123456',   # API tier only
 #         os          => 'Linux 3.x',
+#         org         => 'Example Hosting LLC',          # API tier only, as
+#         isp         => 'Example Carrier Inc',          # are isp and asn
+#         asn         => 'AS64496',
 #         ports       => [ 22, 80, 443 ],
 #         hostnames   => [ 'gate1.example.org' ],
 #         domains     => [ 'example.org' ],              # API tier only
@@ -433,11 +452,11 @@ sub _service {
 #     # $shodan->{ports} is [ 22, 80, 443 ]
 #     # $shodan->{services}[2]{ssl}{jarm} is the JARM fingerprint of the 443 service
 sub gather {
-	my ( $ip, $api_key, $source ) = @_;
+	my ( $ip, $api_key, $source, $history ) = @_;
 
 	return ( { skipped => 'private or reserved address' }, '' ) if is_private_ip($ip);
 
-	my ( $raw, $error ) = fetch( $ip, $api_key );
+	my ( $raw, $error ) = fetch( $ip, $api_key, $history );
 	return ( {}, $error ) if $error ne '';
 
 	return ( normalize( $raw, $source, $ip ), '', $raw );
@@ -457,6 +476,13 @@ sub gather {
 #   - $ip :: the address to look up. Already checked by the caller against
 #     is_private_ip, so it is one that may be sent.
 #   - $api_key :: the configured Shodan key, or '' for the keyless tier.
+#   - $history :: when true, ask the host API for every banner it has ever
+#     crawled for the address rather than only the current ones -- what dates
+#     when a port first appeared (see normalize's first_seen). Needs a Shodan
+#     membership plan, which is why it is its own config switch
+#     (shodan_history) rather than implied by the key. History responses are
+#     much larger, and are cached whole like everything else. Ignored on the
+#     keyless tier, which keeps no history.
 #
 # Returns: two values, the decoded response and an error string. An address
 # Shodan has never crawled is a 404 on both tiers and comes back as an empty
@@ -466,7 +492,7 @@ sub gather {
 #
 #     my ( $raw, $error ) = fetch( '192.0.2.10', $key );
 sub fetch {
-	my ( $ip, $api_key ) = @_;
+	my ( $ip, $api_key, $history ) = @_;
 
 	my $raw;
 
@@ -480,7 +506,7 @@ sub fetch {
 			# is waiting on.
 			$shodan->_ua->timeout(15);
 
-			$raw = $shodan->host_ip( { IP => $ip } );
+			$raw = $shodan->host_ip( { IP => $ip, ( $history ? ( HISTORY => 1 ) : () ) } );
 		};
 		if ($@) {
 			my $why = $@;
@@ -554,10 +580,19 @@ sub normalize {
 		url         => 'https://www.shodan.io/host/' . $ip,
 		os          => ( defined $raw->{os}          && !ref $raw->{os}          ? $raw->{os}          : '' ),
 		last_update => ( defined $raw->{last_update} && !ref $raw->{last_update} ? $raw->{last_update} : '' ),
-		hostnames   => _list( $raw->{hostnames} ),
-		domains     => _list( $raw->{domains} ),
-		tags        => _list( $raw->{tags} ),
-		ports       => [ sort { $a <=> $b } @{ _list( $raw->{ports} ) } ],
+
+		# who the address belongs to, per Shodan itself: often more specific
+		# than whois or the GeoIP ASN database (the customer rather than the
+		# carrier), and unlike either of those it can be cached into columns
+		# and grouped by. API tier only; the keyless summary carries none.
+		org => ( defined $raw->{org} && !ref $raw->{org} ? $raw->{org} : '' ),
+		isp => ( defined $raw->{isp} && !ref $raw->{isp} ? $raw->{isp} : '' ),
+		asn => ( defined $raw->{asn} && !ref $raw->{asn} ? $raw->{asn} : '' ),
+
+		hostnames => _list( $raw->{hostnames} ),
+		domains   => _list( $raw->{domains} ),
+		tags      => _list( $raw->{tags} ),
+		ports     => [ sort { $a <=> $b } @{ _list( $raw->{ports} ) } ],
 	);
 
 	my %vulns;
@@ -567,15 +602,54 @@ sub normalize {
 	# banners on the API one, so both are collected and merged.
 	my %cpes = map { $_ => 1 } @{ _list( $raw->{cpes} ) };
 
-	my @services;
+	# One service per port/transport/module, the newest banner standing for the
+	# group. On an ordinary response that is every banner exactly as it
+	# arrived; a history response (see fetch) carries the same service once per
+	# crawl, and collapsing to the newest keeps the modal describing it as it
+	# stands -- while the group's oldest sighting rides along as first_seen,
+	# which is what dates when a port first appeared.
+	my %service_group;
 	for my $banner ( @{ _list( $raw->{data} ) } ) {
 		next unless ref $banner eq 'HASH';
-		my $service = _service($banner);
+		my $stamp = defined $banner->{timestamp} && !ref $banner->{timestamp} ? $banner->{timestamp} : '';
+		my $key   = join(
+			'|',
+			( defined $banner->{port}      && !ref $banner->{port}      ? $banner->{port}      : 0 ),
+			( defined $banner->{transport} && !ref $banner->{transport} ? $banner->{transport} : '' ),
+			(
+				ref $banner->{_shodan} eq 'HASH'
+					&& defined $banner->{_shodan}{module} ? $banner->{_shodan}{module} : ''
+			)
+		);
+
+		my $slot = $service_group{$key} ||= { banner => $banner, stamp => $stamp, first_seen => $stamp };
+
+		# the stamps are ISO, so they compare lexically
+		if ( $stamp gt $slot->{stamp} ) {
+			@{$slot}{qw( banner stamp )} = ( $banner, $stamp );
+		}
+		$slot->{first_seen} = $stamp if $stamp ne '' && ( $slot->{first_seen} eq '' || $stamp lt $slot->{first_seen} );
+	} ## end for my $banner ( @{ _list( $raw->{data} ) })
+
+	my @services;
+	my %current_port = map { $_ => 1 } @{ $info{ports} };
+	for my $slot ( values %service_group ) {
+		my $service = _service( $slot->{banner} );
+		$service->{first_seen} = $slot->{first_seen};
 		push( @services, $service );
-		_add_vulns( $banner->{vulns}, \%vulns );
+
+		# The host-level lists describe the host as it stands, so only the
+		# services on its current ports feed them: a history response also
+		# carries banners for ports since closed, whose old CVEs and CPEs must
+		# not resurface as the host's. With no host-level port list there is
+		# no "current" to hold to, and every banner counts, as before.
+		next if %current_port && !$current_port{ $service->{port} };
+		_add_vulns( $slot->{banner}{vulns}, \%vulns );
 		$cpes{$_} = 1 for @{ $service->{cpes} };
-	}
-	$info{services} = [ sort { $a->{port} <=> $b->{port} || $a->{transport} cmp $b->{transport} } @services ];
+	} ## end for my $slot ( values %service_group )
+	$info{services}
+		= [ sort { $a->{port} <=> $b->{port} || $a->{transport} cmp $b->{transport} || $a->{module} cmp $b->{module} }
+			@services ];
 
 	# A response can carry banners without a host level port list; deriving the
 	# ports from them keeps the chips from being the one thing missing.

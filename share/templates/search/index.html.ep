@@ -47,6 +47,15 @@
 %   { value => 'unknown',   desc => 'crawled, nothing there' },
 %   { value => 'unchecked', desc => 'never looked up' },
 % );
+%
+% # Likewise the cve_match pair: the four buckets of the dashboard's
+% # shodan_*_cve_match dimensions, as filters, one per end.
+% my @_cve_match_options = (
+%   { value => 'matched',   desc => 'rule CVE this end is vulnerable to' },
+%   { value => 'unmatched', desc => 'rule CVE, no cached overlap' },
+%   { value => 'no-cve',    desc => 'rule names no CVE' },
+%   { value => 'unchecked', desc => 'this end never looked up' },
+% );
 % my @_filter_groups = (
 %   {   heading => 'Network',
 %       fields  => [
@@ -89,6 +98,10 @@
 %           { name => 'shodan_dest_known', label => 'Shodan Dst Known', form_label => 'Dst Known', options => \@_known_options },
 %           { name => 'shodan_dest_cvss',  label => 'Shodan Dst CVSS',  form_label => 'Dst CVSS' },
 %           { name => 'cve',               label => 'Rule CVE', tables => 'suricata' },
+%           { name => 'shodan_src_cve_match',  label => 'Src CVE Match', form_label => 'Src CVE Match',
+%             tables => 'suricata', options => \@_cve_match_options },
+%           { name => 'shodan_dest_cve_match', label => 'Dst CVE Match', form_label => 'Dst CVE Match',
+%             tables => 'suricata', options => \@_cve_match_options },
 %       ],
 %   },
 %   {   heading => 'CAPE',

@@ -130,6 +130,9 @@ use_ok('Lilith::Shodan') or BAIL_OUT('Lilith::Shodan failed to load');
 		ports => [ 443, 22 ],
 		tags  => ['cloud'],
 		vulns => ['CVE-2019-0217'],
+		org   => 'Example Hosting LLC',
+		isp   => 'Example Carrier Inc',
+		asn   => 'AS64496',
 		data  => [ { port => 443, transport => 'tcp', product => 'nginx', _shodan => { module => 'https' } } ],
 	};
 	my $first  = Lilith::Shodan::normalize( $raw, 'api', '192.0.2.10' );
@@ -138,12 +141,93 @@ use_ok('Lilith::Shodan') or BAIL_OUT('Lilith::Shodan failed to load');
 	is_deeply( $first->{ports}, [ 22, 443 ], 'ports are sorted whichever way they arrived' );
 	is( $first->{services}[0]{product}, 'nginx', 'services are rebuilt from the stored response' );
 
+	# who the address belongs to rides along, for the modal and the columns
+	# the dashboard groups by
+	is( $first->{org}, 'Example Hosting LLC', 'org carries through' );
+	is( $first->{isp}, 'Example Carrier Inc', 'isp carries through' );
+	is( $first->{asn}, 'AS64496',             'asn carries through' );
+
 	# An empty response is the full shape with nothing in it, which is what an
-	# address Shodan has never crawled is cached as.
+	# address Shodan has never crawled is cached as -- and what the keyless
+	# tier, which sends no ownership fields, comes to for those.
 	my $empty = Lilith::Shodan::normalize( {}, 'internetdb', '192.0.2.10' );
 	is( $empty->{source}, 'internetdb', 'an empty response still names its source' );
 	is_deeply( $empty->{ports},    [], 'an empty response has no ports' );
 	is_deeply( $empty->{services}, [], 'an empty response has no services' );
+	is( $empty->{org}, '', 'an absent org is an empty string' );
+	is( $empty->{asn}, '', 'an absent asn is an empty string' );
+}
+
+# ---------------------------------------------------------------------------
+# 3b.  Shodan — a history response: one service per crawl collapses to the
+#      newest banner, dated by the oldest
+# ---------------------------------------------------------------------------
+
+{
+	my $raw = {
+		ports => [443],
+		vulns => ['CVE-2021-40438'],
+		data  => [
+			# the same service crawled three times across two years, arriving
+			# out of order
+			{
+				port      => 443,
+				transport => 'tcp',
+				product   => 'nginx',
+				version   => '1.18.0',
+				timestamp => '2026-07-01T00:00:00',
+				_shodan   => { module => 'https' },
+			},
+			{
+				port      => 443,
+				transport => 'tcp',
+				product   => 'nginx',
+				version   => '1.14.0',
+				timestamp => '2024-05-01T00:00:00',
+				_shodan   => { module => 'https' },
+			},
+			{
+				port      => 443,
+				transport => 'tcp',
+				product   => 'nginx',
+				version   => '1.16.0',
+				timestamp => '2025-06-01T00:00:00',
+				_shodan   => { module => 'https' },
+			},
+
+			# a port long closed, whose old banner carried a CVE
+			{
+				port      => 21,
+				transport => 'tcp',
+				product   => 'vsftpd',
+				timestamp => '2023-01-01T00:00:00',
+				_shodan   => { module => 'ftp' },
+				vulns     => ['CVE-2011-2523'],
+			},
+		],
+	};
+	my $info = Lilith::Shodan::normalize( $raw, 'api', '192.0.2.10' );
+
+	is( scalar @{ $info->{services} }, 2, 'one service per port/transport/module, not one per crawl' );
+	my ($https) = grep { $_->{port} == 443 } @{ $info->{services} };
+	is( $https->{version},    '1.18.0',              'the newest crawl stands for the group' );
+	is( $https->{first_seen}, '2024-05-01T00:00:00', 'dated by its oldest sighting' );
+	is( $https->{timestamp},  '2026-07-01T00:00:00', 'and last seen by its newest' );
+
+	# the closed port keeps its block -- that history is the point -- but its
+	# old CVE must not resurface as the host's
+	my ($ftp) = grep { $_->{port} == 21 } @{ $info->{services} };
+	is( $ftp->{product}, 'vsftpd', 'a since-closed port keeps its block' );
+	is_deeply( [ map { $_->{cve} } @{ $info->{vulns} } ],
+		['CVE-2021-40438'], "a closed port's old CVEs do not resurface as the host's" );
+
+	# an ordinary response reads the same as before: a single crawl is its own
+	# first sighting
+	my $plain
+		= Lilith::Shodan::normalize(
+			{ ports => [80], data => [ { port => 80, transport => 'tcp', timestamp => '2026-07-01T00:00:00' } ] },
+			'api', '192.0.2.10' );
+	is( $plain->{services}[0]{first_seen}, '2026-07-01T00:00:00', 'a single crawl is its own first sighting' );
 }
 
 done_testing();

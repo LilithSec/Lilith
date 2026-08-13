@@ -233,12 +233,7 @@ document.addEventListener('DOMContentLoaded', function() {
       description: document.getElementById('target-description').value,
       enabled:     document.getElementById('target-enabled').checked ? 1 : 0
     };
-    fetch('/api/escalation/targets', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    })
-      .then(util.unwrap)
+    util.postResult('/api/escalation/targets', requestBody)
       .then(function(result) {
         if (!result.ok || result.data.error) {
           errorEl.textContent = result.data.error || 'save failed';

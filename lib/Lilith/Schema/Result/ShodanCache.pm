@@ -113,6 +113,10 @@ __PACKAGE__->add_columns(
 	"vulns",       { data_type => "varchar[]",                is_nullable => 1 },
 	"max_cvss",    { data_type => "numeric",                  is_nullable => 1, size => [ 3, 1 ] },
 	"hostnames",   { data_type => "varchar[]",                is_nullable => 1 },
+	"os",          { data_type => "varchar",                  is_nullable => 1, size => 255 },
+	"org",         { data_type => "varchar",                  is_nullable => 1, size => 255 },
+	"isp",         { data_type => "varchar",                  is_nullable => 1, size => 255 },
+	"asn",         { data_type => "varchar",                  is_nullable => 1, size => 32 },
 	"raw",         { data_type => "jsonb",                    is_nullable => 1 },
 );
 

@@ -3,6 +3,19 @@
 % # $escalated (hashref of row id => escalation count) is optional.
 % my $count = scalar @$results;
 % my $escalated = stash('escalated') || {};
+% # The correlation lookups for the suricata table's badges, read once for the
+% # whole page rather than per row.
+% my $cve_matches   = stash('cve_matches')   || {};
+% my $shodan_badges = stash('shodan_badges') || {};
+% # Whether the port the flow names at an end is on that end's cached
+% # open-port list.
+% my $port_open = sub {
+%   my ( $row, $end ) = @_;
+%   my $port = $row->{ $end . '_port' };
+%   return 0 unless defined $port && $port ne '';
+%   my $shodan = $shodan_badges->{ $row->{ $end . '_ip' } // '' };
+%   return $shodan && grep { $_ == $port } @{ $shodan->{ports} || [] };
+% };
 <div id="search-results">
   %= include 'partials/_results_pager', count => $count, noun => 'result', offset => $offset, limit => $limit
 
@@ -26,29 +39,28 @@
           <td><% if (my $instance = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $instance %>"><%= $instance %></a><% } %></td>
           <td class="col-host" style="display:none"><% if (my $host = $row->{host}) { %><a href="#" class="host-filter" data-host="<%= $host %>"><%= $host %></a><% } %></td>
           <td><% if (my $in_iface = $row->{in_iface}) { %><a href="#" class="iface-filter" data-iface="<%= $in_iface %>"><%= $in_iface %></a><% } %></td>
-          <td class="ip-cell"><%= include 'partials/_ip_cell', ip => $row->{src_ip} %></td>
-          <td><% if (my $src_port = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $src_port %>"><%= $src_port %></a><% } %></td>
+          % # The correlation badges, on either end: "CVE match" when the rule
+          % # names a CVE that end's cached entry lists it as vulnerable to
+          % # (ids in the tooltip), "open" when the port hit at that end is on
+          % # its cached open-port list; absence shows nothing. Inside
+          % # .shodan-badges so the Shodan toggle governs them with the rest
+          % # of the enrichment.
+          % my $row_matches = $cve_matches->{ $row->{id} } || {};
+          <td class="ip-cell"><%= include 'partials/_ip_cell', ip => $row->{src_ip} %><%
+            if (my $matched = $row_matches->{src}) { %> <span class="shodan-badges"><span class="badge bg-danger" title="rule CVE the source is vulnerable to per Shodan: <%= join(', ', @$matched) %>">CVE match</span></span><% } %></td>
+          <td><% if (my $src_port = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $src_port %>"><%= $src_port %></a><%
+            if ($port_open->($row, 'src')) { %> <span class="shodan-badges"><span class="badge bg-secondary" title="Shodan sees this port open on the source">open</span></span><% } %><% } %></td>
           <td class="ip-cell"><%= include 'partials/_ip_cell', ip => $row->{dest_ip} %><%
-            # The loudest thing a row can say: the rule names a CVE the
-            # destination's cached Shodan entry lists it as vulnerable to. The
-            # matched ids go in the tooltip; inside .shodan-badges so the
-            # Shodan toggle governs it with the rest of the enrichment.
-            my $matched = ( stash('cve_matches') || {} )->{ $row->{id} };
-            if ($matched) { %> <span class="shodan-badges"><span class="badge bg-danger" title="rule CVE the destination is vulnerable to per Shodan: <%= join(', ', @$matched) %>">CVE match</span></span><% } %></td>
-          <td><% if (my $dest_port = $row->{dest_port}) { %><a href="#" class="port-filter" data-port="<%= $dest_port %>"><%= $dest_port %></a><% } %></td>
+            if (my $matched = $row_matches->{dest}) { %> <span class="shodan-badges"><span class="badge bg-danger" title="rule CVE the destination is vulnerable to per Shodan: <%= join(', ', @$matched) %>">CVE match</span></span><% } %></td>
+          <td><% if (my $dest_port = $row->{dest_port}) { %><a href="#" class="port-filter" data-port="<%= $dest_port %>"><%= $dest_port %></a><%
+            if ($port_open->($row, 'dest')) { %> <span class="shodan-badges"><span class="badge bg-secondary" title="Shodan sees this port open on the destination">open</span></span><% } %><% } %></td>
           <td><% if (my $proto = $row->{proto}) { %><a href="#" class="proto-filter" data-proto="<%= $proto %>"><%= $proto %></a><% } %></td>
           <td><% if (my $app_proto = $row->{app_proto}) { %><a href="#" class="aproto-filter" data-aproto="<%= $app_proto %>"><%= $app_proto %></a><% } %></td>
           <td title="<%= $row->{classification} // '' %>">
             <%= $self->lilith->get_short_class($row->{classification}) %>
           </td>
           <td><% if (my $signature = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $signature %>"><%= $signature %></a><% } %></td>
-          <td class="text-muted">
-            % # gid:sid:rev, each a filter link when it is set. Kept on one line
-            % # because the colons must sit flush against the parts either side:
-            % # breaking it would put the indentation of the next line into the
-            % # cell, rendering as "1 : 2000123 : 4".
-            <% if (my $gid = $row->{gid}) { %><a href="#" class="gid-filter" data-gid="<%= $gid %>"><%= $gid %></a><% } %>:<% if (my $sid = $row->{sid}) { %><a href="#" class="sid-filter" data-sid="<%= $sid %>"><%= $sid %></a><% } %>:<% if (my $rev = $row->{rev}) { %><a href="#" class="rev-filter" data-rev="<%= $rev %>"><%= $rev %></a><% } %>
-          </td>
+          <td class="text-muted"><%= include 'partials/_rule_cell', row => $row %></td>
         </tr>
         % }
       </tbody>
@@ -80,13 +92,7 @@
             <%= $self->lilith->get_short_class($row->{classification}) %>
           </td>
           <td><% if (my $signature = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $signature %>"><%= $signature %></a><% } %></td>
-          <td class="text-muted">
-            % # gid:sid:rev, each a filter link when it is set. Kept on one line
-            % # because the colons must sit flush against the parts either side:
-            % # breaking it would put the indentation of the next line into the
-            % # cell, rendering as "1 : 2000123 : 4".
-            <% if (my $gid = $row->{gid}) { %><a href="#" class="gid-filter" data-gid="<%= $gid %>"><%= $gid %></a><% } %>:<% if (my $sid = $row->{sid}) { %><a href="#" class="sid-filter" data-sid="<%= $sid %>"><%= $sid %></a><% } %>:<% if (my $rev = $row->{rev}) { %><a href="#" class="rev-filter" data-rev="<%= $rev %>"><%= $rev %></a><% } %>
-          </td>
+          <td class="text-muted"><%= include 'partials/_rule_cell', row => $row %></td>
         </tr>
         % }
       </tbody>

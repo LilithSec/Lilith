@@ -23,13 +23,11 @@
 // Lilith::search accepts. Each list leads with that table's default.
 var _orderByCols = (window.LilithSearch || {}).orderByColumns || {};
 
-// Repopulate the Order by picker for the selected table, keeping the current
-// column when the new table also has it and falling back to that table's
-// default (the first entry) when it does not.
-function syncOrderBy(keepVal) {
+// Repopulate the Order by picker for the selected table, selecting that
+// table's default (the first entry).
+function syncOrderBy() {
   var table = document.getElementById('table-sel').value;
   var orderBy = document.getElementById('order-by');
-  var prev = keepVal ? orderBy.value : null;
   var cols = _orderByCols[table] || _orderByCols.suricata;
   orderBy.innerHTML = '';
   cols.forEach(function(column) {
@@ -37,11 +35,7 @@ function syncOrderBy(keepVal) {
     option.value = column; option.textContent = column;
     orderBy.appendChild(option);
   });
-  if (prev && cols.indexOf(prev) !== -1) {
-    orderBy.value = prev;
-  } else {
-    orderBy.value = cols[0];
-  }
+  orderBy.value = cols[0];
 }
 
 // What /api/search/values is asked for a field: the column named in its
@@ -189,27 +183,24 @@ function syncFilterFields() {
     fieldEl.classList.toggle('filter-hidden', fieldTables.indexOf(table) === -1);
   });
 }
-function applyHostCol(show) {
-  document.querySelectorAll('.col-host').forEach(function(el) {
+// Show or hide everything a view toggle governs.
+function applyDisplay(selector, show) {
+  document.querySelectorAll(selector).forEach(function(el) {
     el.style.display = show ? '' : 'none';
   });
 }
 
-// Toggle the GeoIP city label shown next to each IP's country flag.
-function applyGeoCity(show) {
-  document.querySelectorAll('#search-results .geoip-city').forEach(function(el) {
-    el.style.display = show ? '' : 'none';
-  });
-}
-
-// Toggle the cached Shodan badges shown after each IP's geo annotation. Only
-// the display: the badges are rendered with the rest of the row either way,
-// since they come from one query the page has already made.
-function applyShodanBadges(show) {
-  document.querySelectorAll('#search-results .shodan-badges').forEach(function(el) {
-    el.style.display = show ? '' : 'none';
-  });
-}
+// The view toggles that persist in localStorage: the Host column, the GeoIP
+// city label beside each IP's country flag, and the cached Shodan badges after
+// each IP's geo annotation. Display only -- the city and badges are rendered
+// with the rest of the row either way, since they come from queries the page
+// has already made. defaultOn is what applies until the user makes an explicit
+// choice: the annotations show, the extra column does not.
+var VIEW_TOGGLES = [
+  { checkboxId: 'show-host-col', storageKey: 'showHostCol',      defaultOn: false, selector: '.col-host' },
+  { checkboxId: 'show-city',     storageKey: 'showGeoCity',      defaultOn: true,  selector: '#search-results .geoip-city' },
+  { checkboxId: 'show-shodan',   storageKey: 'showShodanBadges', defaultOn: true,  selector: '#search-results .shodan-badges' }
+];
 
 // Make a filter field hold one value and nothing else. The fields are token
 // fields, so what a click-to-filter cell wants is a replacement rather than an
@@ -246,14 +237,10 @@ function bindFilter(selector, inputId, dataKey) {
 // (Re)wire all handlers and view state inside the results container. Safe to
 // call again after the results HTML is swapped in by an auto-refresh.
 function initResults() {
-  var hostCheckbox = document.getElementById('show-host-col');
-  applyHostCol(hostCheckbox && hostCheckbox.checked);
-
-  var cityCheckbox = document.getElementById('show-city');
-  applyGeoCity(!cityCheckbox || cityCheckbox.checked);
-
-  var shodanCheckbox = document.getElementById('show-shodan');
-  applyShodanBadges(!shodanCheckbox || shodanCheckbox.checked);
+  VIEW_TOGGLES.forEach(function(toggle) {
+    var checkbox = document.getElementById(toggle.checkboxId);
+    applyDisplay(toggle.selector, checkbox ? checkbox.checked : toggle.defaultOn);
+  });
 
   bindFilter('.host-filter',          'host-input',          'host');
   bindFilter('.instance-host-filter', 'instance-host-input', 'instanceHost');
@@ -279,43 +266,25 @@ function initResults() {
 
 document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('table-sel').addEventListener('change', function() {
-    syncOrderBy(false);
+    syncOrderBy();
     syncFilterFields();
   });
-  syncOrderBy(false);
+  syncOrderBy();
   syncFilterFields();
   initFilterPickers();
   var wantedOrderBy = (window.LilithSearch || {}).orderBy;
   if (wantedOrderBy) { document.getElementById('order-by').value = wantedOrderBy; }
-  var hostCheckbox = document.getElementById('show-host-col');
-  var storedHostCol = localStorage.getItem('showHostCol') === 'true';
-  hostCheckbox.checked = storedHostCol;
-  applyHostCol(storedHostCol);
-  hostCheckbox.addEventListener('change', function() {
-    localStorage.setItem('showHostCol', this.checked);
-    applyHostCol(this.checked);
-  });
 
-  // GeoIP city: show the city label next to each IP's country flag. Defaults on
-  // when the user has not made an explicit choice.
-  var cityCheckbox  = document.getElementById('show-city');
-  var storedCity    = localStorage.getItem('showGeoCity');
-  cityCheckbox.checked = ( storedCity === null ) ? true : ( storedCity === 'true' );
-  applyGeoCity(cityCheckbox.checked);
-  cityCheckbox.addEventListener('change', function() {
-    localStorage.setItem('showGeoCity', this.checked);
-    applyGeoCity(this.checked);
-  });
-
-  // Shodan badges: the cached tags, port count, and CVE count after each IP's
-  // geo annotation. Defaults on when the user has not made an explicit choice.
-  var shodanCheckbox = document.getElementById('show-shodan');
-  var storedShodan   = localStorage.getItem('showShodanBadges');
-  shodanCheckbox.checked = ( storedShodan === null ) ? true : ( storedShodan === 'true' );
-  applyShodanBadges(shodanCheckbox.checked);
-  shodanCheckbox.addEventListener('change', function() {
-    localStorage.setItem('showShodanBadges', this.checked);
-    applyShodanBadges(this.checked);
+  // Restore each view toggle from localStorage, apply it, and persist changes.
+  VIEW_TOGGLES.forEach(function(toggle) {
+    var checkbox = document.getElementById(toggle.checkboxId);
+    var stored   = localStorage.getItem(toggle.storageKey);
+    checkbox.checked = ( stored === null ) ? toggle.defaultOn : ( stored === 'true' );
+    applyDisplay(toggle.selector, checkbox.checked);
+    checkbox.addEventListener('change', function() {
+      localStorage.setItem(toggle.storageKey, this.checked);
+      applyDisplay(toggle.selector, this.checked);
+    });
   });
 
   // Auto-FC: keep the filter panel collapsed on load (overriding the server's

@@ -623,7 +623,7 @@ sub _ipinfo_gather {
 			$shodan->{cached} = 1;
 		} else {
 			( $shodan, $shodan_error, $shodan_raw )
-				= Lilith::Shodan::gather( $ip, $self->shodan_api_key, $self->shodan_source );
+				= Lilith::Shodan::gather( $ip, $self->shodan_api_key, $self->shodan_source, $self->shodan_history );
 		}
 	}
 

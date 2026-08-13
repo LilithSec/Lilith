@@ -7,6 +7,7 @@ use Exporter qw( import );
 
 our @EXPORT_OK = qw(
 	clamped_int
+	column_exists
 	connect_cached_dbh
 	host_or_text_expr
 	measure_expr
@@ -129,6 +130,17 @@ The second is the estimated number of distinct values. The walk is capped in any
 case, but reaching the cap means paying for thousands of descents before falling
 back, so a column already known to be wide is not started. The estimate comes
 from C<pg_stats> and is only a sample, hence the cap staying as the backstop.
+
+=head2 column_exists( $dbh, $table, $column )
+
+Whether a table currently has a column, asked of the catalog: 1 when it does, 0
+when it does not. How the readers cope with a database still on an older schema
+than the code -- a promoted or generated column is probed for rather than
+assumed, so the feature built on it can be withheld instead of erroring.
+
+Answers per call and dies if the catalog cannot be read; whether and how long
+to remember the answer is the caller's business, since each caller has its own
+rules about caching a failure.
 
 =head2 clamped_int( $value, $default, $min, $max )
 
@@ -271,6 +283,16 @@ SQL
 	$args{cache}{$table}{$column} = $viable;
 	return $viable;
 } ## end sub skip_scan_viable
+
+sub column_exists {
+	my ( $dbh, $table, $column ) = @_;
+	my ($found) = $dbh->selectrow_array(
+		'SELECT 1 FROM pg_attribute WHERE attrelid = ?::regclass'
+			. ' AND attname = ? AND attnum > 0 AND NOT attisdropped',
+		undef, $table, $column
+	);
+	return $found ? 1 : 0;
+}
 
 sub clamped_int {
 	my ( $value, $default, $min, $max ) = @_;

@@ -1,15 +1,16 @@
 package Lilith::Web;
 
 use Mojo::Base 'Mojolicious';
-use Mojo::File     qw(curfile);
-use TOML           qw(from_toml);
-use File::Slurp    qw(read_file);
-use File::Temp     ();
-use Mojo::IOLoop   ();
-use Mojo::JSON     ();
-use Lilith         ();
-use Lilith::Shodan ();
-use Lilith::CVEDB  ();
+use Mojo::File         qw(curfile);
+use TOML               qw(from_toml);
+use File::Slurp        qw(read_file);
+use File::Temp         ();
+use Mojo::IOLoop       ();
+use Mojo::JSON         ();
+use Lilith             ();
+use Lilith::Shodan     ();
+use Lilith::CVEDB      ();
+use Lilith::ConfigUtil ();
 
 # When run from a checkout, share/ lives three directories up from
 # lib/Lilith/Web.pm and takes priority so an installed copy of the dist
@@ -456,6 +457,13 @@ sub startup {
 		}
 	);
 
+	# Whether host lookups ask for every banner ever crawled rather than only
+	# the current ones (see Lilith::Shodan::fetch). TOML::from_toml hands
+	# booleans back as the strings 'true'/'false' -- both truthy -- so it is
+	# coerced the same way cape_enable is.
+	my $shodan_history = Lilith::ConfigUtil::to_bool( $toml->{shodan_history} );
+	$self->helper( shodan_history => sub { $shodan_history } );
+
 	# Which tier the configured key selects, and so which rows of the cache may
 	# be read: the keyless summary and the keyed host API differ in depth, and a
 	# row written by the lesser must not stand in for the greater. The rule lives
@@ -538,16 +546,19 @@ sub startup {
 		}
 	);
 
-	# The rows on a page whose rule names a CVE the destination's cached Shodan
-	# entry lists it as vulnerable to -- an exploit thrown at a host Shodan says
-	# is actually vulnerable to it, the strongest triage signal this data can
-	# give, and worth more than either half shown side by side.
+	# The rows on a page whose rule names a CVE an end's cached Shodan entry
+	# lists it as vulnerable to -- an exploit thrown at a host Shodan says is
+	# actually vulnerable to it, the strongest triage signal this data can
+	# give, and worth more than either half shown side by side. Both ends are
+	# compared: src and dest are the triggering packet's direction, not
+	# attacker and victim, so which end the vulnerable host lands on is up to
+	# the rule that fired.
 	#
 	# The comparison is done here at render time and costs no query of its own:
 	# the cache side rides the vuln_ids the shodan_badges helper already fetched
 	# for the page, and the rule side comes out of each row's raw -- decoded
-	# only for rows whose destination has cached CVEs at all, which on most
-	# pages is few of them.
+	# only for rows where some end has cached CVEs at all, which on most pages
+	# is few of them.
 	#
 	# Args:
 	#
@@ -555,18 +566,19 @@ sub startup {
 	#     metadata, so anything else returns empty.
 	#
 	#   - $rows :: the result rows, as the search controller has them. Each
-	#     row's id, dest_ip, and raw are read. raw may be the JSON string the
-	#     row was fetched with or already decoded -- the event view holds it
-	#     decoded.
+	#     row's id, src_ip, dest_ip, and raw are read. raw may be the JSON
+	#     string the row was fetched with or already decoded -- the event view
+	#     holds it decoded.
 	#
 	#   - $badges :: what the shodan_badges helper returned for these rows.
 	#
-	# Returns: a hash ref keyed by row id, each value the matched ids sorted.
-	# Only rows with a match are present, so existence of the key is the badge
-	# test. Empty whenever there is nothing to compare.
+	# Returns: a hash ref keyed by row id, each value a hash of the ends that
+	# matched, each holding its matched ids sorted. Only rows with a match are
+	# present, and only the ends that matched, so existence is the badge test
+	# at both levels. Empty whenever there is nothing to compare.
 	#
 	#     my $matches = $c->cve_matches( 'suricata', $results, $badges );
-	#     # $matches->{5012} is [ 'CVE-2021-44228' ]
+	#     # $matches->{5012}{dest} is [ 'CVE-2021-44228' ]
 	$self->helper(
 		cve_matches => sub {
 			my ( $c, $table, $rows, $badges ) = @_;
@@ -576,11 +588,24 @@ sub startup {
 			return {} unless ref $badges eq 'HASH' && keys %{$badges};
 
 			my %matches;
+			my %vuln_set;    # ip => { cve => 1 }; the badge entries are per
+							 # address and shared across rows, so each set is
+							 # built once however many rows name the address
 			foreach my $row ( @{$rows} ) {
-				next unless ref $row eq 'HASH' && defined $row->{id} && defined $row->{dest_ip};
+				next unless ref $row eq 'HASH' && defined $row->{id};
 
-				my $entry = $badges->{ $row->{dest_ip} };
-				next unless ref $entry eq 'HASH' && ref $entry->{vuln_ids} eq 'ARRAY' && @{ $entry->{vuln_ids} };
+				# which ends have cached CVEs at all; raw is only worth
+				# decoding when one does
+				my %end_ip;
+				for my $end (qw(src dest)) {
+					my $ip    = $row->{ $end . '_ip' };
+					my $entry = defined $ip ? $badges->{$ip} : undef;
+					next
+						unless ref $entry eq 'HASH' && ref $entry->{vuln_ids} eq 'ARRAY' && @{ $entry->{vuln_ids} };
+					$end_ip{$end} = $ip;
+					$vuln_set{$ip} ||= { map { $_ => 1 } @{ $entry->{vuln_ids} } };
+				}
+				next unless %end_ip;
 
 				my $raw = $row->{raw};
 				if ( defined $raw && !ref $raw ) {
@@ -589,9 +614,11 @@ sub startup {
 				my $rule_cves = Lilith::CVEDB::rule_cves($raw);
 				next unless @{$rule_cves};
 
-				my %vulnerable = map  { $_ => 1 } @{ $entry->{vuln_ids} };
-				my @matched    = grep { $vulnerable{$_} } @{$rule_cves};
-				$matches{ $row->{id} } = \@matched if @matched;
+				for my $end ( keys %end_ip ) {
+					my $vulnerable = $vuln_set{ $end_ip{$end} };
+					my @matched    = grep { $vulnerable->{$_} } @{$rule_cves};
+					$matches{ $row->{id} }{$end} = \@matched if @matched;
+				}
 			} ## end foreach my $row ( @{$rows} )
 
 			return \%matches;
@@ -847,7 +874,6 @@ sub startup {
 	# default slug. Off by default, since a submission pushes a file to an outside
 	# service; the feature is available only when enabled and at least one server
 	# with a url is configured (mirrors the virani gate).
-	require Lilith::CapeSubmit;
 	my %cape_servers;
 	if ( ref $toml->{cape_servers} eq 'HASH' ) {
 		foreach my $name ( keys %{ $toml->{cape_servers} } ) {
@@ -861,7 +887,7 @@ sub startup {
 	# cape_enable comes from TOML, whose parser yields the bare strings
 	# 'true'/'false' -- both truthy in Perl -- so coerce it properly rather than
 	# with a bare truth test (a plain ? : would leave 'false' enabled).
-	my $cape_enabled = Lilith::CapeSubmit::to_bool( $toml->{cape_enable} );
+	my $cape_enabled = Lilith::ConfigUtil::to_bool( $toml->{cape_enable} );
 	$self->helper( cape_servers        => sub { \%cape_servers } );
 	$self->helper( cape_slug           => sub { $cape_slug } );
 	$self->helper( cape_submit_enabled => sub { ( $cape_enabled && scalar keys %cape_servers ) ? 1 : 0 } );

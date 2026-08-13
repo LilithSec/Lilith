@@ -60,6 +60,14 @@ pre.raw-json { max-height: 600px; overflow-y: auto; font-size: 0.78em; backgroun
 /* The small "?" button that opens the IP / Domain info modal (partials/_info_btn). */
 .info-btn { font-size: 0.65rem; line-height: 1.2; }
 
+/* The label/value rows LilithUtil.kvRow builds (the lookup modals and the
+   Shodan service blocks). */
+.kv-key { width: 170px; white-space: nowrap; }
+.kv-val { word-break: break-all; }
+
+/* The key column of the event view's protocol detail tables. */
+.event-proto-table th { width: 180px; }
+
 /* Tom Select's Bootstrap 5 theme (the filter fields on /search) reads --bs-*
    variables for most of its colours, so it follows the dark theme on its own.
    These few it hardcodes to light values, which on a dark page show up as pale

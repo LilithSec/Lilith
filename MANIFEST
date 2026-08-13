@@ -48,6 +48,7 @@ lib/Lilith/CLI/Command/Search.pm
 lib/Lilith/CLI/Command/ShodanCache.pm
 lib/Lilith/Allani.pm
 lib/Lilith/CapeSubmit.pm
+lib/Lilith/ConfigUtil.pm
 lib/Lilith/CVEDB.pm
 lib/Lilith/DBUtil.pm
 lib/Lilith/Escalate.pm
@@ -127,6 +128,7 @@ share/templates/partials/_class_options.html.ep
 share/templates/partials/_filter_chips.html.ep
 share/templates/partials/_table_options.html.ep
 share/templates/partials/_event_id_cell.html.ep
+share/templates/partials/_rule_cell.html.ep
 share/templates/partials/_ip_cell.html.ep
 share/templates/partials/_modal.html.ep
 share/templates/partials/_card.html.ep
@@ -176,6 +178,7 @@ share/migrations/PostgreSQL/deploy/13/001-auto.sql
 share/migrations/PostgreSQL/deploy/14/001-auto.sql
 share/migrations/PostgreSQL/deploy/15/001-auto.sql
 share/migrations/PostgreSQL/deploy/16/001-auto.sql
+share/migrations/PostgreSQL/deploy/17/001-auto.sql
 share/migrations/PostgreSQL/downgrade/1-0/001-auto.sql
 share/migrations/PostgreSQL/downgrade/3-2/001-auto.sql
 share/migrations/PostgreSQL/downgrade/4-3/001-auto.sql
@@ -191,6 +194,7 @@ share/migrations/PostgreSQL/downgrade/13-12/001-auto.sql
 share/migrations/PostgreSQL/downgrade/14-13/001-auto.sql
 share/migrations/PostgreSQL/downgrade/15-14/001-auto.sql
 share/migrations/PostgreSQL/downgrade/16-15/001-auto.sql
+share/migrations/PostgreSQL/downgrade/17-16/001-auto.sql
 share/migrations/PostgreSQL/upgrade/0-1/001-auto.sql
 share/migrations/PostgreSQL/upgrade/1-2/001-auto.sql
 share/migrations/PostgreSQL/upgrade/2-3/001-auto.sql
@@ -207,6 +211,7 @@ share/migrations/PostgreSQL/upgrade/12-13/001-auto.sql
 share/migrations/PostgreSQL/upgrade/13-14/001-auto.sql
 share/migrations/PostgreSQL/upgrade/14-15/001-auto.sql
 share/migrations/PostgreSQL/upgrade/15-16/001-auto.sql
+share/migrations/PostgreSQL/upgrade/16-17/001-auto.sql
 share/fixtures/1/conf/keep
 share/fixtures/2/conf/keep
 share/fixtures/3/conf/keep
@@ -223,6 +228,7 @@ share/fixtures/13/conf/keep
 share/fixtures/14/conf/keep
 share/fixtures/15/conf/keep
 share/fixtures/16/conf/keep
+share/fixtures/17/conf/keep
 share/public/vendor/Chart.js
 share/public/js/time-range.js
 share/public/js/auto-refresh.js

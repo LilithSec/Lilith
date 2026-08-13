@@ -131,14 +131,17 @@ sub index {
 				shodan_src_cvss   => _param_list( $self, 'shodan_src_cvss' ),
 				shodan_dest_cvss  => _param_list( $self, 'shodan_dest_cvss' ),
 				cve               => _param_list( $self, 'cve' ),
-				src_port          => \@src_port,
-				dest_port         => \@dest_port,
-				gid               => \@gid,
-				sid               => \@sid,
-				rev               => \@rev,
-				malscore          => \@malscore,
-				size              => \@size,
-				task              => \@task,
+
+				shodan_src_cve_match  => _param_list( $self, 'shodan_src_cve_match' ),
+				shodan_dest_cve_match => _param_list( $self, 'shodan_dest_cve_match' ),
+				src_port              => \@src_port,
+				dest_port             => \@dest_port,
+				gid                   => \@gid,
+				sid                   => \@sid,
+				rev                   => \@rev,
+				malscore              => \@malscore,
+				size                  => \@size,
+				task                  => \@task,
 			);
 		};
 		$error = $@ if $@;

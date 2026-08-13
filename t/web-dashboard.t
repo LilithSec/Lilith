@@ -282,6 +282,18 @@ SKIP: {
 		->json_is( '/rows/0/count', 2,                 'with its alerts' )
 		->json_is( '/rows/1/value', 'Not looked up',   'the rest fall in their own bucket' );
 
+	# The coverage stat as a timeseries: per bucket, that end's distinct
+	# addresses split into Enriched / Stale / Not looked up -- whether the
+	# cache timer has been keeping up, not just where it stands. Everything
+	# above landed in one bucket: the held source enriched, the other two
+	# never looked up.
+	$t->get_ok('/api/dashboard/timeseries?table=suricata&metric=shodan_src_coverage&bucket=day')
+		->status_is( 200, 'coverage timeseries ok' )
+		->json_is( '/grouped', 1, 'the coverage series is grouped' );
+	my %series_group = map { $_->{group} => $_->{count} } @{ $t->tx->res->json->{rows} };
+	is( $series_group{'Enriched'},      1, 'the held source counts as enriched in its bucket' );
+	is( $series_group{'Not looked up'}, 2, 'the never-looked-up sources land in their own series' );
+
 	# Layout persistence: the seeded default board is empty; a POST is stored and
 	# read back (exercises Lilith::dashboard_get/save and the version-6 table).
 	$t->get_ok('/api/dashboard/layout')

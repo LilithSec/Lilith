@@ -10,18 +10,26 @@
 <div class="alert alert-warning py-2">Event #<%= $id %> not found in the <em><%= $table %></em> table.</div>
 % } else {
 
-% # The strongest thing this page can say: the rule names a CVE the
-% # destination's cached Shodan entry lists it as vulnerable to. Loud and
-% # first, since it changes what the analyst does next.
+% # The strongest thing this page can say: the rule names a CVE an end's
+% # cached Shodan entry lists it as vulnerable to. Loud and first, since it
+% # changes what the analyst does next. One line per end that matched --
+% # which end the vulnerable host is on is up to the rule that fired.
 % if (my $cve_match = stash('cve_match')) {
 <div class="alert alert-danger py-2 mb-3">
-  <strong>CVE match</strong> &mdash; the rule names <%= @$cve_match == 1 ? 'a CVE' : 'CVEs' %> Shodan lists the destination as vulnerable to:
-  % my $last = $cve_match->[-1];
-  % for my $m (@$cve_match) {
+  % for my $match_end (grep { $cve_match->{$_} } qw(dest src)) {
+  %   my $list = $cve_match->{$match_end};
+  <div>
+  <strong>CVE match</strong> &mdash; the rule names <%= @$list == 1 ? 'a CVE' : 'CVEs' %> Shodan lists the <%= $match_end eq 'src' ? 'source' : 'destination' %> as vulnerable to:
+  % my $last = $list->[-1];
+  % for my $m (@$list) {
   %   my @notes;
   %   push(@notes, 'CVSS ' . $m->{cvss}) if defined $m->{cvss};
   %   push(@notes, 'KEV') if $m->{kev};
+  %   # the vulnerable service is the one on the very port the flow names
+  %   push(@notes, 'on the flow port') if $m->{on_port};
   <a class="alert-link" href="https://nvd.nist.gov/vuln/detail/<%= $m->{cve} %>" target="_blank" rel="noopener"><%= $m->{cve} %></a><% if (@notes) { %> (<%= join(', ', @notes) %>)<% } %><%= $m == $last ? '' : ',' %>
+  % }
+  </div>
   % }
 </div>
 % }
@@ -141,20 +149,12 @@
       % }
     </div>
     % }
-    % if (grep { defined $event->{$_} && $event->{$_} ne '' } qw(flow_start flow_id timestamp)) {
+    % # Two more plain key/value lines: the flow identity, then where it was
+    % # seen. Same rendering, so one loop over the two key lists.
+    % for my $line_keys ([qw(flow_start flow_id timestamp)], [qw(instance host)]) {
+    %   next unless grep { defined $event->{$_} && $event->{$_} ne '' } @$line_keys;
     <div class="event-info-flow font-monospace d-flex flex-wrap align-items-baseline gap-3 mt-1">
-      % for my $flow_key (qw(flow_start flow_id timestamp)) {
-      %   next unless defined $event->{$flow_key} && $event->{$flow_key} ne '';
-      <span class="d-inline-flex align-items-baseline gap-1">
-        <span class="text-muted"><%= $flow_key %></span>
-        <span><%= $event->{$flow_key} %></span>
-      </span>
-      % }
-    </div>
-    % }
-    % if (grep { defined $event->{$_} && $event->{$_} ne '' } qw(instance host)) {
-    <div class="event-info-flow font-monospace d-flex flex-wrap align-items-baseline gap-3 mt-1">
-      % for my $flow_key (qw(instance host)) {
+      % for my $flow_key (@$line_keys) {
       %   next unless defined $event->{$flow_key} && $event->{$flow_key} ne '';
       <span class="d-inline-flex align-items-baseline gap-1">
         <span class="text-muted"><%= $flow_key %></span>
@@ -188,6 +188,26 @@
       %       : $worst >= 9 ? 'bg-danger'
       %       : $worst >= 7 ? 'bg-warning text-dark' : 'bg-secondary';
       <span class="badge <%= $cvss_class %>" title="<%= defined($worst) ? 'worst CVSS ' . $worst : 'no scores cached' %>"><%= $s->{vuln_count} %> CVE</span>
+      %   }
+      %   # the port half: whether this end's flow port is on its open list,
+      %   # and what the crawl saw running there (API-tier depth). The ja3s
+      %   # line only appears when both the alert and the crawl carry one.
+      %   if (defined $s->{port_open}) {
+      %     if ($s->{port_open}) {
+      <span class="badge bg-secondary" title="Shodan sees this port open on this host">port <%= $s->{flow_port} %> open</span>
+      %     } else {
+      <span class="text-muted" title="weaker evidence than presence: Shodan&#39;s port coverage is not a full sweep">port <%= $s->{flow_port} %> not seen open</span>
+      %     }
+      %   }
+      %   if ($s->{service_label}) {
+      <span title="what Shodan saw running on this end&#39;s flow port"><span class="text-muted">service</span> <%= $s->{service_label} %></span>
+      %   }
+      %   if (defined $s->{ja3s_match}) {
+      %     if ($s->{ja3s_match}) {
+      <span class="text-muted" title="the alert&#39;s TLS ja3s equals the crawled service&#39;s, so this entry describes the service the sensor watched">ja3s matches crawl</span>
+      %     } else {
+      <span class="badge bg-warning text-dark" title="the alert&#39;s TLS ja3s differs from the crawled service&#39;s: the service changed since the crawl, or a proxy answered one of the two">ja3s differs from crawl</span>
+      %     }
       %   }
       %   if (defined $s->{info}{os} && $s->{info}{os} ne '') {
       <span><span class="text-muted">os</span> <%= $s->{info}{os} %></span>
@@ -281,12 +301,12 @@
     </a>
     % }
 % end, body => begin
-    <table class="table table-dark table-sm table-bordered mb-0">
+    <table class="table table-dark table-sm table-bordered mb-0 event-proto-table">
       <tbody>
         % for my $field (qw(hostname http_method url protocol status http_content_type http_user_agent http_refer length)) {
           % next unless defined $http->{$field};
         <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
+          <th class="text-muted ps-3"><%= $field %></th>
           <td class="font-monospace"><%= $http->{$field} %>
             % if ($field eq 'hostname') {
             <%= include 'partials/_info_btn', kind => 'domain', value => $http->{$field}, extra_class => 'ms-1' %>
@@ -302,12 +322,12 @@
 % if (ref $proto_root eq 'HASH' && $proto_app && lc($proto_app) eq 'dns' && ref $proto_root->{dns} eq 'HASH') {
   % my $dns = $proto_root->{dns};
 %= include 'partials/_card', title => 'DNS Details', body_class => 'p-0', body => begin
-    <table class="table table-dark table-sm table-bordered mb-0">
+    <table class="table table-dark table-sm table-bordered mb-0 event-proto-table">
       <tbody>
         % for my $field (qw(type id tx_id opcode rcode ttl rdata version flags rd rrname rrtype)) {
           % next unless defined $dns->{$field};
         <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
+          <th class="text-muted ps-3"><%= $field %></th>
           <td class="font-monospace"><%= ref $dns->{$field} eq 'ARRAY' ? join(', ', @{$dns->{$field}}) : $dns->{$field} %>
             % if ($field eq 'rrname' && !ref $dns->{$field}) {
             <%= include 'partials/_info_btn', kind => 'domain', value => $dns->{$field}, extra_class => 'ms-1' %>
@@ -317,7 +337,7 @@
         % }
         % if (ref $dns->{queries} eq 'ARRAY' && @{$dns->{queries}}) {
         <tr>
-          <th style="width:180px" class="text-muted ps-3">queries</th>
+          <th class="text-muted ps-3">queries</th>
           <td class="font-monospace">
             % for my $query (@{$dns->{queries}}) {
               <%= $query->{rrname} // '' %> <%= $query->{rrtype} // '' %>
@@ -331,7 +351,7 @@
         % }
         % if (ref $dns->{answers} eq 'ARRAY' && @{$dns->{answers}}) {
         <tr>
-          <th style="width:180px" class="text-muted ps-3">answers</th>
+          <th class="text-muted ps-3">answers</th>
           <td class="font-monospace">
             % for my $answer (@{$dns->{answers}}) {
               <%= $answer->{rrname} // '' %> <%= $answer->{rrtype} // '' %> <%= $answer->{rdata} // '' %> (ttl <%= $answer->{ttl} // '' %>)<br>
@@ -348,13 +368,13 @@
   % my $smtp = $proto_root->{smtp};
   % my $email = ref $proto_root->{email} eq 'HASH' ? $proto_root->{email} : {};
 %= include 'partials/_card', title => 'SMTP Details', body_class => 'p-0', body => begin
-    <table class="table table-dark table-sm table-bordered mb-0">
+    <table class="table table-dark table-sm table-bordered mb-0 event-proto-table">
       <tbody>
         % for my $field (qw(helo mail_from)) {
           % next unless defined $smtp->{$field};
           % (my $mail_from_domain = $smtp->{$field}) =~ s/^[^@]*@//;
         <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $field %></th>
+          <th class="text-muted ps-3"><%= $field %></th>
           <td class="font-monospace"><%= $smtp->{$field} %>
             % if ($field eq 'mail_from' && $mail_from_domain) {
             <%= include 'partials/_info_btn', kind => 'domain', value => $mail_from_domain, extra_class => 'ms-1' %>
@@ -364,7 +384,7 @@
         % }
         % if (ref $smtp->{rcpt_to} eq 'ARRAY' && @{$smtp->{rcpt_to}}) {
         <tr>
-          <th style="width:180px" class="text-muted ps-3">rcpt_to</th>
+          <th class="text-muted ps-3">rcpt_to</th>
           <td class="font-monospace">
             % for my $recipient (@{$smtp->{rcpt_to}}) {
               % (my $recipient_domain = $recipient) =~ s/^[^@]*@//;
@@ -380,7 +400,7 @@
         % for my $field (qw(from to subject attachment)) {
           % next unless defined $email->{$field};
         <tr>
-          <th style="width:180px" class="text-muted ps-3">email.<%= $field %></th>
+          <th class="text-muted ps-3">email.<%= $field %></th>
           <td class="font-monospace"><%= ref $email->{$field} eq 'ARRAY' ? join(', ', @{$email->{$field}}) : $email->{$field} %></td>
         </tr>
         % }
@@ -581,7 +601,7 @@
 %                     :                            $proto_root;
 %   next unless ref $protocol_data eq 'HASH';
 %= include 'partials/_card', title => $card->{title}, body_class => 'p-0', body => begin
-    <table class="table table-dark table-sm table-bordered mb-0">
+    <table class="table table-dark table-sm table-bordered mb-0 event-proto-table">
       <tbody>
         % for my $row_group (@{ $card->{rows} }) {
           % my $group_data = $protocol_data;
@@ -598,7 +618,7 @@
             % for my $field (@{ $row_group->{fields} }) {
               % next unless defined $group_data->{$field};
         <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $label_prefix . $field %></th>
+          <th class="text-muted ps-3"><%= $label_prefix . $field %></th>
           <td class="font-monospace"><%= $row_group->{join_arrays} && ref $group_data->{$field} eq 'ARRAY' ? join(', ', @{ $group_data->{$field} }) : $group_data->{$field} %>
             % if ($row_group->{domain_fields} && $row_group->{domain_fields}{$field}) {
             <%= include 'partials/_info_btn', kind => 'domain', value => $group_data->{$field}, extra_class => 'ms-1' %>
@@ -610,7 +630,7 @@
             % for my $field (@{ $row_group->{fields} }) {
               % next unless ref $group_data->{$field} eq 'ARRAY' && @{ $group_data->{$field} };
         <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $label_prefix . $field %></th>
+          <th class="text-muted ps-3"><%= $label_prefix . $field %></th>
           <td class="font-monospace"><%= join(', ', @{ $group_data->{$field} }) %></td>
         </tr>
             % }
@@ -619,7 +639,7 @@
             % if (ref $entries eq 'ARRAY' && @$entries) {
               % my $format_entry = $row_group->{format} // $format_key_value_entry;
         <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $row_group->{label} // $label_prefix . $row_group->{field} %></th>
+          <th class="text-muted ps-3"><%= $row_group->{label} // $label_prefix . $row_group->{field} %></th>
           <td class="font-monospace">
             % for my $entry (@$entries) {
               <%= $format_entry->($entry) %><br>
@@ -631,7 +651,7 @@
             % for my $field (sort keys %$group_data) {
               % next if ref $group_data->{$field};
         <tr>
-          <th style="width:180px" class="text-muted ps-3"><%= $label_prefix . $field %></th>
+          <th class="text-muted ps-3"><%= $label_prefix . $field %></th>
           <td class="font-monospace"><%= $group_data->{$field} %></td>
         </tr>
             % }

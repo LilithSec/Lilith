@@ -22,20 +22,26 @@
   Chart.defaults.borderColor = 'rgba(255,255,255,0.08)';
   Chart.defaults.font.size = 11;
 
-  var GROUP_COL = { suricata: 'classification', sagan: 'classification', cape: 'target', baphomet: 'event_type' };
   // Allani log sources a widget may target alongside the alert tables; such a
   // widget fetches from /api/logs/* (source=) instead of /api/dashboard/* (table=).
   var LOG_SOURCES = { syslog: 1, http: 1, http_error: 1 };
   function isLogSource(source) { return !!LOG_SOURCES[source]; }
   function apiBase(source) { return isLogSource(source) ? '/api/logs' : '/api/dashboard'; }
   var PALETTE = ['#dc3545','#0d6efd','#fd7e14','#20c997','#6f42c1','#ffc107','#0dcaf0','#d63384','#198754','#adb5bd'];
-  // The Shodan stat metrics and the titles they default to. Each reads as a
-  // "percent (of)" string rather than a number, so none of them abbreviates.
-  var SHODAN_METRIC = {
-    shodan_src_coverage:   'Shodan coverage (sources)',
-    shodan_src_staleness:  'Shodan staleness (sources)',
-    shodan_dest_coverage:  'Shodan coverage (destinations)',
-    shodan_dest_staleness: 'Shodan staleness (destinations)'
+  // The Shodan stat metrics and the titles they default to, read off the
+  // widget modal's Metric picker so the labels live in the template alone.
+  // Each reads as a "percent (of)" string rather than a number, so none of
+  // them abbreviates.
+  var SHODAN_METRIC = {};
+  document.querySelectorAll('#wm-metric option[value^="shodan_"]').forEach(function(option) {
+    SHODAN_METRIC[option.value] = option.textContent.trim();
+  });
+  // The coverage pair may also ride a timeseries widget -- coverage over
+  // time, has the cache timer been keeping up. Picked from the Group by list
+  // and saved as config.metric.
+  var SHODAN_TS_METRIC = {
+    shodan_src_coverage:  SHODAN_METRIC.shodan_src_coverage,
+    shodan_dest_coverage: SHODAN_METRIC.shodan_dest_coverage
   };
 
   // Built-in dashboard presets the Reset menu offers. Each is a list of ordinary
@@ -137,6 +143,8 @@
     // note the table only when the widget pins one different from the board's
     var suffix = widget.config.table ? (' · ' + widgetTable) : '';
     if (widget.type === 'timeseries') {
+      var coverage = SHODAN_TS_METRIC[widget.config.metric];
+      if (coverage) { return coverage + ' over time' + suffix; }
       return (measure || 'Alerts') + ' over time' + (widget.config.group_by ? ' (by ' + widget.config.group_by + ')' : '') + suffix;
     }
     if (widget.type === 'top')       { return 'Top ' + (widget.config.column || '') + (measure ? ' by ' + measure : '') + suffix; }
@@ -290,7 +298,7 @@
         .catch(function(error) { showNote(widget, error.message); });
     } else if (widget.type === 'timeseries') {
       var unit = resolveBucket(widget);
-      getJSON(base + '/timeseries' + qsFor(widgetTable, { bucket: unit, group_by: widget.config.group_by, top_groups: 6, measure: widget.config.measure }))
+      getJSON(base + '/timeseries' + qsFor(widgetTable, { bucket: unit, group_by: widget.config.group_by, top_groups: 6, measure: widget.config.measure, metric: widget.config.metric }))
         .then(function(data) {
           // log timeseries buckets are ISO strings; the renderer wants epoch seconds
           if (isLogSource(widgetTable)) { (data.rows || []).forEach(function(row) { row.bucket = Math.floor(new Date(row.bucket).getTime() / 1000); }); }
@@ -329,13 +337,12 @@
   // restores its own table / time range / GPCD setting.
   function currentSettings() { return { table: state.table, go_back_minutes: state.mins, show_gpcd: state.showGpcd ? 1 : 0, bucket: state.bucket }; }
   function postLayout(layout) {
-    return fetch('/api/dashboard/layout', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({ name: state.board, layout: layout, settings: currentSettings() }) });
+    return postJSON('/api/dashboard/layout', { name: state.board, layout: layout, settings: currentSettings() });
   }
   var saveTimer;
   function saveLayout() {
     var layout = currentLayout();
-    widgets = layout.map(function(node) { return { id: node.id, type: node.type, config: node.config, x: node.x, y: node.y, w: node.w, h: node.h }; });
+    widgets = layout;
     postLayout(layout).catch(function() {});
   }
   // Only persist while editing: out of edit mode the grid is locked, so a change
@@ -420,11 +427,22 @@
         var columnOption = document.createElement('option'); columnOption.value = column; columnOption.textContent = column; columnSelect.appendChild(columnOption);
         var groupOption = document.createElement('option'); groupOption.value = column; groupOption.textContent = column; groupSelect.appendChild(groupOption);
       });
+      // the coverage series ride the Group by list too, but only where the
+      // enrichment exists at all -- the alert tables, not the Allani logs
+      if (!isLogSource(table)) {
+        var covGroup = document.createElement('optgroup'); covGroup.label = 'Shodan';
+        Object.keys(SHODAN_TS_METRIC).forEach(function(metric) {
+          var covOption = document.createElement('option');
+          covOption.value = metric; covOption.textContent = SHODAN_TS_METRIC[metric];
+          covGroup.appendChild(covOption);
+        });
+        groupSelect.appendChild(covGroup);
+      }
       measures.forEach(function(measure) {
         var option = document.createElement('option'); option.value = measure.name; option.textContent = measure.label; measureSelect.appendChild(option);
       });
       if (widget && (widget.type === 'top' || widget.type === 'stat')) { columnSelect.value = widget.config.column || ''; }
-      if (widget && widget.type === 'timeseries') { groupSelect.value = widget.config.group_by || ''; }
+      if (widget && widget.type === 'timeseries') { groupSelect.value = widget.config.metric || widget.config.group_by || ''; }
       document.getElementById('wm-style').value = (widget && widget.config.style) ? widget.config.style : 'bar';
       document.getElementById('wm-limit').value = (widget && widget.config.limit) ? widget.config.limit : 10;
       measureSelect.value = (widget && widget.config.measure) ? widget.config.measure : 'count';
@@ -461,10 +479,13 @@
       config.limit = limit;
     }
     if (type === 'timeseries') {
-      var group = document.getElementById('wm-group').value; if (group) { config.group_by = group; }
+      var group = document.getElementById('wm-group').value;
+      // a coverage entry is a metric, not a column to group by
+      if (SHODAN_TS_METRIC[group]) { config.metric = group; }
+      else if (group) { config.group_by = group; }
       var bucket = document.getElementById('wm-bucket').value; if (bucket) { config.bucket = bucket; }
     }
-    if ((type === 'top' || type === 'timeseries') && measure && measure !== 'count') { config.measure = measure; }
+    if ((type === 'top' || type === 'timeseries') && measure && measure !== 'count' && !config.metric) { config.measure = measure; }
     if (type === 'stat') {
       var metric = document.getElementById('wm-metric').value;
       config.metric = metric;
@@ -524,7 +545,9 @@
   // ---- dashboards (boards) ----
   function applySettings(settings) {
     settings = settings || {};
-    if (settings.table && /^(?:suricata|sagan|cape|baphomet|syslog|http|http_error)$/.test(settings.table)) { state.table = settings.table; }
+    // a valid table is one the Default table picker offers, so a new table
+    // needs no change here
+    if (settings.table && document.querySelector('#db-table option[value="' + settings.table + '"]')) { state.table = settings.table; }
     if (settings.go_back_minutes) { state.mins = Number(settings.go_back_minutes); }
     if (settings.show_gpcd !== undefined) { state.showGpcd = !!settings.show_gpcd; }
     state.bucket = (settings.bucket && /^(?:auto|minute|hour|day|week|month)$/.test(settings.bucket)) ? settings.bucket : 'auto';

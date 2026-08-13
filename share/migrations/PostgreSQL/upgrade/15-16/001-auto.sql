@@ -37,10 +37,10 @@ CREATE TABLE cvedb_cache (
 
 -- The CVE ids a Suricata rule names, promoted out of raw the same way and for
 -- the same reason as severity and the MITRE annotations in 12 -> 13: comparing
--- them against shodan_cache.vulns -- "an exploit for a CVE the destination is
--- actually vulnerable to" -- has to happen in SQL for the dashboard and the
--- search filters, and digging them out of raw per row means detoasting the
--- whole EVE record to read a few ids.
+-- them against shodan_cache.vulns -- "an exploit for a CVE the host at an end
+-- of the flow is actually vulnerable to" -- has to happen in SQL for the
+-- dashboard and the search filters, and digging them out of raw per row means
+-- detoasting the whole EVE record to read a few ids.
 --
 -- Rulesets write the ids into alert.metadata.cve in several shapes
 -- (CVE_2021_44228, cve-2021-44228, a bare 2021-44228) and often only into the

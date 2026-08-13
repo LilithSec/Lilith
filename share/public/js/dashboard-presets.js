@@ -131,12 +131,40 @@ var PRESETS = [
     { type: 'top',        config: { column: 'shodan_dest_tag' },                 x: 0, y: 18, w: 4, h: 4 },
     { type: 'top',        config: { column: 'shodan_dest_cpe' },                 x: 4, y: 18, w: 4, h: 4 },
     { type: 'top',        config: { column: 'shodan_dest_known', style: 'pie' }, x: 8, y: 18, w: 4, h: 4 },
-    // the correlation: rules naming a CVE the destination is cached as
-    // actually vulnerable to. 'Matched' here is the loudest thing the
-    // enrichment can say; the same comparison badges the search rows. Needs
-    // schema version 16 (the suricata cves column).
-    { type: 'top',        config: { column: 'shodan_dest_cve_match', style: 'pie' }, x: 0, y: 22, w: 4, h: 4 },
-    { type: 'timeseries', config: { group_by: 'shodan_dest_cve_match' },             x: 4, y: 22, w: 8, h: 4 }
+    // The correlations: rules naming a CVE an end is cached as actually
+    // vulnerable to (needs schema version 16, the suricata cves column), and
+    // flows hitting a port Shodan confirms open at that end. Both ends of
+    // each, since src and dest are the triggering packet's direction rather
+    // than attacker and victim. 'Matched' is the loudest thing the
+    // enrichment can say; the same comparisons badge the search rows.
+    { type: 'top',        config: { column: 'shodan_dest_cve_match', style: 'pie' },  x: 0, y: 22, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'shodan_dest_port_match', style: 'pie' }, x: 4, y: 22, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'shodan_src_cve_match', style: 'pie' },   x: 8, y: 22, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'shodan_src_port_match', style: 'pie' },  x: 0, y: 26, w: 4, h: 4 },
+    { type: 'timeseries', config: { group_by: 'shodan_dest_cve_match' },              x: 4, y: 26, w: 8, h: 4 },
+    // the coverage stat over time: has the cache timer been keeping up
+    { type: 'timeseries', config: { metric: 'shodan_src_coverage' },                  x: 0, y: 30, w: 12, h: 4 }
+  ] },
+  // Shodan × Baphomet -- the judgments cut by what Shodan knows about the
+  // judged host. The score panels are the point: does Baphomet's own scoring
+  // agree with Shodan's view of the host, per tag and per CVSS band? Judged
+  // offenders are the src side, which is why there is no dest band here.
+  { key: 'shodan_baphomet', label: 'Shodan × Baphomet', table: 'baphomet', widgets: [
+    { type: 'stat', config: { metric: 'shodan_src_coverage' },                                   x: 0, y: 0, w: 3, h: 1 },
+    { type: 'stat', config: { metric: 'shodan_src_staleness' },                                  x: 3, y: 0, w: 3, h: 1 },
+    { type: 'stat', config: { metric: 'total', label: 'Judgments' },                             x: 6, y: 0, w: 3, h: 1 },
+    { type: 'stat', config: { metric: 'distinct', column: 'src_ip', label: 'Judged addresses' }, x: 9, y: 0, w: 3, h: 1 },
+    // the scoring cross-check: average judgment score per Shodan tag and per
+    // CVSS band, with plain counts per tag beside them for scale
+    { type: 'top',        config: { column: 'shodan_src_tag',  measure: 'avg_score' },               x: 0, y: 1, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'shodan_src_cvss', measure: 'avg_score', style: 'pie' }, x: 4, y: 1, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'shodan_src_tag' },                                      x: 8, y: 1, w: 4, h: 4 },
+    { type: 'timeseries', config: { group_by: 'shodan_src_known' },                                  x: 0, y: 5, w: 8, h: 4 },
+    { type: 'top',        config: { column: 'shodan_src_known', style: 'pie' },                      x: 8, y: 5, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'shodan_src_vuln' },                                     x: 0, y: 9, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'src_ip', measure: 'max_score' },                        x: 4, y: 9, w: 4, h: 4 },
+    { type: 'top',        config: { column: 'shodan_src_cpe' },                                      x: 8, y: 9, w: 4, h: 4 },
+    { type: 'timeseries', config: { metric: 'shodan_src_coverage' },                                 x: 0, y: 13, w: 12, h: 4 }
   ] },
   // Syslog (Allani log store).
   { key: 'syslog', label: 'Syslog', widgets: [

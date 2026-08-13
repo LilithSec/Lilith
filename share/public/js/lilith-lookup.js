@@ -98,15 +98,33 @@
     container.appendChild(linkEl);
   }
 
+  // One label/value row whose value pivots into Shodan. The fingerprints a
+  // service block carries -- favicon hash, certificate, JARM, JA3S, HASSH --
+  // are search facets there, so each links to "everything else on the
+  // internet with this exact fingerprint": cloned panels and reused TLS
+  // stacks show up as fleets sharing one. Running the search needs a Shodan
+  // login; rendering the link costs nothing. The row itself is util.kvRow's,
+  // with the link riding as its node value.
+  function pivotRow(tbody, label, value, facet) {
+    if (value === undefined || value === null || value === '') { return; }
+    var link = document.createElement('a');
+    link.href = 'https://www.shodan.io/search?query=' + encodeURIComponent(facet + ':' + value);
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.title = 'everything Shodan sees sharing this ' + label;
+    link.textContent = value;
+    util.kvRow(tbody, label, link);
+  }
+
   // One service block: the port as a heading, whatever the banner identified
   // under it, and the raw banner text itself.
   function serviceBlock(container, service) {
     var block = document.createElement('div');
     block.className = 'border-start border-secondary ps-2 mt-2';
 
-    // "443/tcp — nginx 1.18.0", falling back to the crawler module that found
-    // it when Shodan could not name the product.
-    var name = [service.product, service.version].filter(Boolean).join(' ') || service.module;
+    // "443/tcp — nginx 1.18.0"; the name comes with the block (normalize's
+    // label), so every renderer of a service calls it the same thing.
+    var name = service.label;
     var headingEl = document.createElement('div');
     headingEl.className = 'small fw-semibold';
     headingEl.textContent = service.port + '/' + (service.transport || 'tcp') + (name ? ' — ' + name : '');
@@ -123,7 +141,7 @@
     util.kvRow(tbody, 'HTTP status', http.status);
     util.kvRow(tbody, 'WAF', http.waf);
     util.kvRow(tbody, 'Components', http.components);
-    util.kvRow(tbody, 'Favicon hash', http.favicon_hash);
+    pivotRow(tbody, 'Favicon hash', http.favicon_hash, 'http.favicon.hash');
     util.kvRow(tbody, 'TLS versions', ssl.versions);
     util.kvRow(tbody, 'Cipher', ssl.cipher);
     util.kvRow(tbody, 'Certificate', ssl.cert_subject);
@@ -132,14 +150,19 @@
       ? (ssl.cert_expires + (ssl.cert_expired ? ' (EXPIRED)' : '')) : undefined,
       ssl.cert_expired ? 'text-warning' : '');
     util.kvRow(tbody, 'Cert serial', ssl.cert_serial);
-    util.kvRow(tbody, 'Cert SHA-256', ssl.cert_fingerprint);
-    util.kvRow(tbody, 'JARM', ssl.jarm);
-    util.kvRow(tbody, 'JA3S', ssl.ja3s);
+    pivotRow(tbody, 'Cert SHA-256', ssl.cert_fingerprint, 'ssl.cert.fingerprint');
+    pivotRow(tbody, 'JARM', ssl.jarm, 'ssl.jarm');
+    pivotRow(tbody, 'JA3S', ssl.ja3s, 'ssl.ja3s');
     util.kvRow(tbody, 'SSH key type', ssh.type);
     util.kvRow(tbody, 'SSH fingerprint', ssh.fingerprint);
-    util.kvRow(tbody, 'HASSH', ssh.hassh);
+    pivotRow(tbody, 'HASSH', ssh.hassh, 'ssh.hassh');
     util.kvRow(tbody, 'CPE', service.cpes);
     util.kvRow(tbody, 'CVEs', service.vulns);
+    // only with shodan_history on does first_seen predate the crawl shown,
+    // and only then is it worth a row -- it dates when the port appeared
+    if (service.first_seen && service.first_seen !== service.timestamp) {
+      util.kvRow(tbody, 'First seen', service.first_seen);
+    }
     util.kvRow(tbody, 'Seen', service.timestamp);
     if (tbody.childNodes.length) { block.appendChild(table); }
 
@@ -209,6 +232,12 @@
         + (shodan.cached ? ' — cached' : ''));
     util.kvRow(summaryEl, 'Last seen', shodan.last_update);
     util.kvRow(summaryEl, 'OS', shodan.os);
+    // who the address belongs to, per Shodan itself -- complements the whois
+    // section, and often names the customer where whois names the carrier.
+    // API tier only; blank rows drop out.
+    util.kvRow(summaryEl, 'Org', shodan.org);
+    util.kvRow(summaryEl, 'ISP', shodan.isp);
+    util.kvRow(summaryEl, 'ASN', shodan.asn);
     util.kvRow(summaryEl, 'Hostnames', shodan.hostnames);
     util.kvRow(summaryEl, 'Domains', shodan.domains);
     util.kvRow(summaryEl, 'CPE', shodan.cpes);
@@ -226,6 +255,13 @@
 
   document.addEventListener('DOMContentLoaded', function () {
 
+    // Make Enter in a navbar input click its Go button.
+    function enterClicks(inputId, buttonId) {
+      document.getElementById(inputId).addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') { document.getElementById(buttonId).click(); }
+      });
+    }
+
     // ---- Go to Event -------------------------------------------------------
     document.getElementById('lookup-go-btn').addEventListener('click', function () {
       var lookupValue = document.getElementById('lookup-id').value.trim();
@@ -240,9 +276,7 @@
                              + '&event_id=' + encodeURIComponent(lookupValue);
       }
     });
-    document.getElementById('lookup-id').addEventListener('keydown', function (event) {
-      if (event.key === 'Enter') { document.getElementById('lookup-go-btn').click(); }
-    });
+    enterClicks('lookup-id', 'lookup-go-btn');
 
     // ---- IP Info -----------------------------------------------------------
     // One modal and one lookup used everywhere (navbar, search, event).
@@ -293,9 +327,7 @@
       errEl.style.display = 'none';
       window.showIpInfo(ip);
     });
-    document.getElementById('nav-ip-input').addEventListener('keydown', function (event) {
-      if (event.key === 'Enter') { document.getElementById('nav-ip-go-btn').click(); }
-    });
+    enterClicks('nav-ip-input', 'nav-ip-go-btn');
 
     // ---- Domain Info -------------------------------------------------------
     // One modal and one lookup used everywhere (navbar, event).
@@ -360,9 +392,7 @@
       errEl.style.display = 'none';
       window.showDomainInfo(domain);
     });
-    document.getElementById('nav-domain-input').addEventListener('keydown', function (event) {
-      if (event.key === 'Enter') { document.getElementById('nav-domain-go-btn').click(); }
-    });
+    enterClicks('nav-domain-input', 'nav-domain-go-btn');
 
     // ---- HTTPS Info --------------------------------------------------------
     var httpsModal = new bootstrap.Modal(document.getElementById('httpsinfo-modal'));

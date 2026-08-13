@@ -75,6 +75,14 @@ sub opt_spec {
 		[ 'shodan_src_cvss=s@',   'worst CVSS on the source; takes the numeric comparison operators' ],
 		[ 'shodan_dest_cvss=s@',  'worst CVSS on the destination; takes the numeric comparison operators' ],
 		[ 'cve=s@',               'CVE id the rule names (suricata)' ],
+		[
+			'shodan_src_cve_match=s@',
+			'rule CVEs against the source cache: matched, unmatched, no-cve, or unchecked'
+		],
+		[
+			'shodan_dest_cve_match=s@',
+			'rule CVEs against the destination cache: matched, unmatched, no-cve, or unchecked'
+		],
 	);
 } ## end sub opt_spec
 
@@ -126,7 +134,8 @@ sub execute {
 	my %enrich_filter;
 	foreach my $enrich_name (
 		qw( shodan_src_tag shodan_dest_tag shodan_src_known
-		shodan_dest_known shodan_src_cvss shodan_dest_cvss cve )
+		shodan_dest_known shodan_src_cvss shodan_dest_cvss cve
+		shodan_src_cve_match shodan_dest_cve_match )
 		)
 	{
 		my @values = split( /\s*,\s*/, join( ',', @{ $opt->{$enrich_name} // [] } ) );

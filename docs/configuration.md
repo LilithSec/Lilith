@@ -44,7 +44,8 @@ why these sit outside the web-only settings below. All optional.
 |--------------------|--------------------------------------------------|
 | `enable_shodan`    | Boolean. Adds a Shodan section to the web UI's IP info modal — open ports, tags, CPEs, and known CVEs, plus per-service banners when a key is set — and the port/tag/CVE badges on the results tables' IP cells. Off by default, as it takes a Shodan account to be worth turning on. Private, reserved, and documentation addresses are never sent. Does not gate the `shodan_cache` command; running that is already a decision of its own. |
 | `shodan_api_key`   | A Shodan API key. With one, `/shodan/host/{ip}` is used, which adds the per-service detail: product and version per port, TLS certificates with their JARM/JA3S fingerprints, HTTP titles and detected components, and CVEs attributed to the service they were found on. The lookup costs no query credits. Without one the free keyless InternetDB summary is used instead. Needs `WWW::Shodan::API` installed. |
-| `shodan_cache_ttl` | Seconds an answer stays fresh in the `shodan_cache` table. Default `2592000` (30 days), since what Shodan knows about a host changes on the order of its own crawl interval; `0` disables caching, and with it off the `shodan_cache` command refuses to run. Unlike the domain info cache this lives in the database, so one lookup serves every worker and survives a restart; entries past the TTL are cleared as new ones are written. Needs schema version 15 — with an older database the web lookups run live and log the failure. |
+| `shodan_cache_ttl` | Seconds an answer stays fresh in the `shodan_cache` table. Default `2592000` (30 days), since what Shodan knows about a host changes on the order of its own crawl interval; `0` disables caching, and with it off the `shodan_cache` command refuses to run. Unlike the domain info cache this lives in the database, so one lookup serves every worker and survives a restart; entries past the TTL are cleared as new ones are written. |
+| `shodan_history`   | Boolean. Host lookups ask for every banner Shodan has ever crawled for the address rather than only the current ones, which puts a **First seen** date on the modal's service blocks — when a port first appeared, which is what dates a compromise. Off by default: it needs a Shodan membership plan on top of the API key, and history responses are much larger (they are cached whole, like everything else). The keyless tier ignores it. |
 
 The badges on the results tables read this cache and never trigger a
 lookup, so on their own they only appear for addresses someone has already
@@ -60,7 +61,7 @@ Shodan's free CVE database ([cvedb.shodan.io](https://cvedb.shodan.io)),
 which needs no key or account. `lilith cvedb_cache` looks up the CVE ids the
 Shodan cache names and stores what CVEDB says about each — CVSS, the EPSS
 exploitation probability, the CISA KEV flag, known ransomware use — in the
-`cvedb_cache` table (schema version 16). The web reads only the table: the IP
+`cvedb_cache` table. The web reads only the table: the IP
 info modal's CVE chips gain their KEV marker and tooltip detail from it, and
 it is what gives the keyless InternetDB tier's bare CVE ids scores at all,
 on the chips and on the results tables' CVE badges alike.

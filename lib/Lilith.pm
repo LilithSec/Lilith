@@ -15,6 +15,7 @@ use Time::Piece::Guess   ();
 use Lilith::Schema       ();
 use Lilith::Escalate     ();
 use Lilith::AutoEscalate ();
+use Lilith::DBUtil       qw( column_exists );
 
 =head1 NAME
 
@@ -1625,8 +1626,8 @@ that current. An end with no cached entry never matches a positive filter.
     # alerts against destinations Shodan has never crawled
     shodan_dest_known => 'unchecked',
 
-Last is the rule CVE filter, for suricata only (elsewhere it is skipped like
-any other filter naming a column the table lacks):
+Last are the rule CVE filters, for suricata only (elsewhere they are skipped
+like any other filter naming a column the table lacks):
 
     - cve :: the CVE ids the rule that fired names, from the cves generated
       column (schema version 16). Values are normalized before matching, so
@@ -1636,6 +1637,22 @@ any other filter naming a column the table lacks):
 
     # alerts whose rule names Log4Shell
     cve => 'CVE-2021-44228',
+
+    - shodan_src_cve_match / shodan_dest_cve_match :: where the rule's ids
+      and that end's cached CVEs stand against each other -- the same four
+      states as the dashboard dimensions of the same names, so a slice of
+      either chart is answerable as a list of alerts. One filter per end
+      because src and dest are the triggering packet's direction, not
+      attacker and victim. One or more of 'matched' (the rule names a CVE
+      that end is cached as vulnerable to), 'unmatched' (the rule names CVEs,
+      the cached entry carries none of them), 'no-cve' (the rule names none),
+      and 'unchecked' (the rule names CVEs, that end was never looked up).
+      '!' negates; anything else dies. Needs both the shodan_cache table and
+      the cves column (schema version 16).
+
+    # the exploit-against-a-vulnerable-host alerts, whichever end it sits on
+    shodan_src_cve_match  => 'matched',
+    shodan_dest_cve_match => 'matched',
 
 =cut
 
@@ -1762,6 +1779,53 @@ sub _filter_values {
 	my @values = ref $values eq 'ARRAY' ? @{$values} : ($values);
 	return grep { defined($_) && $_ ne '' } @values;
 }
+
+# Turn a fixed-vocabulary filter's values into search clauses, the assembly the
+# known and cve_match filters share: strip a leading '!' as negation, die on a
+# value outside the vocabulary, OR the positives together (a single one stays a
+# bare clause), and AND each negation in as the complement of its clause. Plain
+# function, not a method.
+#
+# Args:
+#
+#   - $filter_name :: the filter as the caller names it, e.g.
+#     'shodan_src_known'; used in the death.
+#   - $values :: array ref of the submitted values, already through
+#     _filter_values.
+#   - $sql_for :: hash ref mapping each vocabulary word to the SQL boolean
+#     implementing it.
+#   - $allowed :: the vocabulary as prose for the death, e.g. 'known, unknown,
+#     or unchecked'.
+#
+# Returns: the clauses as a list, ready to push onto the search's -and --
+# literal-SQL refs, plus a -or hash when several positives were given. Empty
+# when $values is. Dies naming the filter and the vocabulary for a value
+# outside it.
+#
+#     push( @clauses, _vocab_clauses( 'shodan_src_known', \@values,
+#         \%known_sql, 'known, unknown, or unchecked' ) );
+sub _vocab_clauses {
+	my ( $filter_name, $values, $sql_for, $allowed ) = @_;
+
+	my ( @positive, @negative );
+	for my $value ( @{$values} ) {
+		my $negated = $value =~ s/^\!//;
+		if ( !$sql_for->{$value} ) {
+			die( '"' . $value . '" for ' . $filter_name . ' is not one of ' . $allowed );
+		}
+		if   ($negated) { push( @negative, $value ); }
+		else            { push( @positive, $value ); }
+	}
+
+	my @clauses;
+	if ( @positive == 1 ) {
+		push( @clauses, \[ $sql_for->{ $positive[0] } ] );
+	} elsif (@positive) {
+		push( @clauses, { '-or' => [ map { \[ $sql_for->{$_} ] } @positive ] } );
+	}
+	push( @clauses, map { \[ 'not (' . $sql_for->{$_} . ')' ] } @negative );
+	return @clauses;
+} ## end sub _vocab_clauses
 
 # Dies if the passed table name is not one of the known alert table types. The
 # short type picks both the DBIx::Class result class and the real table name, so
@@ -2083,6 +2147,23 @@ sub search {
 	# Shodan enrichment filters
 	#
 
+	# The schema facts the enrichment filters gate on, probed lazily and at
+	# most once per call however many filters ask -- a clear death beats what
+	# the driver would say about a missing table or column when the database is
+	# still on an older schema.
+	my ( $has_shodan_cache, $has_cves_column );
+	my $shodan_cache_present = sub {
+		$has_shodan_cache
+			= ( $schema->storage->dbh->selectrow_array(q{select to_regclass('shodan_cache')}) ? 1 : 0 )
+			if !defined $has_shodan_cache;
+		return $has_shodan_cache;
+	};
+	my $cves_column_present = sub {
+		$has_cves_column = column_exists( $schema->storage->dbh, 'suricata_alerts', 'cves' )
+			if !defined $has_cves_column;
+		return $has_cves_column;
+	};
+
 	# These filter on what the shodan_cache table says about an alert's ends
 	# rather than on the alert itself, each as an EXISTS against the end's
 	# address -- the search-filter form of the dashboard's enrichment
@@ -2136,27 +2217,13 @@ sub search {
 					. $ip_column . ')',
 			);
 			my @known_values = _filter_values( $opts{ 'shodan_' . $side . '_known' } );
-			if (@known_values) {
-				my ( @known_positive, @known_negative );
-				for my $value (@known_values) {
-					my $negated = $value =~ s/^\!//;
-					if ( !$known_sql{$value} ) {
-						die(      '"'
-								. $value
-								. '" for shodan_'
-								. $side
-								. '_known is not one of known, unknown, or unchecked' );
-					}
-					if   ($negated) { push( @known_negative, $value ); }
-					else            { push( @known_positive, $value ); }
-				} ## end for my $value (@known_values)
-				if ( defined( $known_positive[0] ) && !defined( $known_positive[1] ) ) {
-					push( @shodan_clauses, \[ $known_sql{ $known_positive[0] } ] );
-				} elsif ( defined( $known_positive[1] ) ) {
-					push( @shodan_clauses, { '-or' => [ map { \[ $known_sql{$_} ] } @known_positive ] } );
-				}
-				push( @shodan_clauses, map { \[ 'not (' . $known_sql{$_} . ')' ] } @known_negative );
-			} ## end if (@known_values)
+			push(
+				@shodan_clauses,
+				_vocab_clauses(
+					'shodan_' . $side . '_known',
+					\@known_values, \%known_sql, 'known, unknown, or unchecked'
+				)
+			) if @known_values;
 
 			# cvss: comparisons against the worst score of the end's CVEs,
 			# the CVEDB cache standing in where Shodan sent no scores -- the
@@ -2212,16 +2279,12 @@ sub search {
 		} ## end for my $side (qw(src dest))
 
 		if (@shodan_clauses) {
-
-			# a clear death beats "relation does not exist" out of the driver
-			# when the database is still on an older schema
-			my ($has_shodan) = $schema->storage->dbh->selectrow_array(q{select to_regclass('shodan_cache')});
 			die("the shodan_* search filters need the shodan_cache table (schema version 15)\n")
-				unless $has_shodan;
+				unless $shodan_cache_present->();
 
 			$search->{'-and'} = [] if !defined( $search->{'-and'} );
 			push( @{ $search->{'-and'} }, @shodan_clauses );
-		} ## end if (@shodan_clauses)
+		}
 	} ## end if ( $opts{table} =~ /^(?:suricata|sagan|baphomet)$/)
 
 	# cve: the ids the rule that fired names, out of the cves generated column
@@ -2247,15 +2310,8 @@ sub search {
 		}
 
 		if ( @cve_positive || @cve_negative ) {
-
-			# same reasoning as the shodan_cache probe above
-			my ($has_cves) = $schema->storage->dbh->selectrow_array(
-				'SELECT 1 FROM pg_attribute WHERE attrelid = ?::regclass'
-					. ' AND attname = ? AND attnum > 0 AND NOT attisdropped',
-				undef, 'suricata_alerts', 'cves'
-			);
 			die("the cve search filter needs the suricata_alerts cves column (schema version 16)\n")
-				unless $has_cves;
+				unless $cves_column_present->();
 
 			$search->{'-and'} = [] if !defined( $search->{'-and'} );
 			push( @{ $search->{'-and'} }, \[ 'me.cves && ?::text[]', $self->_pg_text_array( \@cve_positive ) ] )
@@ -2268,6 +2324,48 @@ sub search {
 			) if @cve_negative;
 		} ## end if ( @cve_positive || @cve_negative )
 	} ## end if ( defined( $opts{cve} ) && $opts{table}...)
+
+	# shodan_src_cve_match / shodan_dest_cve_match, as the POD above lays out.
+	# Fixed vocabulary; anything else dies rather than silently matching
+	# nothing. suricata only, like cve, and for the same reason.
+	for my $side (qw(src dest)) {
+		my $match_filter = 'shodan_' . $side . '_cve_match';
+		next unless defined( $opts{$match_filter} ) && $opts{table} eq 'suricata';
+
+		my @match_values = _filter_values( $opts{$match_filter} );
+		my $ip_column    = $side . '_ip';
+
+		my $overlap_exists
+			= 'exists (select 1 from shodan_cache where shodan_cache.ip = me.'
+			. $ip_column
+			. ' and me.cves && (shodan_cache.vulns)::text[])';
+		my $row_exists = 'exists (select 1 from shodan_cache where shodan_cache.ip = me.' . $ip_column . ')';
+		my %match_sql  = (
+			'matched'   => $overlap_exists,
+			'unmatched' => '(me.cves is not null and ' . $row_exists . ' and not ' . $overlap_exists . ')',
+			'no-cve'    => 'me.cves is null',
+
+			# the address null test keeps this the dimension's bucket: an
+			# alert naming no address on this end is left out there, not
+			# counted as never-looked-up
+			'unchecked' => '(me.cves is not null and me.'
+				. $ip_column
+				. ' is not null and not '
+				. $row_exists . ')',
+		);
+
+		my @match_clauses
+			= _vocab_clauses( $match_filter, \@match_values, \%match_sql, 'matched, unmatched, no-cve, or unchecked' );
+		next unless @match_clauses;
+
+		die( 'the ' . $match_filter . " search filter needs the suricata_alerts cves column (schema version 16)\n" )
+			unless $cves_column_present->();
+		die( 'the ' . $match_filter . " search filter needs the shodan_cache table (schema version 15)\n" )
+			unless $shodan_cache_present->();
+
+		$search->{'-and'} = [] if !defined( $search->{'-and'} );
+		push( @{ $search->{'-and'} }, @match_clauses );
+	} ## end for my $side (qw(src dest))
 
 	my %result_attrs = (
 		order_by     => $opts{order_by} . ' ' . $opts{order_dir},
@@ -3759,9 +3857,11 @@ prune the entries that have since expired.
 The response is stored as it arrived rather than in the form the modal renders,
 so that changing how it is rendered does not strand every cached row on the old
 shape. The columns beside it -- ports, tags, cpes, vulns, max_cvss, hostnames,
-last_update -- are the queryable projection of that response and are passed in
-already worked out, since the caller has just normalized it and would only be
-doing the same work twice.
+last_update, and (schema version 17) os, org, isp, and asn -- are the queryable
+projection of that response and are passed in already worked out, since the
+caller has just normalized it and would only be doing the same work twice. The
+version-17 four are written only where the schema has them, so this keeps
+working against a database still on 15 or 16.
 
 Takes:
 
@@ -3809,16 +3909,38 @@ sub shodan_cache_put {
 	my $last_update = defined $info->{last_update} && $info->{last_update} ne '' ? $info->{last_update} : undef;
 
 	my $dbh = $self->_escalation_dbh;
+
+	# The version-17 columns are probed for rather than assumed, and one probe
+	# answers for all four, since they shipped together -- remembered for the
+	# life of the object, since a shodan_cache run calls this once per address
+	# and the answer changes only when the schema is migrated. The keyless
+	# tier's empty strings are stored as NULL, so "the tier sent nothing" and
+	# "never refreshed since the upgrade" read the same way.
+	my $has_host_columns = $self->{_shodan_cache_host_columns};
+	$has_host_columns = $self->{_shodan_cache_host_columns} = column_exists( $dbh, 'shodan_cache', 'os' )
+		if !defined $has_host_columns;
+	my @host_columns = qw( os org isp asn );
+	my @host_values
+		= $has_host_columns
+		? map { defined $info->{$_} && !ref $info->{$_} && $info->{$_} ne '' ? $info->{$_} : undef } @host_columns
+		: ();
+
 	my $sth
 		= $dbh->prepare( 'insert into shodan_cache'
-			. ' ( ip, source, found, fetched, last_update, ports, tags, cpes, vulns, max_cvss, hostnames, raw )'
+			. ' ( ip, source, found, fetched, last_update, ports, tags, cpes, vulns, max_cvss, hostnames'
+			. ( $has_host_columns ? ', ' . join( ', ', @host_columns ) : '' )
+			. ', raw )'
 			. ' values ( ?::inet, ?, ?, now(), (?::timestamp at time zone \'UTC\'), ?::integer[], ?::varchar[],'
-			. ' ?::varchar[], ?::varchar[], ?, ?::varchar[], ?::jsonb )'
+			. ' ?::varchar[], ?::varchar[], ?, ?::varchar[]'
+			. ( $has_host_columns ? ', ?, ?, ?, ?' : '' )
+			. ', ?::jsonb )'
 			. ' on conflict (ip) do update set'
 			. ' source = excluded.source, found = excluded.found, fetched = excluded.fetched,'
 			. ' last_update = excluded.last_update, ports = excluded.ports, tags = excluded.tags,'
 			. ' cpes = excluded.cpes, vulns = excluded.vulns, max_cvss = excluded.max_cvss,'
-			. ' hostnames = excluded.hostnames, raw = excluded.raw;' );
+			. ' hostnames = excluded.hostnames'
+			. ( $has_host_columns ? join( '', map { ", $_ = excluded.$_" } @host_columns ) : '' )
+			. ', raw = excluded.raw;' );
 	$sth->execute(
 		$ip,
 		( defined $opts{source} ? $opts{source} : '' ),
@@ -3835,6 +3957,7 @@ sub shodan_cache_put {
 		),
 		$max_cvss,
 		$self->_pg_text_array( ref $info->{hostnames} eq 'ARRAY' ? $info->{hostnames} : [] ),
+		@host_values,
 		encode_json($raw),
 	);
 

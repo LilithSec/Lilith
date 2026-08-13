@@ -3,7 +3,7 @@ package Lilith::Stats;
 use strict;
 use warnings;
 use Lilith::DBUtil
-	qw( connect_cached_dbh host_or_text_expr measure_expr skip_scan_viable time_window_clause validate_bucket );
+	qw( column_exists connect_cached_dbh host_or_text_expr measure_expr skip_scan_viable time_window_clause validate_bucket );
 
 =head1 NAME
 
@@ -175,8 +175,8 @@ my %ENRICH_TABLE = map { $_ => 1 } qw( suricata sagan baphomet );
 # side shows up. Each side keys its join and its unnested rows by its own alias
 # so a board can panel both at once without the two colliding.
 my %ENRICH_SIDE = (
-	src  => { ip_column => 'src_ip',  alias => 'shodan_src' },
-	dest => { ip_column => 'dest_ip', alias => 'shodan_dest' },
+	src  => { ip_column => 'src_ip',  port_column => 'src_port',  alias => 'shodan_src' },
+	dest => { ip_column => 'dest_ip', port_column => 'dest_port', alias => 'shodan_dest' },
 );
 
 # Shodan enrichment: dimensions that describe not the alert but the host at one
@@ -198,8 +198,9 @@ my %ENRICH_SIDE = (
 #     a chart reads worst-first rather than by count. These join outward, so an
 #     address never looked up still lands in the panel, in its own bucket.
 #
-# expr and order are written against the side's alias and address column, which
-# is why they are code refs: the same shape is built twice, once per side.
+# expr and order are written against the side's alias and address and port
+# columns, which is why they are code refs: the same shape is built twice, once
+# per side.
 #
 # Either shape drops an alert that names no address on that end (a Baphomet
 # judgment passed on a username, say): there is nothing for Shodan to describe,
@@ -257,18 +258,19 @@ my %ENRICH_SHAPE = (
 	},
 
 	# The correlation the two halves above only imply: whether the rule that
-	# fired names a CVE the destination's cache entry lists it as vulnerable to
-	# -- "an exploit thrown at a host actually vulnerable to it". The rule's
+	# fired names a CVE that end's cache entry lists it as vulnerable to --
+	# "an exploit thrown at a host actually vulnerable to it". The rule's
 	# ids come from the cves generated column (schema 16, suricata only, which
 	# is what tables/needs_cves say), so the comparison is one array overlap
-	# per row and never opens raw. dest only: it is a question about what was
-	# attacked, and the source end of it means nothing.
+	# per row and never opens raw. Built for both ends like everything else
+	# here: src and dest are the triggering packet's direction, not attacker
+	# and victim, so which end the vulnerable host lands on is up to the rule
+	# that fired.
 	#
 	# 'No CVE in rule' leads the tests because with no ids to compare the
-	# lookup state of the destination is beside the point.
+	# lookup state of the host is beside the point.
 	cve_match => {
 		tables     => { suricata => 1 },
-		sides      => ['dest'],
 		needs_cves => 1,
 		columns    => [ 'found', 'vulns' ],
 		expr       => sub {
@@ -291,7 +293,61 @@ my %ENRICH_SHAPE = (
 				. " else 2 end";
 		},
 	},
+
+	# The port half of the same correlation: was the port the flow names at
+	# that end one Shodan sees open on that end's host? An exploit at a closed
+	# port is scan noise; the same packet at a confirmed listener is an
+	# attempt against a live service. Each side reads its own port column --
+	# src_port against the source's entry, dest_port against the
+	# destination's -- since which end the service sits on is up to the rule
+	# that fired.
+	#
+	# 'Port not seen open' rather than 'closed', deliberately: Shodan's port
+	# coverage is protocol weighted rather than a full sweep, so absence from
+	# the list is weaker evidence than presence on it. A row cached as "not on
+	# Shodan" lands there too -- nothing is known open on it.
+	#
+	# No needs_cves and no table scoping: the port columns are real columns on
+	# every enriched table, and both tiers send ports.
+	port_match => {
+		columns => [ 'found', 'ports' ],
+		expr    => sub {
+			my ( $alias, $ip, $port ) = @_;
+			return
+				  "case when $ip is null then null"
+				. " when $port is null then 'No port'"
+				. " when $alias.${alias}_found is null then 'Not looked up'"
+				. " when $port = any($alias.${alias}_ports) then 'Hit an exposed port'"
+				. " else 'Port not seen open' end";
+		},
+		order => sub {
+			my ( $alias, $ip, $port ) = @_;
+			return
+				  "case when $port is null then 3"
+				. " when $alias.${alias}_found is null then 4"
+				. " when $port = any($alias.${alias}_ports) then 1"
+				. " else 2 end";
+		},
+	},
 );
+
+# What the host runs and who it belongs to (schema version 17), as bare
+# columns: the dimension groups by the value itself rather than by a CASE
+# over it. One appliance OS or one hosting org across many addresses is a
+# fleet's fingerprint, which is the read these are for. The join is the
+# outward one, but the queries drop null values, so like the array shapes
+# these describe the enriched subset -- and the keyless tier stores none of
+# the four, so on an InternetDB-only install the panels stay empty.
+for my $host_column (qw( os org isp asn )) {
+	$ENRICH_SHAPE{$host_column} = {
+		columns            => [$host_column],
+		needs_host_columns => 1,
+		expr               => sub {
+			my ($alias) = @_;
+			return $alias . '.' . $alias . '_' . $host_column;
+		},
+	};
+} ## end for my $host_column (qw( os org isp asn ))
 
 # The dimension catalog the rest of this file reads: every shape on every side,
 # named shodan_<side>_<shape> (shodan_src_tag, shodan_dest_cvss, ...) and with
@@ -299,14 +355,10 @@ my %ENRICH_SHAPE = (
 # Built rather than written out so the two sides cannot drift apart.
 my %ENRICH;
 for my $side ( keys %ENRICH_SIDE ) {
-	my ( $alias, $ip ) = @{ $ENRICH_SIDE{$side} }{qw( alias ip_column )};
+	my ( $alias, $ip, $port ) = @{ $ENRICH_SIDE{$side} }{qw( alias ip_column port_column )};
 
 	for my $shape ( keys %ENRICH_SHAPE ) {
 		my $spec = $ENRICH_SHAPE{$shape};
-
-		# a shape that only makes sense on one side (cve_match) is built for
-		# that side alone
-		next if $spec->{sides} && !grep { $_ eq $side } @{ $spec->{sides} };
 
 		$ENRICH{ 'shodan_' . $side . '_' . $shape } = {
 			%{$spec},
@@ -314,8 +366,8 @@ for my $side ( keys %ENRICH_SIDE ) {
 			ip_column => $ip,
 			# an array dimension groups by the unnested value; a scalar one by
 			# the CASE the shape describes
-			expr  => $spec->{array} ? $alias . '_val.v'        : $spec->{expr}->( $alias, $ip ),
-			order => $spec->{order} ? $spec->{order}->($alias) : undef,
+			expr  => $spec->{array} ? $alias . '_val.v'                      : $spec->{expr}->( $alias, $ip, $port ),
+			order => $spec->{order} ? $spec->{order}->( $alias, $ip, $port ) : undef,
 		};
 	} ## end for my $shape ( keys %ENRICH_SHAPE )
 } ## end for my $side ( keys %ENRICH_SIDE )
@@ -667,29 +719,8 @@ table.
 sub shodan_coverage {
 	my ( $self, %opts ) = @_;
 
-	my $type = $self->_table( $opts{table} );
-	die( $type . " alerts carry no Shodan enrichment\n" )                    unless $ENRICH_TABLE{$type};
-	die("the shodan_cache table is not present (needs schema version 15)\n") unless $self->_shodan_available;
-
-	my $side = defined $opts{side} && $opts{side} ne '' ? $opts{side} : 'src';
-	die( '"' . $side . '" is not a known side (src, dest)' . "\n" ) unless $ENRICH_SIDE{$side};
-	my $ip = $ENRICH_SIDE{$side}{ip_column};
-
-	my $mins = $self->_minutes( $opts{go_back_minutes} );
-	my ( $tbl, $tc ) = ( $TABLE{$type}, $TIME_COL{$type} );
-
-	# spliced into an interval literal, which cannot take a placeholder, so it
-	# has to be proven a number first
-	my $ttl = defined $opts{ttl} && $opts{ttl} ne '' ? $opts{ttl} : 2592000;
-	die( '"' . $ttl . '" for ttl is not a non-negative integer' . "\n" ) unless $ttl =~ /^[0-9]+$/;
-
-	my $dbh = $self->_dbh;
-	my $exf = $self->_exclude_frag( $dbh, $type, \%opts );
-	my $win = $self->_window_frag( $dbh, $tc, \%opts, $mins );
-
-	my $fresh = "shodan.shodan_fetched > now() - interval '" . $ttl . " seconds'";
-	$fresh .= ' and shodan.shodan_source = ' . $dbh->quote( $opts{source} )
-		if defined $opts{source} && $opts{source} ne '';
+	my $parts = $self->_coverage_parts( \%opts );
+	my ( $dbh, $tbl, $ip, $win, $exf, $fresh, $join ) = @{$parts}{qw( dbh tbl ip win exf fresh join )};
 
 	# The addresses are collected first and matched after, so the cache is
 	# touched once per distinct address rather than once per alert.
@@ -697,8 +728,7 @@ sub shodan_coverage {
 		= "with addresses as (select distinct $ip as ip from $tbl where $win$exf and $ip is not null) "
 		. "select count(*), count(shodan.shodan_ip), "
 		. "count(*) filter (where shodan.shodan_ip is not null and not ($fresh)) from addresses "
-		. "left join (select ip as shodan_ip, fetched as shodan_fetched, source as shodan_source"
-		. " from shodan_cache) shodan on shodan.shodan_ip = addresses.ip";
+		. $join;
 
 	my ( $addresses, $enriched, $stale ) = $dbh->selectrow_array($sql);
 	$addresses = ( $addresses // 0 ) + 0;
@@ -713,6 +743,55 @@ sub shodan_coverage {
 		stale_percent => $enriched ? int( ( $stale * 100 / $enriched ) + 0.5 ) : 0,
 	};
 } ## end sub shodan_coverage
+
+=head2 shodan_coverage_series
+
+    my $rows = $stats->shodan_coverage_series(
+        table => 'suricata', go_back_minutes => 1440, bucket => 'hour',
+        side  => 'src',      ttl => 2592000, source => 'api',
+    );
+    # [ { bucket => 1755000000, group => 'Enriched', count => 41 }, ... ]
+
+L</shodan_coverage> over time: per time bucket, the distinct addresses on one
+end split into what the cache answers for (C<Enriched>), what it answers with
+something the reads would no longer use (C<Stale>), and what it was never
+asked about (C<Not looked up>). A coverage tile says where the cache stands
+now; this says whether the C<lilith shodan_cache> timer has been keeping up,
+and when it fell behind.
+
+The rows are the shape C<timeseries> returns for a grouped query, so the same
+chart renders either. An address active across several buckets counts in each
+of them -- the question is asked per bucket, not once per window.
+
+Freshness follows the same rule as C<shodan_coverage>, and the same deaths
+apply, plus C<timeseries>'s for an unaccepted C<bucket>.
+
+=cut
+
+sub shodan_coverage_series {
+	my ( $self, %opts ) = @_;
+
+	my $parts = $self->_coverage_parts( \%opts );
+	my ( $dbh, $tbl, $tc, $ip, $win, $exf, $fresh, $join ) = @{$parts}{qw( dbh tbl tc ip win exf fresh join )};
+
+	my $bucket = $self->_bucket( $opts{bucket} );
+	my $epoch  = "extract(epoch from date_trunc('$bucket', $tc))::bigint";
+
+	# The distinct addresses per bucket are collected first and matched after,
+	# the same reasoning as shodan_coverage. The three states happen to sort
+	# alphabetically into Enriched / Not looked up / Stale, which puts the
+	# good news at the bottom of the stack.
+	my $sql
+		= "with addresses as (select $epoch as bucket, $ip as ip from $tbl"
+		. " where $win$exf and $ip is not null group by 1, 2) "
+		. "select bucket, case when shodan.shodan_ip is null then 'Not looked up'"
+		. " when $fresh then 'Enriched' else 'Stale' end as grp, count(*) as count "
+		. "from addresses $join "
+		. "group by 1, 2 order by 1 asc, 2 asc";
+
+	my $rows = $dbh->selectall_arrayref( $sql, { Slice => {} } );
+	return [ map { { bucket => $_->{bucket} + 0, group => $_->{grp}, count => ( $_->{count} // 0 ) + 0 } } @$rows ];
+} ## end sub shodan_coverage_series
 
 =head2 columns
 
@@ -739,7 +818,8 @@ sub columns {
 			grep {
 				my $enrich = $ENRICH{$_};
 				( !$enrich->{tables} || $enrich->{tables}{$type} )
-					&& ( !$enrich->{needs_cves} || $self->_cves_available )
+					&& ( !$enrich->{needs_cves}         || $self->_column_available( 'suricata_alerts', 'cves' ) )
+					&& ( !$enrich->{needs_host_columns} || $self->_column_available( 'shodan_cache',    'os' ) )
 			} keys %ENRICH
 		);
 	} ## end if ( $ENRICH_TABLE{$type} && $self->_shodan_available)
@@ -821,6 +901,69 @@ sub _window_frag {
 	);
 } ## end sub _window_frag
 
+# The scaffolding shodan_coverage and shodan_coverage_series share, worked out
+# once so the freshness rule and the cache join cannot drift between the tile
+# and the chart -- exactly the pair a user compares.
+#
+# Args:
+#
+#   - $opts :: the caller's option hash ref, read for table, side, ttl, source,
+#     go_back_minutes, start/end, and the exclude switches -- the options both
+#     public methods document.
+#
+# Returns: a hash ref of named parts:
+#
+#   - dbh :: the connected handle.
+#   - tbl / tc :: the alert table and its time column.
+#   - ip :: the side's address column, src_ip or dest_ip.
+#   - win / exf :: the window fragment and the classification-exclude fragment.
+#   - fresh :: the SQL boolean saying a joined cache row is still usable,
+#     carrying the ttl (spliced into an interval literal, which cannot take a
+#     placeholder, so it is proven a number first) and, when given, the source
+#     rule.
+#   - join :: the left join of shodan_cache onto an 'addresses' CTE, its
+#     columns riding as shodan.shodan_ip / shodan_fetched / shodan_source.
+#
+# Dies as shodan_coverage documents: an unenriched table, an unknown side, a
+# ttl that is not a non-negative integer, or no shodan_cache table.
+#
+#     my $parts = $self->_coverage_parts( \%opts );
+#     my ( $ip, $fresh ) = @{$parts}{qw( ip fresh )};
+sub _coverage_parts {
+	my ( $self, $opts ) = @_;
+
+	my $type = $self->_table( $opts->{table} );
+	die( $type . " alerts carry no Shodan enrichment\n" )                    unless $ENRICH_TABLE{$type};
+	die("the shodan_cache table is not present (needs schema version 15)\n") unless $self->_shodan_available;
+
+	my $side = defined $opts->{side} && $opts->{side} ne '' ? $opts->{side} : 'src';
+	die( '"' . $side . '" is not a known side (src, dest)' . "\n" ) unless $ENRICH_SIDE{$side};
+
+	my $mins = $self->_minutes( $opts->{go_back_minutes} );
+
+	my $ttl = defined $opts->{ttl} && $opts->{ttl} ne '' ? $opts->{ttl} : 2592000;
+	die( '"' . $ttl . '" for ttl is not a non-negative integer' . "\n" ) unless $ttl =~ /^[0-9]+$/;
+
+	my $dbh = $self->_dbh;
+	my $tc  = $TIME_COL{$type};
+
+	my $fresh = "shodan.shodan_fetched > now() - interval '" . $ttl . " seconds'";
+	$fresh .= ' and shodan.shodan_source = ' . $dbh->quote( $opts->{source} )
+		if defined $opts->{source} && $opts->{source} ne '';
+
+	return {
+		dbh   => $dbh,
+		tbl   => $TABLE{$type},
+		tc    => $tc,
+		ip    => $ENRICH_SIDE{$side}{ip_column},
+		win   => $self->_window_frag( $dbh, $tc, $opts, $mins ),
+		exf   => $self->_exclude_frag( $dbh, $type, $opts ),
+		fresh => $fresh,
+		join  => 'left join (select ip as shodan_ip, fetched as shodan_fetched, source as shodan_source'
+			. ' from shodan_cache) shodan on shodan.shodan_ip = addresses.ip',
+	};
+} ## end sub _coverage_parts
+
 # Check the caller's short table type and hand it back. Everything public here
 # takes the short form ('suricata', not 'suricata_alerts'), and this is the one
 # gate keeping an unchecked request parameter from reaching %TABLE and, through
@@ -873,7 +1016,9 @@ sub _dimension {
 	if ( my $enrich = $self->_enrich_for( $type, $col ) ) {
 		die("the shodan_cache table is not present (needs schema version 15)\n") unless $self->_shodan_available;
 		die("the suricata_alerts cves column is not present (needs schema version 16)\n")
-			if $enrich->{needs_cves} && !$self->_cves_available;
+			if $enrich->{needs_cves} && !$self->_column_available( 'suricata_alerts', 'cves' );
+		die("the shodan_cache os/org/isp/asn columns are not present (needs schema version 17)\n")
+			if $enrich->{needs_host_columns} && !$self->_column_available( 'shodan_cache', 'os' );
 		return $col;
 	}
 
@@ -907,38 +1052,37 @@ sub _enrich_for {
 	return $enrich;
 }
 
-# Whether suricata_alerts has the cves generated column (schema version 16),
-# and so whether the cve_match dimension can be offered and grouped by.
+# Whether the database has a column a dimension is gated on: the cves generated
+# column (schema version 16) behind cve_match, or shodan_cache's os column
+# standing in for the version-17 os/org/isp/asn four, which shipped together so
+# one probe answers for all of them.
 #
 # Detected the same way _virtual_base detects its generated columns, and cached
-# the same way _shodan_available caches its answer: only when the question was
-# actually answered, so an unreachable database does not hide the dimension for
-# good once it comes back.
+# the same way _shodan_available caches its answer: per table-and-column pair,
+# and only when the question was actually answered, so an unreachable database
+# does not hide the dimension for good once it comes back.
 #
-# Args: none.
+# Args:
+#
+#   - $table :: the table the column would be on, e.g. 'suricata_alerts'.
+#   - $column :: the column probed for, e.g. 'cves'.
 #
 # Returns: 1 when the column is there, 0 when it is not or when the catalog
 # could not be read.
 #
-#     $self->_cves_available;    # 1
-sub _cves_available {
-	my ($self) = @_;
+#     $self->_column_available( 'suricata_alerts', 'cves' );    # 1
+sub _column_available {
+	my ( $self, $table, $column ) = @_;
 
-	return $self->{_cves_column_present} if defined $self->{_cves_column_present};
+	my $cached = $self->{_column_available_cache}{$table}{$column};
+	return $cached if defined $cached;
 
-	my $present = eval {
-		my ($found) = $self->_dbh->selectrow_array(
-			'SELECT 1 FROM pg_attribute WHERE attrelid = ?::regclass'
-				. ' AND attname = ? AND attnum > 0 AND NOT attisdropped',
-			undef, 'suricata_alerts', 'cves'
-		);
-		return $found ? 1 : 0;
-	};
+	my $present = eval { column_exists( $self->_dbh, $table, $column ) };
 	return 0 unless defined $present;
 
-	$self->{_cves_column_present} = $present;
+	$self->{_column_available_cache}{$table}{$column} = $present;
 	return $present;
-} ## end sub _cves_available
+} ## end sub _column_available
 
 # Whether the database has the shodan_cache table, and so whether the %ENRICH
 # dimensions can be offered and joined.
@@ -1129,14 +1273,7 @@ sub _virtual_base {
 	my $cached = $self->{_generated_column_cache}{$type}{$col};
 	return ( $cached ? $column : $virtual->{expr} ) if defined $cached;
 
-	my $present = eval {
-		my ($found) = $self->_dbh->selectrow_array(
-			'SELECT 1 FROM pg_attribute WHERE attrelid = ?::regclass'
-				. ' AND attname = ? AND attnum > 0 AND NOT attisdropped',
-			undef, $TABLE{$type}, $column
-		);
-		return $found ? 1 : 0;
-	};
+	my $present = eval { column_exists( $self->_dbh, $TABLE{$type}, $column ) };
 	$present = 0 unless defined $present;
 
 	$self->{_generated_column_cache}{$type}{$col} = $present;

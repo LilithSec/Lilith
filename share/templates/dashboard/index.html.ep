@@ -55,6 +55,7 @@
             <li><a class="dropdown-item" href="#" data-preset="cape">CAPE</a></li>
             <li><a class="dropdown-item" href="#" data-preset="baphomet">Baphomet</a></li>
             <li><a class="dropdown-item" href="#" data-preset="shodan">Shodan enrichment</a></li>
+            <li><a class="dropdown-item" href="#" data-preset="shodan_baphomet">Shodan &times; Baphomet</a></li>
             % if ($self->allani_enabled) {
             <li><hr class="dropdown-divider"></li>
             <li><h6 class="dropdown-header">Logs (Allani)</h6></li>

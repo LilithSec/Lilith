@@ -21,7 +21,8 @@ package Lilith::CLI::Command::ShodanCache;
 use strict;
 use warnings;
 use parent 'Lilith::CLI::Command';
-use Lilith::Shodan ();
+use Lilith::Shodan     ();
+use Lilith::ConfigUtil ();
 
 sub command_names { 'shodan_cache' }
 
@@ -80,6 +81,10 @@ sub execute {
 	my $api_key = defined $toml->{shodan_api_key} ? $toml->{shodan_api_key} : '';
 	my $source  = Lilith::Shodan::source($api_key);
 
+	# See Lilith::Shodan::fetch for what history costs and buys. Coerced like
+	# cape_enable, since TOML booleans arrive as the strings 'true'/'false'.
+	my $history = Lilith::ConfigUtil::to_bool( $toml->{shodan_history} );
+
 	my @tables = grep { $_ ne '' } split( /\s*,\s*/, defined( $opt->{tables} ) ? $opt->{tables} : '' );
 
 	my $ips     = $lilith->alert_ips( go_back_seconds => $opt->{s}, tables => \@tables );
@@ -118,7 +123,7 @@ sub execute {
 		sleep(1) unless $first;
 		$first = 0;
 
-		my ( $info, $error, $raw ) = Lilith::Shodan::gather( $ip, $api_key, $source );
+		my ( $info, $error, $raw ) = Lilith::Shodan::gather( $ip, $api_key, $source, $history );
 		if ( $error ne '' ) {
 			$failed++;
 			push( @results, { ip => $ip, status => $error, ports => '', vulns => '', tags => '' } );

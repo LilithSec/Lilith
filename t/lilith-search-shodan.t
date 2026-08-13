@@ -239,6 +239,90 @@ $bad_cve = $@ if $@;
 like( $bad_cve, qr/is not a CVE id/, 'a non-CVE id dies rather than matching nothing' );
 
 # ---------------------------------------------------------------------------
+# the cve_match pair: the dimensions' four buckets as filters, one per end
+# ---------------------------------------------------------------------------
+
+# The bucket tests a side's filter builds, against that side's address
+# column. Built the same way the code under test builds them, so the
+# assertions read as structure.
+sub match_sql_for {
+	my ($side) = @_;
+
+	my $ip = 'me.' . $side . '_ip';
+	my $overlap
+		= 'exists (select 1 from shodan_cache where shodan_cache.ip = '
+		. $ip
+		. ' and me.cves && (shodan_cache.vulns)::text[])';
+	my $row = 'exists (select 1 from shodan_cache where shodan_cache.ip = ' . $ip . ')';
+	return {
+		'matched'   => $overlap,
+		'unmatched' => '(me.cves is not null and ' . $row . ' and not ' . $overlap . ')',
+		'no-cve'    => 'me.cves is null',
+		'unchecked' => '(me.cves is not null and ' . $ip . ' is not null and not ' . $row . ')',
+	};
+} ## end sub match_sql_for
+
+for my $side (qw(src dest)) {
+	my $match_sql = match_sql_for($side);
+	my $filter    = 'shodan_' . $side . '_cve_match';
+
+	for my $state ( 'matched', 'unmatched', 'no-cve', 'unchecked' ) {
+		is_deeply(
+			filter_clauses( $filter => $state ),
+			[ \[ $match_sql->{$state} ] ],
+			"$filter $state builds its bucket's test"
+		);
+	}
+} ## end for my $side (qw(src dest))
+
+my $dest_match_sql = match_sql_for('dest');
+
+is_deeply(
+	filter_clauses( shodan_dest_cve_match => [ 'matched', 'unchecked' ] ),
+	[ { '-or' => [ \[ $dest_match_sql->{'matched'} ], \[ $dest_match_sql->{'unchecked'} ] ] } ],
+	'two states OR together'
+);
+
+is_deeply(
+	filter_clauses( shodan_dest_cve_match => '!matched' ),
+	[ \[ 'not (' . $dest_match_sql->{'matched'} . ')' ] ],
+	'a negated state is its complement'
+);
+
+my $bad_match = '';
+eval { filter_clauses( shodan_dest_cve_match => 'perhaps' ) };
+$bad_match = $@ if $@;
+like(
+	$bad_match,
+	qr/"perhaps" for shodan_dest_cve_match is not one of matched, unmatched, no-cve, or unchecked/,
+	'an unknown state dies rather than matching nothing, naming the filter'
+);
+
+{
+	local $cves_present = 0;
+	my $died = '';
+	eval { filter_clauses( shodan_src_cve_match => 'matched' ) };
+	$died = $@ if $@;
+	like(
+		$died,
+		qr/the shodan_src_cve_match search filter needs the suricata_alerts cves column \(schema version 16\)/,
+		'a schema without the cves column dies plainly'
+	);
+}
+
+{
+	local $shodan_present = 0;
+	my $died = '';
+	eval { filter_clauses( shodan_dest_cve_match => 'matched' ) };
+	$died = $@ if $@;
+	like(
+		$died,
+		qr/the shodan_dest_cve_match search filter needs the shodan_cache table \(schema version 15\)/,
+		'a schema without shodan_cache dies plainly'
+	);
+}
+
+# ---------------------------------------------------------------------------
 # gating: which tables see the filters at all, and the schema probes
 # ---------------------------------------------------------------------------
 
@@ -250,6 +334,10 @@ like( $bad_cve, qr/is not a CVE id/, 'a non-CVE id dies rather than matching not
 	$captured_search = undef;
 	$lilith->search( table => 'sagan', cve => 'CVE-2021-44228' );
 	is( $captured_search->{'-and'}, undef, 'the cve filter is suricata only' );
+
+	$captured_search = undef;
+	$lilith->search( table => 'sagan', shodan_src_cve_match => 'matched', shodan_dest_cve_match => 'matched' );
+	is( $captured_search->{'-and'}, undef, 'the cve_match pair is suricata only' );
 
 	$captured_search = undef;
 	$lilith->search( table => 'baphomet', shodan_src_tag => 'tor' );

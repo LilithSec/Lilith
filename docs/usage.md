@@ -114,7 +114,8 @@ never matches a positive filter.
 | `--shodan_src_tag` / `--shodan_dest_tag` | a Shodan tag on that end (`tor`, `compromised`, ...) |
 | `--shodan_src_known` / `--shodan_dest_known` | the cache state for that end: `known` (on Shodan), `unknown` (crawled, nothing there), or `unchecked` (never looked up) |
 | `--shodan_src_cvss` / `--shodan_dest_cvss` | the worst CVSS of that end's CVEs (CVEDB standing in where the keyless tier sent no scores); takes `<`, `<=`, `>`, `>=` |
-| `--cve` | a CVE id the rule names (Suricata, schema 16). Normalized before matching, so `cve_2021_44228` finds what `CVE-2021-44228` does |
+| `--cve` | a CVE id the rule names (Suricata). Normalized before matching, so `cve_2021_44228` finds what `CVE-2021-44228` does |
+| `--shodan_src_cve_match` / `--shodan_dest_cve_match` | where the rule's CVEs and that end's cached ones stand against each other (Suricata): `matched` (the rule names a CVE that end is vulnerable to), `unmatched`, `no-cve`, or `unchecked` — the same four buckets as the dashboard dimensions of the same names |
 
 ```shell
 # alerts from tor exits or hosts Shodan tags compromised, last day
@@ -125,6 +126,9 @@ lilith search --shodan_dest_cvss '>=9'
 
 # everything the rule ties to Log4Shell
 lilith search --cve CVE-2021-44228
+
+# exploits thrown at destinations actually vulnerable to them
+lilith search --shodan_dest_cve_match matched
 ```
 
 ### event

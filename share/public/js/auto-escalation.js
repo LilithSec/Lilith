@@ -317,11 +317,7 @@ document.addEventListener('DOMContentLoaded', function() {
       errorEl.style.display = 'none';
       var built = buildBody();
       if (built.error) { errorEl.textContent = built.error; errorEl.style.display = ''; return; }
-      fetch('/api/auto_escalation/rules', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(built.body)
-      })
-        .then(util.unwrap)
+      util.postResult('/api/auto_escalation/rules', built.body)
         .then(function(result){
           if (!result.ok || result.data.error) {
             errorEl.textContent = result.data.error || 'save failed';
@@ -351,11 +347,8 @@ document.addEventListener('DOMContentLoaded', function() {
   document.querySelectorAll('.rule-toggle').forEach(function(toggleInput){
     toggleInput.addEventListener('change', function(){
       var id = this.dataset.ruleId, wantEnabled = this.checked, checkbox = this;
-      fetch('/api/auto_escalation/rules/' + encodeURIComponent(id) + '/toggle', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: wantEnabled ? 1 : 0 })
-      })
-        .then(util.unwrap)
+      util.postResult('/api/auto_escalation/rules/' + encodeURIComponent(id) + '/toggle',
+                      { enabled: wantEnabled ? 1 : 0 })
         .then(function(result){
           if (!result.ok || result.data.error) { checkbox.checked = !wantEnabled; status(result.data.error || 'toggle failed', false); return; }
           status('rule ' + id + (wantEnabled ? ' enabled' : ' disabled'), true);
@@ -379,15 +372,11 @@ document.addEventListener('DOMContentLoaded', function() {
     previewStatusEl.className = 'small mb-1 text-muted';
     previewStatusEl.style.display = '';
 
-    fetch('/api/auto_escalation/preview', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        rule: built.body.rule,
-        table: document.getElementById('rule-preview-table').value,
-        go_back_minutes: document.getElementById('rule-preview-minutes').value.trim()
-      })
+    util.postResult('/api/auto_escalation/preview', {
+      rule: built.body.rule,
+      table: document.getElementById('rule-preview-table').value,
+      go_back_minutes: document.getElementById('rule-preview-minutes').value.trim()
     })
-      .then(util.unwrap)
       .then(function(result){
         if (!result.ok || result.data.error) {
           previewStatusEl.textContent = result.data.error || 'preview failed';
