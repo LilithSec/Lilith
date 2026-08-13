@@ -61,6 +61,12 @@ plan skip_all => 'Allani (Allani::Sources) is not installed'
 		push( @SQL, $sql );
 		return $sql =~ /n_distinct/ ? $N_DISTINCT : undef;
 	}
+
+	sub selectall_arrayref {
+		my ( $self, $sql ) = @_;
+		push( @SQL, $sql );
+		return [];
+	}
 }
 no warnings qw(redefine once);
 local *Lilith::Allani::_dbh = sub { bless {}, 'MockDbh' };

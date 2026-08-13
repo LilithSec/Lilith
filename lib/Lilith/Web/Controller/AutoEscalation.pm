@@ -32,38 +32,11 @@ safe in the read tier.
 
 =cut
 
-# read tier gate; returns 1 when the caller may proceed, else renders the
-# 404 and returns 0. The shared logic lives in the require_escalation_view
-# helper in Lilith::Web.
+# write tier gate: the require_escalation_manage helper in Lilith::Web (which
+# documents the two refusal tiers), bound to this controller's management flag
+# and refusal message. Renders the refusal and returns 0, so a caller reads as
 #
-# A refusal is a 404 rather than a 403 so a frontend with escalation switched
-# off does not advertise that the pages exist at all.
-#
-# Args: none.
-#
-# Returns: 1 when escalation_enable is set, 0 otherwise -- having already
-# rendered the 404, so a caller returns straight away on 0.
-#
-#     return unless ->_require_view;
-sub _require_view {
-	return $_[0]->require_escalation_view;
-}
-
-# write tier gate; view must be allowed and management explicitly enabled.
-# Renders a 404 (view off) or 403 (management off) and returns 0 on refusal.
-# The shared logic lives in the require_escalation_manage helper in
-# Lilith::Web.
-#
-# The two refusals differ on purpose: with view off the page does not exist as
-# far as a caller can tell (404), while with view on but management off the
-# page is real and the action is simply not allowed (403).
-#
-# Args: none.
-#
-# Returns: 1 when both tiers allow it, 0 otherwise -- having already rendered
-# the refusal, so a caller returns straight away on 0.
-#
-#     return unless ->_require_manage;
+#     return unless $self->_require_manage;
 sub _require_manage {
 	my $self = shift;
 
@@ -81,7 +54,7 @@ auto_escalation_manage_enable is set.
 sub index {
 	my $self = shift;
 
-	return unless $self->_require_view;
+	return unless $self->require_escalation_view;
 
 	my $rules   = [];
 	my $targets = [];
@@ -116,14 +89,11 @@ Returns every auto escalation rule as JSON.
 sub rules {
 	my $self = shift;
 
-	return unless $self->_require_view;
+	return unless $self->require_escalation_view;
 
 	my $rules;
 	eval { $rules = $self->lilith->auto_escalations; };
-	if ($@) {
-		( my $why = $@ ) =~ s/\s+\z//;
-		return $self->render( json => { error => $why }, status => 500 );
-	}
+	return $self->render_error( $@, 500 ) if $@;
 
 	$self->render( json => { rules => $rules } );
 } ## end sub rules
@@ -176,10 +146,7 @@ sub save {
 			);
 		} ## end else [ if ( defined $json->{id} && $json->{id} ne...)]
 	};
-	if ($@) {
-		( my $why = $@ ) =~ s/\s+\z//;
-		return $self->render( json => { error => $why }, status => 400 );
-	}
+	return $self->render_error($@) if $@;
 
 	$self->render( json => { ok => 1, id => $id } );
 } ## end sub save
@@ -201,10 +168,7 @@ sub delete {
 	}
 
 	eval { $self->lilith->auto_escalation_delete($id); };
-	if ($@) {
-		( my $why = $@ ) =~ s/\s+\z//;
-		return $self->render( json => { error => $why }, status => 400 );
-	}
+	return $self->render_error($@) if $@;
 
 	$self->render( json => { ok => 1 } );
 } ## end sub delete
@@ -229,10 +193,7 @@ sub toggle {
 	my $enabled = ( ref $json eq 'HASH' && $json->{enabled} ) ? 1 : 0;
 
 	eval { $self->lilith->auto_escalation_update( id => $id, enabled => $enabled ); };
-	if ($@) {
-		( my $why = $@ ) =~ s/\s+\z//;
-		return $self->render( json => { error => $why }, status => 400 );
-	}
+	return $self->render_error($@) if $@;
 
 	$self->render( json => { ok => 1, enabled => $enabled } );
 } ## end sub toggle
@@ -250,7 +211,7 @@ worker's event loop.
 sub preview {
 	my $self = shift;
 
-	return unless $self->_require_view;
+	return unless $self->require_escalation_view;
 
 	my $json = $self->req->json;
 	if ( ref $json ne 'HASH' || ref $json->{rule} ne 'HASH' ) {
@@ -261,7 +222,7 @@ sub preview {
 	}
 
 	my $table = defined $json->{table} ? $json->{table} : 'suricata';
-	unless ( $table =~ /^(?:suricata|sagan|cape|baphomet)$/ ) {
+	unless ( $self->valid_alert_table($table) ) {
 		return $self->render( json => { error => 'invalid table' }, status => 400 );
 	}
 
@@ -297,8 +258,7 @@ sub preview {
 				return $self->render( json => { error => 'preview subprocess failed: ' . $sp_err }, status => 500 );
 			}
 			if ($preview_err) {
-				( my $why = $preview_err ) =~ s/\s+\z//;
-				return $self->render( json => { error => $why }, status => 400 );
+				return $self->render_error($preview_err);
 			}
 			$self->render( json => $result );
 		},

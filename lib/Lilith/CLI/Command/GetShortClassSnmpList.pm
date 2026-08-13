@@ -14,8 +14,6 @@ sub command_names { 'get_short_class_snmp_list' }
 
 sub abstract { 'print the shortened class names for use with SNMP' }
 
-sub usage_desc { '%c get_short_class_snmp_list %o' }
-
 # Print the shortened class names, one per line.
 #
 # The order matters and is not sorted here: it is the order the extend emits

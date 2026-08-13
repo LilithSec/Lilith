@@ -47,7 +47,7 @@ sub index {
 	my $order_by        = $self->param('order_by')        // '';
 
 	# Sanitize
-	$table     = 'suricata' unless $table     =~ /^(?:suricata|sagan|cape|baphomet)$/;
+	$table     = 'suricata' unless $self->valid_alert_table($table);
 	$order_dir = 'DESC'     unless $order_dir =~ /^(?:ASC|DESC)$/;
 	$order_by  = ( $table eq 'cape' ? 'stop' : 'timestamp' )
 		unless grep { $_ eq $order_by } ( @{ $Lilith::alert_columns{$table} }, qw(id escalations auto_escalated) );
@@ -240,7 +240,7 @@ sub filter_values {
 	my $self = shift;
 
 	my $table = $self->param('table') // 'suricata';
-	$table = 'suricata' unless $table =~ /^(?:suricata|sagan|cape|baphomet)$/;
+	$table = 'suricata' unless $self->valid_alert_table($table);
 
 	my $column = $self->param('column');
 

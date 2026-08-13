@@ -155,8 +155,7 @@ unrestricted.
 ## The auto escalation timer
 
 `lilith auto_escalate` is a periodic, run-to-completion job: it loads the
-enabled rules from `auto_escalations`, evaluates them (via
-[Rule::Engine](https://metacpan.org/pod/Rule::Engine)) against alerts
+enabled rules from `auto_escalations`, evaluates them against alerts
 ingested within its `-m` window that have not yet been considered, and
 escalates matches through the same path as a manual escalation — same audit
 trail, same per-row `escalations` array. Ready made systemd service+timer

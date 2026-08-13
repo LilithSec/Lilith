@@ -18,8 +18,6 @@ sub command_names { 'esc_target_update' }
 
 sub abstract { 'update an escalation target' }
 
-sub usage_desc { '%c esc_target_update %o' }
-
 sub opt_spec {
 	return (
 		[ 'tid=s',   'the escalation target ID' ],

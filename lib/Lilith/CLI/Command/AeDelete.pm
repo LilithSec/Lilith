@@ -14,8 +14,6 @@ sub command_names { 'ae_delete' }
 
 sub abstract { 'delete a auto escalation rule' }
 
-sub usage_desc { '%c ae_delete %o' }
-
 sub opt_spec {
 	return ( [ 'id=s', 'the auto escalation rule ID' ], );
 }

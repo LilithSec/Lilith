@@ -14,8 +14,6 @@ sub command_names { 'schema_version' }
 
 sub abstract { 'show the deployed schema version and this release' }
 
-sub usage_desc { '%c schema_version %o' }
-
 sub description {
 	return
 		  "Prints the schema version recorded in the database alongside the version this\n"

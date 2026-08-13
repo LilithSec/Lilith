@@ -13,8 +13,6 @@ sub command_names { 'esc_targets' }
 
 sub abstract { 'list the configured escalation targets' }
 
-sub usage_desc { '%c esc_targets %o' }
-
 sub opt_spec {
 	my ($class) = @_;
 	return $class->output_opt_spec;

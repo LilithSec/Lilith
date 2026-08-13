@@ -18,8 +18,6 @@ sub command_names { 'esc_history' }
 
 sub abstract { 'print the escalations recorded for an event' }
 
-sub usage_desc { '%c esc_history %o' }
-
 sub opt_spec {
 	my ($class) = @_;
 	return (

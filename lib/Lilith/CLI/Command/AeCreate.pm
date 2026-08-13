@@ -21,8 +21,6 @@ sub command_names { 'ae_create' }
 
 sub abstract { 'create a auto escalation rule' }
 
-sub usage_desc { '%c ae_create %o' }
-
 sub opt_spec {
 	return (
 		[ 'name=s',     'the name for the new rule', { required => 1 } ],

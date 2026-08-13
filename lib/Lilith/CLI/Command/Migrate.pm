@@ -15,8 +15,6 @@ sub command_names { 'migrate' }
 
 sub abstract { 'upgrade an existing database to the current schema' }
 
-sub usage_desc { '%c migrate %o' }
-
 sub description {
 	return
 		  "Upgrades an already-deployed database to the schema version this release\n"

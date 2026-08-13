@@ -14,8 +14,6 @@ sub command_names { 'receiver_key_list' }
 
 sub abstract { 'list the receiver API keys' }
 
-sub usage_desc { '%c receiver_key_list %o' }
-
 sub opt_spec {
 	my ($class) = @_;
 	return $class->output_opt_spec;

@@ -24,8 +24,6 @@ use Net::Server::Daemonize qw( daemonize );
 
 sub abstract { 'start processing the EVE logs and daemonize' }
 
-sub usage_desc { '%c run %o' }
-
 sub opt_spec {
 	return (
 		[ 'daemonize', 'daemonize after startup' ],

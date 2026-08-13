@@ -27,8 +27,6 @@ sub command_names { 'shodan_cache' }
 
 sub abstract { 'look up the addresses recent alerts name and cache what Shodan knows' }
 
-sub usage_desc { '%c shodan_cache %o' }
-
 sub opt_spec {
 	my ($class) = @_;
 	return (

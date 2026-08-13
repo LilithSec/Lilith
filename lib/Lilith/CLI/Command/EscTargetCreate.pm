@@ -19,8 +19,6 @@ sub command_names { 'esc_target_create' }
 
 sub abstract { 'create an escalation target' }
 
-sub usage_desc { '%c esc_target_create %o' }
-
 sub opt_spec {
 	return (
 		[ 'name=s',  'the name for the new target', { required => 1 } ],

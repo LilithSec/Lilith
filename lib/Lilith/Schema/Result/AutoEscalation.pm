@@ -9,7 +9,7 @@ Lilith::Schema::Result::AutoEscalation
 =head1 DESCRIPTION
 
 A automatic escalation rule. C<rule> is the match/actions DSL stored as
-JSONB and compiled into a L<Rule::Engine> ruleset by
+JSONB and compiled into match closures by
 L<Lilith::AutoEscalate> when auto_escalate() runs. C<tables> scopes
 which alert tables (suricata/sagan/cape/baphomet) the rule applies to
 (a rule that names no tables defaults to suricata/sagan/cape),

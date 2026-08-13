@@ -19,8 +19,6 @@ sub command_names { 'receiver_key_update' }
 
 sub abstract { 'update a receiver API key' }
 
-sub usage_desc { '%c receiver_key_update %o' }
-
 sub opt_spec {
 	return (
 		[ 'id=s',            'the receiver API key ID' ],

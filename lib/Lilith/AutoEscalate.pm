@@ -7,7 +7,7 @@ use JSON qw( decode_json );
 
 =head1 NAME
 
-Lilith::AutoEscalate - Compile auto escalation rules and evaluate them with Rule::Engine.
+Lilith::AutoEscalate - Compile auto escalation rules and evaluate them against alerts.
 
 =head1 VERSION
 
@@ -62,9 +62,9 @@ C<src_ip>, ...) or a dotted path into the decoded C<raw> payload
 Rules are never evaluated as Perl; a leaf only ever does hash lookups
 and the fixed comparisons above, so a rule is safe to accept from the
 web UI. C<evaluate> compiles each rule's match into a coderef and runs
-them as a L<Rule::Engine> ruleset, ordered by C<priority> (lower
-first); when a matching rule has C<stop_on_match> set, later rules are
-not evaluated for that alert.
+them against every alert, ordered by C<priority> (lower first); when a
+matching rule has C<stop_on_match> set, later rules are not evaluated
+for that alert.
 
 =head1 METHODS
 
@@ -237,7 +237,7 @@ sub _check_node {
 
 Compiles a rule's match into a coderef that takes an alert row hash ref
 and returns true when it matches. Used by evaluate; exposed so the
-match can be tested against a single event without Rule::Engine.
+match can be tested against a single event on its own.
 
     my $matches = Lilith::AutoEscalate->compile( $rule );
     if ( $matches->( $alert_row ) ) { ... }
@@ -495,12 +495,12 @@ sub _field_value {
 
 =head2 evaluate
 
-Compiles the given rules and runs them against the given events as a
-L<Rule::Engine> ruleset. Returns an array ref with one hash ref per
-match, each having the keys C<rule> (the rule row that matched) and
-C<event> (the alert row it matched). Rules are evaluated in C<priority>
-order (lower first, ties broken by id); a match on a rule with
-C<stop_on_match> stops later rules from being evaluated for that alert.
+Compiles the given rules and runs them against the given events.
+Returns an array ref with one hash ref per match, each having the keys
+C<rule> (the rule row that matched) and C<event> (the alert row it
+matched). Rules are evaluated in C<priority> order (lower first, ties
+broken by id); a match on a rule with C<stop_on_match> stops later
+rules from being evaluated for that alert.
 
     my $matches = Lilith::AutoEscalate->evaluate(
         rules  => $rule_rows,
@@ -515,49 +515,23 @@ sub evaluate {
 	my $rules  = ref( $opts{rules} ) eq 'ARRAY'  ? $opts{rules}  : [];
 	my $events = ref( $opts{events} ) eq 'ARRAY' ? $opts{events} : [];
 
-	require Rule::Engine::Session;
-	require Rule::Engine::RuleSet;
-	require Rule::Engine::Rule;
-
-	my @ordered = sort {
-		( defined( $a->{priority} ) ? $a->{priority} : 100 )
+	# priority order, lower first, ties by id; compiled once here, then each
+	# closure runs per event so the tree walk stays out of the hot path
+	my @compiled = map { { rule => $_, condition => $class->compile( $_->{rule} ) } }
+		sort {
+			( defined( $a->{priority} ) ? $a->{priority} : 100 )
 			<=> ( defined( $b->{priority} ) ? $b->{priority} : 100 )
 			|| ( defined( $a->{id} ) ? $a->{id} : 0 ) <=> ( defined( $b->{id} ) ? $b->{id} : 0 )
-	} @{$rules};
+		} @{$rules};
 
-	my $session = Rule::Engine::Session->new;
 	my @matches;
-	$session->set_environment( 'matches', \@matches );
-	$session->set_environment( 'stopped', {} );
-
-	my $ruleset = Rule::Engine::RuleSet->new( name => 'auto' );
-
-	foreach my $rule (@ordered) {
-		my $condition = $class->compile( $rule->{rule} );
-		my $stop      = $rule->{stop_on_match} ? 1 : 0;
-		my $meta      = $rule;
-
-		$ruleset->add_rule(
-			Rule::Engine::Rule->new(
-				name      => 'auto_' . ( defined( $rule->{id} ) ? $rule->{id} : ( $rule->{name} || 'rule' ) ),
-				condition => sub {
-					my ( $self, $sess, $obj ) = @_;
-					my $key = defined( $obj->{id} ) ? $obj->{id} : "$obj";
-					return 0 if $sess->get_environment('stopped')->{$key};
-					return $condition->($obj) ? 1 : 0;
-				},
-				action => sub {
-					my ( $self, $sess, $obj ) = @_;
-					push( @{ $sess->get_environment('matches') }, { rule => $meta, event => $obj } );
-					my $key = defined( $obj->{id} ) ? $obj->{id} : "$obj";
-					$sess->get_environment('stopped')->{$key} = 1 if $stop;
-				},
-			)
-		);
-	} ## end foreach my $rule (@ordered)
-
-	$session->add_ruleset( 'auto', $ruleset );
-	$session->execute( 'auto', $events );
+	foreach my $event ( @{$events} ) {
+		foreach my $entry (@compiled) {
+			next unless $entry->{condition}->($event);
+			push( @matches, { rule => $entry->{rule}, event => $event } );
+			last if $entry->{rule}{stop_on_match};
+		}
+	}
 
 	return \@matches;
 } ## end sub evaluate

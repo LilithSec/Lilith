@@ -272,21 +272,9 @@ sub countries {
 
 	return $self->_ljson(
 		sub {
-			my $r   = shift;
-			my $ips = $r->top_ips( source => $source, go_back_minutes => $mins, limit => 500, @range );
-
-			my %by;
-			for my $row (@$ips) {
-				my $cc = $self->ip_country( $row->{value} );
-				$cc = '??' unless defined $cc && $cc ne '';
-				$by{$cc} += $row->{count};
-			}
-
-			my @rows = map { { country => $_, count => $by{$_} } }
-				sort { $by{$b} <=> $by{$a} || $a cmp $b } keys %by;
-			@rows = @rows[ 0 .. 14 ] if @rows > 15;
-
-			return { enabled => 1, rows => \@rows };
+			my $r = shift;
+			return $self->countries_from_top(
+				$r->top_ips( source => $source, go_back_minutes => $mins, limit => 500, @range ) );
 		}
 	);
 } ## end sub countries

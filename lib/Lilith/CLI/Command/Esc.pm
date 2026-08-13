@@ -19,8 +19,6 @@ use Lilith::CLI::Util qw( esc_resolve_targets );
 
 sub abstract { 'escalate an event to one or more escalation targets' }
 
-sub usage_desc { '%c esc %o' }
-
 sub opt_spec {
 	my ($class) = @_;
 	return (

@@ -16,8 +16,6 @@ sub command_names { 'ae_update' }
 
 sub abstract { 'update a auto escalation rule' }
 
-sub usage_desc { '%c ae_update %o' }
-
 sub opt_spec {
 	return (
 		[ 'id=s',       'the auto escalation rule ID' ],

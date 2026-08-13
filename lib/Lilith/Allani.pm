@@ -2,8 +2,8 @@ package Lilith::Allani;
 
 use strict;
 use warnings;
-use Lilith::DBUtil qw( clamped_int connect_cached_dbh host_or_text_expr measure_expr skip_scan_viable time_window_clause
-	validate_bucket );
+use Lilith::DBUtil qw( clamped_int connect_cached_dbh distinct_by_skip_scan host_or_text_expr measure_expr
+	skip_scan_viable time_window_clause validate_bucket );
 
 =head1 NAME
 
@@ -415,13 +415,10 @@ sub total {
 	my ( $self, %opts )  = @_;
 	my ( $meta, $tscol ) = $self->_agg_meta( $opts{source} );
 	my @binds;
-	my $tc  = $self->_time_clause( $tscol, \%opts, \@binds );
-	my $sth = $self->_dbh->prepare("SELECT count(*) FROM $meta->{table} WHERE $tc");
-	$sth->execute(@binds);
-	my $r = $sth->fetchrow_arrayref;
-	$sth->finish;
-	return ( ( $r && defined $r->[0] ) ? $r->[0] : 0 ) + 0;
-} ## end sub total
+	my $tc = $self->_time_clause( $tscol, \%opts, \@binds );
+	my ($n) = $self->_dbh->selectrow_array( "SELECT count(*) FROM $meta->{table} WHERE $tc", undef, @binds );
+	return ( $n // 0 ) + 0;
+}
 
 =head2 distinct
 
@@ -457,12 +454,10 @@ sub distinct {
 	}
 
 	my @binds;
-	my $tc  = $self->_time_clause( $tscol, \%opts, \@binds );
-	my $sth = $self->_dbh->prepare("SELECT count(distinct $col) FROM $meta->{table} WHERE $tc");
-	$sth->execute(@binds);
-	my $r = $sth->fetchrow_arrayref;
-	$sth->finish;
-	return ( ( $r && defined $r->[0] ) ? $r->[0] : 0 ) + 0;
+	my $tc = $self->_time_clause( $tscol, \%opts, \@binds );
+	my ($n)
+		= $self->_dbh->selectrow_array( "SELECT count(distinct $col) FROM $meta->{table} WHERE $tc", undef, @binds );
+	return ( $n // 0 ) + 0;
 } ## end sub distinct
 
 =head2 top
@@ -548,11 +543,7 @@ SELECT to_char(per_bucket.bucket_ts, $format) AS bucket, per_bucket.grp AS "grou
 FROM per_bucket JOIN busiest USING (grp)
 ORDER BY per_bucket.bucket_ts ASC, 2 ASC
 SQL
-		my $sth = $self->_dbh->prepare($sql);
-		$sth->execute( @wbinds, $k );
-		my $rows = $sth->fetchall_arrayref( {} );
-		$sth->finish;
-		return $rows || [];
+		return $self->_dbh->selectall_arrayref( $sql, { Slice => {} }, @wbinds, $k );
 	} ## end if ( defined $opts{group_by} && $opts{group_by...})
 
 	# same reasoning as the grouped branch: bucket on the timestamp, label after
@@ -561,11 +552,7 @@ SELECT to_char(bucket_ts, $format) AS bucket, count
 FROM (SELECT $trunc AS bucket_ts, $magg AS count FROM $tbl WHERE $tc GROUP BY 1) bucketed
 ORDER BY bucket_ts ASC
 SQL
-	my $sth = $self->_dbh->prepare($sql);
-	$sth->execute(@wbinds);
-	my $rows = $sth->fetchall_arrayref( {} );
-	$sth->finish;
-	return $rows || [];
+	return $self->_dbh->selectall_arrayref( $sql, { Slice => {} }, @wbinds );
 } ## end sub timeseries
 
 =head2 bucket
@@ -727,12 +714,12 @@ sub _top_values {
 	my @binds;
 	my $tc = $self->_time_clause( $tscol, $opts, \@binds );
 	push( @binds, $limit );
-	my $sth = $self->_dbh->prepare( "SELECT $vexpr AS value, $measure_aggregate AS count FROM $meta->{table}"
-			. " WHERE $tc AND $col IS NOT NULL GROUP BY $col ORDER BY count DESC, value ASC LIMIT ?" );
-	$sth->execute(@binds);
-	my $rows = $sth->fetchall_arrayref( {} );
-	$sth->finish;
-	return $rows || [];
+	return $self->_dbh->selectall_arrayref(
+		"SELECT $vexpr AS value, $measure_aggregate AS count FROM $meta->{table}"
+			. " WHERE $tc AND $col IS NOT NULL GROUP BY $col ORDER BY count DESC, value ASC LIMIT ?",
+		{ Slice => {} },
+		@binds
+	);
 } ## end sub _top_values
 
 # How many distinct values a skip scan walks before giving up and letting the
@@ -772,20 +759,14 @@ sub _skip_scan_ok {
 } ## end sub _skip_scan_ok
 
 # Count the distinct values of a column in the window by walking the index
-# rather than reading the rows.
+# rather than reading the rows. The walk itself lives in
+# Lilith::DBUtil::distinct_by_skip_scan, shared with Lilith::Stats; this
+# wrapper renders the window clause with binds and passes both through.
 #
-# The recursive term is the trick: having found one value, ask for the smallest
-# value greater than it. Against a btree that is a single descent, so the walk
-# visits one index entry per distinct value and never touches the table. Each
-# value found is then checked for a row inside the window, which the second key
-# of the same index answers with another descent.
-#
-# The walk is capped so a column with far more values than expected cannot turn
-# a cheap query into thousands of descents. Hitting the cap gives undef rather
-# than a wrong answer, and the caller counts rows instead. The cap earns its
-# keep even behind the index check, because pg_stats estimates cardinality from
-# a sample and can be badly wrong -- on the store this was written against it
-# put pid at 6731 distinct values where the real figure was 227442.
+# The cap earns its keep even behind the index check, because pg_stats
+# estimates cardinality from a sample and can be badly wrong -- on the store
+# this was written against it put pid at 6731 distinct values where the real
+# figure was 227442.
 #
 # Args:
 #
@@ -813,39 +794,14 @@ sub _distinct_by_skip_scan {
 	my @binds;
 	my $tc = $self->_time_clause( $tscol, $opts, \@binds );
 
-	# one over the cap, so a full result set is recognisable as "too many"
-	my $walk_limit = $SKIP_SCAN_CAP + 1;
-
-	my $sql = <<"SQL";
-WITH RECURSIVE walk AS (
-    (SELECT $column AS value FROM $table WHERE $column IS NOT NULL ORDER BY $column LIMIT 1)
-    UNION ALL
-    SELECT (SELECT next_row.$column FROM $table next_row
-            WHERE next_row.$column > walk.value ORDER BY next_row.$column LIMIT 1)
-    FROM walk WHERE walk.value IS NOT NULL
-),
-values_found AS (
-    SELECT value FROM walk WHERE value IS NOT NULL LIMIT $walk_limit
-)
-SELECT
-    (SELECT count(*) FROM values_found) AS walked,
-    (SELECT count(*) FROM values_found v
-     WHERE EXISTS (SELECT 1 FROM $table s WHERE s.$column = v.value AND $tc)) AS in_window
-SQL
-
-	my ( $walked, $in_window ) = eval {
-		my $sth = $self->_dbh->prepare($sql);
-		$sth->execute(@binds);
-		my $row = $sth->fetchrow_arrayref;
-		$sth->finish;
-		return $row ? ( $row->[0], $row->[1] ) : ( undef, undef );
-	};
-	return undef unless defined $walked && defined $in_window;
-
-	# the walk was truncated, so in_window is an undercount rather than an answer
-	return undef if $walked > $SKIP_SCAN_CAP;
-
-	return $in_window + 0;
+	return distinct_by_skip_scan(
+		dbh    => $self->_dbh,
+		table  => $table,
+		column => $column,
+		where  => $tc,
+		binds  => \@binds,
+		cap    => $SKIP_SCAN_CAP,
+	);
 } ## end sub _distinct_by_skip_scan
 
 # Resolve an aggregate source to ( $meta, $timestamp_column, $source_name ).

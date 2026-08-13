@@ -20,8 +20,6 @@ sub command_names { 'auto_escalate' }
 
 sub abstract { 'evaluate the auto escalation rules against recent alerts' }
 
-sub usage_desc { '%c auto_escalate %o' }
-
 sub opt_spec {
 	my ($class) = @_;
 	return (

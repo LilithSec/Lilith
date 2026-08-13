@@ -32,7 +32,7 @@ sub view {
 	my $table = $self->param('table');
 	my $id    = $self->param('id');
 
-	$table = 'suricata' unless $table =~ /^(?:suricata|sagan|cape|baphomet)$/;
+	$table = 'suricata' unless $self->valid_alert_table($table);
 
 	my ( $event, $error ) = $self->_load_event( $table, $id );
 
@@ -398,12 +398,10 @@ sub pcap {
 	my $id     = $self->param('id');
 	my $remote = $self->param('remote');
 
-	$table = 'suricata' unless $table =~ /^(?:suricata|sagan|cape|baphomet)$/;
-
 	unless ( $self->virani_enabled ) {
 		return $self->render( text => 'PCAP retrieval is not configured', status => 404 );
 	}
-	unless ( $table eq 'suricata' ) {
+	unless ( defined $table && $table eq 'suricata' ) {
 		return $self->render( text => 'PCAP is only available for Suricata events', status => 400 );
 	}
 	unless ( defined $id && $id =~ /^[0-9]+$/ ) {
@@ -638,7 +636,7 @@ sub body_zip {
 	my $id    = $self->param('id');
 	my $which = $self->param('which');
 
-	$table = 'suricata' unless $table =~ /^(?:suricata|sagan|cape|baphomet)$/;
+	$table = 'suricata' unless $self->valid_alert_table($table);
 
 	unless ( $which =~ /^(?:request|response)$/ ) {
 		return $self->render( text => 'invalid body', status => 400 );
@@ -675,6 +673,67 @@ sub body_zip {
 	return $self->render( data => $zipdata );
 } ## end sub body_zip
 
+# The preamble the two cape results actions share: validate the :id, load the
+# cape event, resolve its instance's results endpoint, and pull its task id.
+# Renders the refusal itself and returns an empty list, so a caller reads as
+#
+#     my ( $endpoint, $task ) = $self->_cape_task( json => 1 ) or return;
+#
+# Args:
+#
+#   - json :: render refusals as { error => ... } JSON rather than plain
+#     text, matching what the action itself renders. Optional, default text.
+#
+# Returns: on success, the instance's cape_results endpoint config and the
+# event's numeric task id. On refusal, an empty list -- the response has
+# already been rendered.
+sub _cape_task {
+	my ( $self, %opts ) = @_;
+
+	my $refuse
+		= $opts{json}
+		? sub { $self->render( json => { error => $_[0] }, status => $_[1] ) }
+		: sub { $self->render( text => $_[0],              status => $_[1] ) };
+
+	my $id = $self->param('id');
+	unless ( defined $id && $id =~ /^[0-9]+$/ ) {
+		$refuse->( 'invalid id', 400 );
+		return;
+	}
+
+	my ( $event, $error ) = $self->_load_event( 'cape', $id );
+	if ( $error || !$event ) {
+		$refuse->( 'event not found', 404 );
+		return;
+	}
+
+	my $endpoint = $self->cape_results_for( $event->{instance} );
+	unless ($endpoint) {
+		$refuse->( 'no cape results endpoint configured for instance "' . ( $event->{instance} // '' ) . '"', 400 );
+		return;
+	}
+
+	my $task = $event->{task};
+	unless ( defined $task && $task =~ /^[0-9]+$/ ) {
+		$refuse->( 'event has no task id', 400 );
+		return;
+	}
+
+	return ( $endpoint, $task );
+} ## end sub _cape_task
+
+# The LWP::UserAgent the cape results fetches run inside their subprocess: a 30
+# second cap, and no certificate checking, since nergal boxes habitually serve
+# self-signed certs. Plain function; LWP is required lazily so the web worker
+# itself never loads it.
+sub _results_ua {
+	require LWP::UserAgent;
+	return LWP::UserAgent->new(
+		timeout  => 30,
+		ssl_opts => { verify_hostname => 0, SSL_verify_mode => 0 },
+	);
+}
+
 =head2 cape_results
 
 For a cape event, fetches the list of that task's detonation results from the
@@ -689,30 +748,7 @@ responsive, mirroring the Virani lookups in L<Lilith::Web::Controller::Api>.
 sub cape_results {
 	my $self = shift;
 
-	my $id = $self->param('id');
-	unless ( defined $id && $id =~ /^[0-9]+$/ ) {
-		return $self->render( json => { error => 'invalid id' }, status => 400 );
-	}
-
-	my ( $event, $error ) = $self->_load_event( 'cape', $id );
-	if ( $error || !$event ) {
-		return $self->render( json => { error => 'event not found' }, status => 404 );
-	}
-
-	my $endpoint = $self->cape_results_for( $event->{instance} );
-	unless ($endpoint) {
-		return $self->render(
-			json => {
-				error => 'no cape results endpoint configured for instance "' . ( $event->{instance} // '' ) . '"'
-			},
-			status => 400
-		);
-	}
-
-	my $task = $event->{task};
-	unless ( defined $task && $task =~ /^[0-9]+$/ ) {
-		return $self->render( json => { error => 'event has no task id' }, status => 400 );
-	}
+	my ( $endpoint, $task ) = $self->_cape_task( json => 1 ) or return;
 
 	# built here so the subprocess closure captures only plain strings
 	my $query
@@ -730,11 +766,7 @@ sub cape_results {
 	$self->render_later;
 	Mojo::IOLoop->subprocess(
 		sub {
-			require LWP::UserAgent;
-			my $ua = LWP::UserAgent->new(
-				timeout  => 30,
-				ssl_opts => { verify_hostname => 0, SSL_verify_mode => 0 },
-			);
+			my $ua = _results_ua();
 
 			my $list_res = $ua->get($list_url);
 			die 'results list failed: ' . $list_res->status_line . "\n" unless $list_res->is_success;
@@ -766,8 +798,8 @@ sub cape_results {
 		sub {
 			my ( $subprocess, $err, $result ) = @_;
 			if ( $err || !$result ) {
-				chomp( my $why = ( defined $err ? $err : 'no data' ) );
-				return $self->render( json => { error => 'cape results fetch failed: ' . $why }, status => 502 );
+				return $self->render_error( 'cape results fetch failed: ' . ( defined $err ? $err : 'no data' ),
+					502 );
 			}
 			$result->{web_report_url} = $web_report_url if defined $web_report_url;
 			return $self->render( json => $result );
@@ -791,14 +823,10 @@ server-side rather than being exposed in a browser URL.
 sub cape_result {
 	my $self = shift;
 
-	my $id      = $self->param('id');
 	my $subpath = $self->param('subpath');
 
-	unless ( defined $id && $id =~ /^[0-9]+$/ ) {
-		return $self->render( text => 'invalid id', status => 400 );
-	}
-
-	# mirror nergal's own allowlist: a shot jpg or one of the fixed report files
+	# mirror nergal's own allowlist: a shot jpg or one of the fixed report
+	# files. Checked first so a bad path costs no event lookup.
 	unless (
 		defined $subpath
 		&& (   $subpath =~ m{^shots/[A-Za-z0-9_-]+\.jpg$}
@@ -809,20 +837,7 @@ sub cape_result {
 		return $self->render( text => 'invalid result path', status => 400 );
 	}
 
-	my ( $event, $error ) = $self->_load_event( 'cape', $id );
-	if ( $error || !$event ) {
-		return $self->render( text => 'event not found', status => 404 );
-	}
-
-	my $endpoint = $self->cape_results_for( $event->{instance} );
-	unless ($endpoint) {
-		return $self->render( text => 'no cape results endpoint configured', status => 400 );
-	}
-
-	my $task = $event->{task};
-	unless ( defined $task && $task =~ /^[0-9]+$/ ) {
-		return $self->render( text => 'event has no task id', status => 400 );
-	}
+	my ( $endpoint, $task ) = $self->_cape_task or return;
 
 	my $url = $endpoint->{url} . '/results/' . $task . '/' . $subpath;
 	if ( defined $endpoint->{apikey} && $endpoint->{apikey} ne '' ) {
@@ -832,12 +847,7 @@ sub cape_result {
 	$self->render_later;
 	Mojo::IOLoop->subprocess(
 		sub {
-			require LWP::UserAgent;
-			my $ua = LWP::UserAgent->new(
-				timeout  => 30,
-				ssl_opts => { verify_hostname => 0, SSL_verify_mode => 0 },
-			);
-			my $res = $ua->get($url);
+			my $res = _results_ua()->get($url);
 			die 'upstream ' . $res->status_line . "\n" unless $res->is_success;
 			return { content_type => scalar $res->header('Content-Type'), body => $res->content };
 		},

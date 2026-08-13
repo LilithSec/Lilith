@@ -15,8 +15,6 @@ sub command_names { 'esc_types' }
 
 sub abstract { 'list the available escalation types and their config fields' }
 
-sub usage_desc { '%c esc_types %o' }
-
 sub opt_spec {
 	my ($class) = @_;
 	return $class->output_opt_spec;

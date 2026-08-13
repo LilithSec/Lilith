@@ -14,8 +14,6 @@ sub command_names { 'dump_self' }
 
 sub abstract { 'init Lilith and dump it via Data::Dumper' }
 
-sub usage_desc { '%c dump_self %o' }
-
 # Build the Lilith object from the config and dump it.
 #
 # Args:

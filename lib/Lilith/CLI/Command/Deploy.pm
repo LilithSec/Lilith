@@ -14,8 +14,6 @@ sub command_names { 'deploy' }
 
 sub abstract { 'deploy the schema into a fresh database' }
 
-sub usage_desc { '%c deploy %o' }
-
 sub description {
 	return
 		  "Installs the current schema version into an empty database using\n"

@@ -21,8 +21,6 @@ use Time::Piece::Guess ();
 
 sub abstract { 'fetch an event' }
 
-sub usage_desc { '%c event %o' }
-
 # --id and --event are alternative ways to name the same event, one by row ID
 # and one by the ID hashed at ingest; validate_args insists on one of them. The
 # last three are only meaningful together with --pcap, which is Suricata only.

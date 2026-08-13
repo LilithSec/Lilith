@@ -12,7 +12,6 @@ Declared in `Makefile.PL`; the load bearing ones are below.
 | `DBIx::Class`, `DBIx::Class::Migration` | the schema and its versioned migrations        |
 | `Mojolicious` (>= 9.0)                  | the `mojo_lilith` frontend                      |
 | `JSON`, `TOML::Tiny`                    | EVE decoding and the config file               |
-| `Rule::Engine`                          | evaluating auto escalation rules               |
 | `Text::ANSITable`, `Term::ANSIColor`    | the CLI's table output                         |
 | `Mail::SPF`, `Mail::DMARC`, `Mail::DKIM`| the web UI's mail checks under Domain Info     |
 | `Net::Server::Daemonize`                | `run --daemonize`                              |

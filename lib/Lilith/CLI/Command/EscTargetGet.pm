@@ -15,8 +15,6 @@ sub command_names { 'esc_target_get' }
 
 sub abstract { 'print a single escalation target as JSON' }
 
-sub usage_desc { '%c esc_target_get %o' }
-
 sub opt_spec {
 	return (
 		[ 'tid=s',  'the escalation target ID' ],

@@ -56,7 +56,7 @@ sub _params {
 	my $self = shift;
 
 	my $table = $self->param('table') // 'suricata';
-	$table = 'suricata' unless $table =~ /^(?:suricata|sagan|cape|baphomet)$/;
+	$table = 'suricata' unless $self->valid_alert_table($table);
 
 	my $mins = $self->param('go_back_minutes');
 	$mins = 1440 unless defined $mins && $mins =~ /^[0-9]+$/;
@@ -88,29 +88,6 @@ sub _params {
 
 	return ( $table, $mins, @filter );
 } ## end sub _params
-
-# Render whatever $code returns as JSON, turning a Lilith::Stats die (bad
-# column, unreachable database, ...) into a 400 with the message. The shared
-# logic lives in the render_json_or_400 helper in Lilith::Web.
-#
-# This is what lets every endpoint here pass request parameters straight to
-# Lilith::Stats: an unaccepted table, column, measure, or bucket dies there and
-# arrives at the browser as a 400 naming the problem, rather than as a 500.
-#
-# Args:
-#
-#   - $code :: code ref doing the work and returning something JSON encodable,
-#     normally the array or hash ref a Lilith::Stats method gave back.
-#
-# Returns: nothing meaningful; renders the JSON response -- $code's return
-# value on success, or { error => $message } with a 400 status when it died.
-#
-#     return $self->_json( sub { $self->lilith->stats->top( %args ) } );
-sub _json {
-	my ( $self, $code ) = @_;
-
-	return $self->render_json_or_400($code);
-}
 
 # A dashboard name a user may create: trimmed, 1-64 chars of a conservative set,
 # so a board name is safe to show and to round-trip. Returns the cleaned name or
@@ -226,7 +203,7 @@ sub stat {
 	my $metric = $self->param('metric') // 'total';
 	my $column = $self->param('column');
 
-	return $self->_json(
+	return $self->render_json_or_400(
 		sub {
 			my $stats = $self->lilith->stats;
 			if ( $metric eq 'distinct' ) {
@@ -301,7 +278,7 @@ sub top {
 
 	my $measure = $self->param('measure');
 
-	return $self->_json(
+	return $self->render_json_or_400(
 		sub {
 			my $rows = $self->lilith->stats->top(
 				table           => $table,
@@ -341,7 +318,7 @@ sub timeseries {
 
 	my $grouped = ( defined $group_by && $group_by ne '' ) ? 1 : 0;
 
-	return $self->_json(
+	return $self->render_json_or_400(
 		sub {
 			my $rows = $self->lilith->stats->timeseries(
 				table           => $table,
@@ -374,7 +351,7 @@ sub countries {
 	return $self->render( json => { enabled => 0, rows => [] } )
 		unless scalar @{ $self->geoip_mmdbs };
 
-	return $self->_json(
+	return $self->render_json_or_400(
 		sub {
 			# Aggregate the busiest source IPs into countries. Only the top IPs are
 			# geolocated, so this is the country breakdown of the top talkers, not
@@ -387,18 +364,7 @@ sub countries {
 				@filter,
 			);
 
-			my %by;
-			for my $r (@$ips) {
-				my $cc = $self->ip_country( $r->{value} );
-				$cc = '??' unless defined $cc && $cc ne '';
-				$by{$cc} += $r->{count};
-			}
-
-			my @rows = map { { country => $_, count => $by{$_} } }
-				sort { $by{$b} <=> $by{$a} || $a cmp $b } keys %by;
-			@rows = @rows[ 0 .. 14 ] if @rows > 15;
-
-			return { enabled => 1, rows => \@rows };
+			return $self->countries_from_top($ips);
 		}
 	);
 } ## end sub countries
@@ -417,7 +383,7 @@ sub layout {
 	my $self  = shift;
 	my $name  = $self->param('name');
 	my $named = defined $name && $name ne '';
-	return $self->_json(
+	return $self->render_json_or_400(
 		sub {
 			my $board = $self->lilith->dashboard_get( $named ? ( name => $name ) : () );
 			return $board if $board;
@@ -442,7 +408,7 @@ config pickers from the same set of accepted columns the API validates against.
 sub columns {
 	my $self = shift;
 	my ($table) = $self->_params;
-	return $self->_json(
+	return $self->render_json_or_400(
 		sub {
 			return { table => $table, columns => $self->lilith->stats->columns($table) };
 		}
@@ -459,7 +425,7 @@ that table may aggregate by, as C<< { table, measures => [ { name, label } ] } >
 sub measures {
 	my $self = shift;
 	my ($table) = $self->_params;
-	return $self->_json(
+	return $self->render_json_or_400(
 		sub {
 			return { table => $table, measures => $self->lilith->stats->measures($table) };
 		}
@@ -549,7 +515,7 @@ sub layout_save {
 
 	my $settings = _clean_settings( $body->{settings} );
 
-	return $self->_json(
+	return $self->render_json_or_400(
 		sub {
 			$self->lilith->dashboard_save(
 				( defined $name ? ( name => $name ) : () ),
@@ -570,7 +536,7 @@ C<< { boards => [ { name, is_default, updated }, ... ], default } >>.
 
 sub boards {
 	my $self = shift;
-	return $self->_json(
+	return $self->render_json_or_400(
 		sub {
 			my $list = $self->lilith->dashboard_list;
 			my ($default) = map { $_->{name} } grep { $_->{is_default} } @$list;
@@ -593,7 +559,7 @@ sub board_create {
 	return $self->render( json => { error => 'invalid dashboard name' }, status => 400 )
 		unless defined $name;
 
-	return $self->_json(
+	return $self->render_json_or_400(
 		sub {
 			die "a dashboard named '$name' already exists\n"
 				if $self->lilith->dashboard_get( name => $name );
@@ -620,7 +586,7 @@ sub board_rename {
 	return $self->render( json => { error => 'invalid target name' }, status => 400 )
 		unless defined $to;
 
-	return $self->_json(
+	return $self->render_json_or_400(
 		sub {
 			die "no dashboard named '$from'\n" unless $self->lilith->dashboard_get( name => $from );
 			die "a dashboard named '$to' already exists\n"
@@ -645,7 +611,7 @@ sub board_delete {
 	return $self->render( json => { error => 'missing dashboard name' }, status => 400 )
 		unless defined $name && $name ne '';
 
-	return $self->_json(
+	return $self->render_json_or_400(
 		sub {
 			my $board = $self->lilith->dashboard_get( name => $name );
 			die "no dashboard named '$name'\n" unless $board;
@@ -673,7 +639,7 @@ sub board_default {
 	return $self->render( json => { error => 'missing dashboard name' }, status => 400 )
 		unless defined $name && $name ne '';
 
-	return $self->_json(
+	return $self->render_json_or_400(
 		sub {
 			die "no dashboard named '$name'\n" unless $self->lilith->dashboard_get( name => $name );
 			$self->lilith->dashboard_set_default( name => $name );

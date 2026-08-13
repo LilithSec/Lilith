@@ -100,6 +100,13 @@ sub startup {
 	);
 	$self->helper( alert_tables => sub { \@alert_tables } );
 
+	# Whether a request-supplied table name is one of the alert tables above.
+	# Derived from the same list so a new table needs no second edit; the
+	# controllers all validate through this rather than each keeping its own
+	# regex of the table names. Tolerant of undef, which is simply not valid.
+	my %is_alert_table = map { $_->{key} => 1 } @alert_tables;
+	$self->helper( valid_alert_table => sub { defined( $_[1] ) && $is_alert_table{ $_[1] } ? 1 : 0 } );
+
 	# The columns each alert table may be ordered by, as a table => [columns]
 	# hash ref, derived from %Lilith::alert_columns rather than hand-kept in the
 	# search page's JavaScript -- so adding a column to a table offers it for
@@ -397,6 +404,19 @@ sub startup {
 		}
 	);
 
+	# Render an error message as { error => ... } JSON with the given status
+	# (default 400), first stripping the trailing whitespace a die message
+	# carries. The one place the error-response shape lives; every controller
+	# error path renders through this rather than hand-rolling the trim.
+	$self->helper(
+		render_error => sub {
+			my ( $controller, $error, $status ) = @_;
+
+			( my $why = defined($error) ? $error : '' ) =~ s/\s+\z//;
+			return $controller->render( json => { error => $why }, status => ( $status // 400 ) );
+		}
+	);
+
 	# Render whatever $code->(@code_args) returns as JSON, turning a die (bad
 	# column/source, unreachable database, ...) into a 400 with the message.
 	# Shared by the dashboard and logs JSON APIs.
@@ -405,10 +425,7 @@ sub startup {
 			my ( $controller, $code, @code_args ) = @_;
 
 			my $data = eval { $code->(@code_args) };
-			if ($@) {
-				( my $why = $@ ) =~ s/\s+\z//;
-				return $controller->render( json => { error => $why }, status => 400 );
-			}
+			return $controller->render_error($@) if $@;
 			return $controller->render( json => $data );
 		}
 	);
@@ -729,6 +746,41 @@ sub startup {
 			my $geo = { country => $country, subdivision => $subdivision, city => $city };
 			$cache->{$ip} = $geo if $cache;
 			return $geo;
+		}
+	);
+
+	# The rows of a countries panel, aggregated from a top-source-IPs result:
+	# each address resolved through ip_country, unknowns pooled under '??',
+	# sorted busiest first with ties alphabetical, capped at 15. Shared by the
+	# dashboard and logs panels so the two cannot disagree on the shape.
+	#
+	# Args:
+	#
+	#   - $ips :: the top() result to aggregate -- an array ref of
+	#     { value => <address>, count => ... } rows.
+	#
+	# Returns: the response body for a countries endpoint whose GeoIP is
+	# configured: { enabled => 1, rows => [ { country, count }, ... ] }. The
+	# enabled => 0 case never gets here, having no addresses to aggregate.
+	#
+	#     $c->countries_from_top( $ips );
+	#     # { enabled => 1, rows => [ { country => 'US', count => 40 }, ... ] }
+	$self->helper(
+		countries_from_top => sub {
+			my ( $c, $ips ) = @_;
+
+			my %by_country;
+			for my $row ( @{$ips} ) {
+				my $cc = $c->ip_country( $row->{value} );
+				$cc = '??' unless defined $cc && $cc ne '';
+				$by_country{$cc} += $row->{count};
+			}
+
+			my @rows = map { { country => $_, count => $by_country{$_} } }
+				sort { $by_country{$b} <=> $by_country{$a} || $a cmp $b } keys %by_country;
+			@rows = @rows[ 0 .. 14 ] if @rows > 15;
+
+			return { enabled => 1, rows => \@rows };
 		}
 	);
 

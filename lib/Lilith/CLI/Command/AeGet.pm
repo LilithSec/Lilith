@@ -15,8 +15,6 @@ sub command_names { 'ae_get' }
 
 sub abstract { 'print a single auto escalation rule as JSON' }
 
-sub usage_desc { '%c ae_get %o' }
-
 sub opt_spec {
 	return ( [ 'id=s', 'the auto escalation rule ID' ], [ 'pretty', 'pretty print the JSON' ], );
 }

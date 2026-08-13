@@ -137,6 +137,31 @@ sub _list {
 	return [ grep { defined && $_ ne '' } @{$value} ];
 }
 
+# A Shodan field that should hold a plain scalar, as one. Shodan omits fields
+# it has nothing for, and a response is not trusted about shape either -- so
+# every scalar read of one defaults through here, and a ref can never leak
+# into the result.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $hash :: the hash ref to read from. Anything that is not a hash ref
+#     reads as holding nothing, so a possibly-absent parent can be passed
+#     without checking it first.
+#   - $key :: the field wanted.
+#
+# Returns: the value, or '' when it is absent or not a plain scalar.
+#
+#     _str( $http, 'title' )                  # 'Login' or ''
+#     _str( $banner->{_shodan}, 'module' )    # parent may be absent
+sub _str {
+	my ( $hash, $key ) = @_;
+
+	my $value = ref $hash eq 'HASH' ? $hash->{$key} : undef;
+	return defined $value && !ref $value ? $value : '';
+}
+
 # One certificate name as the usual 'CN=..., O=...' one liner. Shodan sends a
 # subject and an issuer as a hash of their DN components, which is not how
 # anyone reads a certificate.
@@ -168,6 +193,54 @@ sub _dn {
 
 	return join( ', ', @parts );
 } ## end sub _dn
+
+# One GET against a keyless *.shodan.io JSON endpoint, with a 404 taken as an
+# empty answer rather than a failure -- both InternetDB and CVEDB answer a
+# subject they have nothing on that way. Shared with Lilith::CVEDB, whose
+# fetch is deliberately this fetch with a different URL; one copy keeps the
+# two from drifting.
+#
+# Plain function, not a method. Blocking. Nothing here dies.
+#
+# Args:
+#
+#   - $url :: the full URL to GET.
+#   - $error_label :: what to prefix an error with, naming the service --
+#     'internetdb' or 'cvedb'.
+#
+# Returns: two values, the decoded response and an error string. A 404 or an
+# undecodable body comes back as an empty hash ref with no error; a transport
+# or HTTP failure as undef with the labelled reason.
+#
+#     my ( $raw, $error ) = get_json( 'https://internetdb.shodan.io/' . $ip, 'internetdb' );
+sub get_json {
+	my ( $url, $error_label ) = @_;
+
+	my $transaction = eval {
+		my $ua = Mojo::UserAgent->new;
+		$ua->connect_timeout(5)->inactivity_timeout(10)->request_timeout(15);
+		$ua->get($url);
+	};
+	if ( $@ || !$transaction ) {
+		my $why = $@ || 'request failed';
+		chomp($why);
+		return ( undef, $error_label . ': ' . $why );
+	}
+
+	my $raw;
+	if ( my $error = $transaction->error ) {
+		my $why = $error->{message} // 'request failed';
+		$why .= ' (' . $error->{code} . ')' if $error->{code};
+
+		# a 404 is the service saying it has nothing on the subject
+		return ( undef, $error_label . ': ' . $why ) unless ( $error->{code} // 0 ) == 404;
+		$raw = {};
+	} else {
+		$raw = eval { $transaction->res->json };
+	}
+
+	return ( ref $raw eq 'HASH' ? $raw : {}, '' );
+} ## end sub get_json
 
 # Fold one Shodan 'vulns' value into a CVE => detail hash the caller owns.
 #
@@ -279,7 +352,7 @@ sub _add_vulns {
 sub _service {
 	my $banner = shift;
 
-	my $text = defined $banner->{data} && !ref $banner->{data} ? $banner->{data} : '';
+	my $text = _str( $banner, 'data' );
 	if ( length($text) > 4000 ) {
 		$text = substr( $text, 0, 4000 ) . "\n... (truncated)";
 	}
@@ -288,14 +361,12 @@ sub _service {
 	$cpes = _list( $banner->{cpe} ) unless @{$cpes};
 
 	my %service = (
-		port      => ( defined $banner->{port}      ? $banner->{port} + 0  : 0 ),
-		transport => ( defined $banner->{transport} ? $banner->{transport} : '' ),
-		module    => ( ref $banner->{_shodan} eq 'HASH' && defined $banner->{_shodan}{module} )
-		? $banner->{_shodan}{module}
-		: '',
-		product   => ( defined $banner->{product}   ? $banner->{product}   : '' ),
-		version   => ( defined $banner->{version}   ? $banner->{version}   : '' ),
-		timestamp => ( defined $banner->{timestamp} ? $banner->{timestamp} : '' ),
+		port      => ( defined $banner->{port} ? $banner->{port} + 0 : 0 ),
+		transport => _str( $banner,            'transport' ),
+		module    => _str( $banner->{_shodan}, 'module' ),
+		product   => _str( $banner,            'product' ),
+		version   => _str( $banner,            'version' ),
+		timestamp => _str( $banner,            'timestamp' ),
 		cpes      => $cpes,
 		banner    => $text,
 		vulns     => [],
@@ -316,14 +387,13 @@ sub _service {
 	if ( ref $banner->{http} eq 'HASH' ) {
 		my $http = $banner->{http};
 		$service{http} = {
-			title      => ( defined $http->{title}  && !ref $http->{title}  ? $http->{title}  : '' ),
-			server     => ( defined $http->{server} && !ref $http->{server} ? $http->{server} : '' ),
-			waf        => ( defined $http->{waf}    && !ref $http->{waf}    ? $http->{waf}    : '' ),
-			status     => ( defined $http->{status} && !ref $http->{status} ? $http->{status} : '' ),
+			title      => _str( $http, 'title' ),
+			server     => _str( $http, 'server' ),
+			waf        => _str( $http, 'waf' ),
+			status     => _str( $http, 'status' ),
 			components =>
 				( ref $http->{components} eq 'HASH' ? join( ', ', sort keys %{ $http->{components} } ) : '' ),
-			favicon_hash =>
-				( ref $http->{favicon} eq 'HASH' && defined $http->{favicon}{hash} ? $http->{favicon}{hash} : '' ),
+			favicon_hash => _str( $http->{favicon}, 'hash' ),
 		};
 	} ## end if ( ref $banner->{http} eq 'HASH' )
 
@@ -343,27 +413,23 @@ sub _service {
 				? $cipher->{name} . ( defined $cipher->{bits} ? ' (' . $cipher->{bits} . ' bit)' : '' )
 				: ''
 			),
-			jarm             => ( defined $ssl->{jarm} && !ref $ssl->{jarm} ? $ssl->{jarm} : '' ),
-			ja3s             => ( defined $ssl->{ja3s} && !ref $ssl->{ja3s} ? $ssl->{ja3s} : '' ),
+			jarm             => _str( $ssl, 'jarm' ),
+			ja3s             => _str( $ssl, 'ja3s' ),
 			cert_subject     => _dn( $cert->{subject} ),
 			cert_issuer      => _dn( $cert->{issuer} ),
-			cert_serial      => ( defined $cert->{serial}  && !ref $cert->{serial}  ? $cert->{serial}  : '' ),
-			cert_expires     => ( defined $cert->{expires} && !ref $cert->{expires} ? $cert->{expires} : '' ),
+			cert_serial      => _str( $cert, 'serial' ),
+			cert_expires     => _str( $cert, 'expires' ),
 			cert_expired     => ( $cert->{expired} ? 1 : 0 ),
-			cert_fingerprint => (
-				ref $cert->{fingerprint} eq 'HASH' && defined $cert->{fingerprint}{sha256}
-				? $cert->{fingerprint}{sha256}
-				: ''
-			),
+			cert_fingerprint => _str( $cert->{fingerprint}, 'sha256' ),
 		};
 	} ## end if ( ref $banner->{ssl} eq 'HASH' )
 
 	if ( ref $banner->{ssh} eq 'HASH' ) {
 		my $ssh = $banner->{ssh};
 		$service{ssh} = {
-			type        => ( defined $ssh->{type}        && !ref $ssh->{type}        ? $ssh->{type}        : '' ),
-			fingerprint => ( defined $ssh->{fingerprint} && !ref $ssh->{fingerprint} ? $ssh->{fingerprint} : '' ),
-			hassh       => ( defined $ssh->{hassh}       && !ref $ssh->{hassh}       ? $ssh->{hassh}       : '' ),
+			type        => _str( $ssh, 'type' ),
+			fingerprint => _str( $ssh, 'fingerprint' ),
+			hassh       => _str( $ssh, 'hassh' ),
 		};
 	}
 
@@ -518,28 +584,10 @@ sub fetch {
 			$raw = {};
 		}
 	} else {
-		my $transaction = eval {
-			my $ua = Mojo::UserAgent->new;
-			$ua->connect_timeout(5)->inactivity_timeout(10)->request_timeout(15);
-			$ua->get( 'https://internetdb.shodan.io/' . $ip );
-		};
-		if ( $@ || !$transaction ) {
-			my $why = $@ || 'request failed';
-			chomp($why);
-			return ( undef, 'internetdb: ' . $why );
-		}
-
-		if ( my $error = $transaction->error ) {
-			my $why = $error->{message} // 'request failed';
-			$why .= ' (' . $error->{code} . ')' if $error->{code};
-
-			# As above, a 404 is InternetDB saying it has nothing on the address.
-			return ( undef, 'internetdb: ' . $why ) unless ( $error->{code} // 0 ) == 404;
-			$raw = {};
-		} else {
-			$raw = eval { $transaction->res->json };
-		}
-	} ## end else [ if ( defined $api_key && $api_key ne q{} )]
+		my $error;
+		( $raw, $error ) = get_json( 'https://internetdb.shodan.io/' . $ip, 'internetdb' );
+		return ( undef, $error ) if !defined $raw;
+	}
 
 	return ( ref $raw eq 'HASH' ? $raw : {}, '' );
 } ## end sub fetch
@@ -578,16 +626,16 @@ sub normalize {
 	my %info = (
 		source      => $source,
 		url         => 'https://www.shodan.io/host/' . $ip,
-		os          => ( defined $raw->{os}          && !ref $raw->{os}          ? $raw->{os}          : '' ),
-		last_update => ( defined $raw->{last_update} && !ref $raw->{last_update} ? $raw->{last_update} : '' ),
+		os          => _str( $raw, 'os' ),
+		last_update => _str( $raw, 'last_update' ),
 
 		# who the address belongs to, per Shodan itself: often more specific
 		# than whois or the GeoIP ASN database (the customer rather than the
 		# carrier), and unlike either of those it can be cached into columns
 		# and grouped by. API tier only; the keyless summary carries none.
-		org => ( defined $raw->{org} && !ref $raw->{org} ? $raw->{org} : '' ),
-		isp => ( defined $raw->{isp} && !ref $raw->{isp} ? $raw->{isp} : '' ),
-		asn => ( defined $raw->{asn} && !ref $raw->{asn} ? $raw->{asn} : '' ),
+		org => _str( $raw, 'org' ),
+		isp => _str( $raw, 'isp' ),
+		asn => _str( $raw, 'asn' ),
 
 		hostnames => _list( $raw->{hostnames} ),
 		domains   => _list( $raw->{domains} ),
@@ -611,16 +659,11 @@ sub normalize {
 	my %service_group;
 	for my $banner ( @{ _list( $raw->{data} ) } ) {
 		next unless ref $banner eq 'HASH';
-		my $stamp = defined $banner->{timestamp} && !ref $banner->{timestamp} ? $banner->{timestamp} : '';
-		my $key   = join(
-			'|',
-			( defined $banner->{port}      && !ref $banner->{port}      ? $banner->{port}      : 0 ),
-			( defined $banner->{transport} && !ref $banner->{transport} ? $banner->{transport} : '' ),
-			(
-				ref $banner->{_shodan} eq 'HASH'
-					&& defined $banner->{_shodan}{module} ? $banner->{_shodan}{module} : ''
-			)
-		);
+		my $stamp = _str( $banner, 'timestamp' );
+		my $key   = join( '|',
+			( _str( $banner, 'port' ) || 0 ),
+			_str( $banner,            'transport' ),
+			_str( $banner->{_shodan}, 'module' ) );
 
 		my $slot = $service_group{$key} ||= { banner => $banner, stamp => $stamp, first_seen => $stamp };
 

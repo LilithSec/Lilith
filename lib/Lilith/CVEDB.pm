@@ -2,7 +2,7 @@ package Lilith::CVEDB;
 
 use strict;
 use warnings;
-use Mojo::UserAgent ();
+use Lilith::Shodan ();
 
 =head1 NAME
 
@@ -153,30 +153,11 @@ sub rule_cves {
 sub fetch {
 	my $cve = shift;
 
-	my $transaction = eval {
-		my $ua = Mojo::UserAgent->new;
-		$ua->connect_timeout(5)->inactivity_timeout(10)->request_timeout(15);
-		$ua->get( 'https://cvedb.shodan.io/cve/' . $cve );
-	};
-	if ( $@ || !$transaction ) {
-		my $why = $@ || 'request failed';
-		chomp($why);
-		return ( undef, 'cvedb: ' . $why );
-	}
+	# the GET itself, with its 404-is-an-answer handling, is shared with the
+	# InternetDB fetch in Lilith::Shodan -- the two endpoints behave the same
+	my ( $raw, $error ) = Lilith::Shodan::get_json( 'https://cvedb.shodan.io/cve/' . $cve, 'cvedb' );
+	return ( undef, $error ) if !defined $raw;
 
-	my $raw;
-	if ( my $error = $transaction->error ) {
-		my $why = $error->{message} // 'request failed';
-		$why .= ' (' . $error->{code} . ')' if $error->{code};
-
-		# A 404 is CVEDB saying it has nothing on the id.
-		return ( undef, 'cvedb: ' . $why ) unless ( $error->{code} // 0 ) == 404;
-		$raw = {};
-	} else {
-		$raw = eval { $transaction->res->json };
-	}
-
-	$raw = {} unless ref $raw eq 'HASH';
 	delete $raw->{cpes};
 
 	return ( $raw, '' );

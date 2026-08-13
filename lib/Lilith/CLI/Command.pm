@@ -55,6 +55,12 @@ a command's C<opt_spec> like below.
         );
     }
 
+=head2 usage_desc
+
+Returns the usage line every command shares, C<%c E<lt>nameE<gt> %o>, with the
+name taken from C<command_names>. A command whose usage takes more than
+options (positional arguments, say) overrides this.
+
 =head2 output_dispatch( $opt, %renderers )
 
 Dispatches on C<< $opt->{output} >>, calling the matching code ref from
@@ -171,6 +177,12 @@ sub table {
 
 	return $tb;
 } ## end sub table
+
+sub usage_desc {
+	my ($class) = @_;
+
+	return '%c ' . ( $class->command_names )[0] . ' %o';
+}
 
 sub output_opt_spec {
 	return (

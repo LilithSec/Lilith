@@ -14,8 +14,6 @@ sub command_names { 'class_map' }
 
 sub abstract { 'print the long name to short name class mapping' }
 
-sub usage_desc { '%c class_map %o' }
-
 # Print the classification map as a table, sorted by long name so the output is
 # stable between runs.
 #

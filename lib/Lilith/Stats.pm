@@ -3,7 +3,7 @@ package Lilith::Stats;
 use strict;
 use warnings;
 use Lilith::DBUtil
-	qw( column_exists connect_cached_dbh host_or_text_expr local_networks_frag measure_expr skip_scan_viable time_window_clause validate_bucket );
+	qw( column_exists connect_cached_dbh distinct_by_skip_scan host_or_text_expr local_networks_frag measure_expr skip_scan_viable time_window_clause validate_bucket );
 
 =head1 NAME
 
@@ -534,18 +534,8 @@ Total number of alerts in the window.
 sub total {
 	my ( $self, %opts ) = @_;
 
-	my $type = $self->_table( $opts{table} );
-	my $mins = $self->_minutes( $opts{go_back_minutes} );
-	my ( $tbl, $tc ) = ( $TABLE{$type}, $TIME_COL{$type} );
-
-	my $dbh = $self->_dbh;
-	my $exf = $self->_exclude_frag( $dbh, $type, \%opts );
-	my $win = $self->_window_frag( $dbh, $tc, \%opts, $mins );
-	my $sql = "select count(*) from $tbl where $win$exf";
-	my ($n) = $dbh->selectrow_array($sql);
-
-	return ( $n // 0 ) + 0;
-} ## end sub total
+	return $self->_count_where( \%opts, '' );
+}
 
 =head2 escalated
 
@@ -559,20 +549,8 @@ have been escalated at least once).
 sub escalated {
 	my ( $self, %opts ) = @_;
 
-	my $type = $self->_table( $opts{table} );
-	my $mins = $self->_minutes( $opts{go_back_minutes} );
-	my ( $tbl, $tc ) = ( $TABLE{$type}, $TIME_COL{$type} );
-
-	my $dbh = $self->_dbh;
-	my $exf = $self->_exclude_frag( $dbh, $type, \%opts );
-	my $win = $self->_window_frag( $dbh, $tc, \%opts, $mins );
-	my $sql
-		= "select count(*) from $tbl where $win$exf "
-		. "and escalations is not null and array_length(escalations, 1) > 0";
-	my ($n) = $dbh->selectrow_array($sql);
-
-	return ( $n // 0 ) + 0;
-} ## end sub escalated
+	return $self->_count_where( \%opts, ' and escalations is not null and array_length(escalations, 1) > 0' );
+}
 
 =head2 distinct
 
@@ -587,25 +565,19 @@ sub distinct {
 
 	my $type = $self->_table( $opts{table} );
 	my $col  = $self->_dimension( $type, $opts{column} );
-	my $mins = $self->_minutes( $opts{go_back_minutes} );
-	my ( $tbl, $tc ) = ( $TABLE{$type}, $TIME_COL{$type} );
-
-	my $dbh     = $self->_dbh;
-	my $exf     = $self->_exclude_frag( $dbh, $type, \%opts );
-	my $win     = $self->_window_frag( $dbh, $tc, \%opts, $mins );
+	my ( $tbl, $tc, $dbh, $where ) = $self->_query_ctx( $type, \%opts );
 	my $colexpr = $self->_col_expr( $type, $col, \%opts );
 
 	# A virtual or enriched column is an expression -- dug out of raw, or read
 	# from the joined shodan_cache -- so there is no column for an index to lead
 	# with and nothing to walk.
 	if ( $colexpr eq $col ) {
-		my $walked = $self->_distinct_by_skip_scan( $tbl, $col, $tc, $win . $exf );
+		my $walked = $self->_distinct_by_skip_scan( $tbl, $col, $tc, $where );
 		return $walked if defined $walked;
 	}
 
 	my $from = $self->_from_frag( $type, $col );
-	my $sql  = "select count(distinct $colexpr) from $from where $win$exf";
-	my ($n)  = $dbh->selectrow_array($sql);
+	my ($n) = $dbh->selectrow_array("select count(distinct $colexpr) from $from where $where");
 
 	return ( $n // 0 ) + 0;
 } ## end sub distinct
@@ -625,13 +597,9 @@ sub top {
 
 	my $type  = $self->_table( $opts{table} );
 	my $col   = $self->_dimension( $type, $opts{column} );
-	my $mins  = $self->_minutes( $opts{go_back_minutes} );
 	my $limit = $self->_limit( $opts{limit}, 10 );
-	my ( $tbl, $tc ) = ( $TABLE{$type}, $TIME_COL{$type} );
+	my ( $tbl, $tc, $dbh, $where ) = $self->_query_ctx( $type, \%opts );
 
-	my $dbh     = $self->_dbh;
-	my $exf     = $self->_exclude_frag( $dbh, $type, \%opts );
-	my $win     = $self->_window_frag( $dbh, $tc, \%opts, $mins );
 	my $vexpr   = $self->_value_expr( $type, $col, \%opts );
 	my $colexpr = $self->_col_expr( $type, $col, \%opts );
 	my $magg    = $self->_measure_expr( $type, $opts{measure}, \%opts );
@@ -646,7 +614,7 @@ sub top {
 
 	my $sql
 		= "select $vexpr as value, $magg as count from $from "
-		. "where $win$exf and $colexpr is not null "
+		. "where $where and $colexpr is not null "
 		. "group by 1 order by $ord limit $limit";
 
 	my $rows = $dbh->selectall_arrayref( $sql, { Slice => {} } );
@@ -676,15 +644,11 @@ sub timeseries {
 	my ( $self, %opts ) = @_;
 
 	my $type   = $self->_table( $opts{table} );
-	my $mins   = $self->_minutes( $opts{go_back_minutes} );
 	my $bucket = $self->_bucket( $opts{bucket} );
-	my ( $tbl, $tc ) = ( $TABLE{$type}, $TIME_COL{$type} );
+	my ( $tbl, $tc, $dbh, $window ) = $self->_query_ctx( $type, \%opts );
 
-	my $dbh    = $self->_dbh;
-	my $exf    = $self->_exclude_frag( $dbh, $type, \%opts );
-	my $magg   = $self->_measure_expr( $type, $opts{measure}, \%opts );
-	my $window = $self->_window_frag( $dbh, $tc, \%opts, $mins ) . $exf;
-	my $epoch  = "extract(epoch from date_trunc('$bucket', $tc))::bigint";
+	my $magg  = $self->_measure_expr( $type, $opts{measure}, \%opts );
+	my $epoch = "extract(epoch from date_trunc('$bucket', $tc))::bigint";
 
 	if ( defined $opts{group_by} && $opts{group_by} ne '' ) {
 		my $g     = $self->_dimension( $type, $opts{group_by} );
@@ -793,12 +757,7 @@ sub shodan_coverage {
 	die( '"' . $side . '" is not a known side (src, dest)' . "\n" ) unless $ENRICH_SIDE{$side};
 	my $ip = $ENRICH_SIDE{$side}{ip_column};
 
-	my $mins = $self->_minutes( $opts{go_back_minutes} );
-	my ( $tbl, $tc ) = ( $TABLE{$type}, $TIME_COL{$type} );
-
-	my $dbh = $self->_dbh;
-	my $exf = $self->_exclude_frag( $dbh, $type, \%opts );
-	my $win = $self->_window_frag( $dbh, $tc, \%opts, $mins );
+	my ( $tbl, $tc, $dbh, $where ) = $self->_query_ctx( $type, \%opts );
 
 	# the same rule the freshness dimension applies, so this tile and a chart
 	# grouped by shodan_*_freshness cannot disagree
@@ -807,7 +766,7 @@ sub shodan_coverage {
 	# The addresses are collected first and matched after, so the cache is
 	# touched once per distinct address rather than once per alert.
 	my $sql
-		= "with addresses as (select distinct $ip as ip from $tbl where $win$exf and $ip is not null) "
+		= "with addresses as (select distinct $ip as ip from $tbl where $where and $ip is not null) "
 		. "select count(*), count(shodan.shodan_ip), "
 		. "count(*) filter (where shodan.shodan_ip is not null and not ($fresh)) from addresses "
 		. "left join (select ip as shodan_ip, fetched as shodan_fetched, source as shodan_source"
@@ -848,17 +807,16 @@ sub columns {
 	my @cols = keys %{ $DIMENSION{$type} };
 	push( @cols, keys %{ $VIRTUAL{$type} } ) if $VIRTUAL{$type};
 	push( @cols, grep { $DIMENSION{$type}{ $LOCALITY{$_} } } keys %LOCALITY );
-	if ( $ENRICH_TABLE{$type} && $self->_shodan_available ) {
+	if ( $ENRICH_TABLE{$type} ) {
 		push(
 			@cols,
 			grep {
 				my $enrich = $ENRICH{$_};
 				( !$enrich->{tables} || $enrich->{tables}{$type} )
-					&& ( !$enrich->{needs_cves}         || $self->_column_available( 'suricata_alerts', 'cves' ) )
-					&& ( !$enrich->{needs_host_columns} || $self->_column_available( 'shodan_cache',    'os' ) )
+					&& !defined( $self->_enrich_unavailable_reason($enrich) )
 			} keys %ENRICH
 		);
-	} ## end if ( $ENRICH_TABLE{$type} && $self->_shodan_available)
+	} ## end if ( $ENRICH_TABLE{$type} )
 	return [ sort @cols ];
 } ## end sub columns
 
@@ -897,6 +855,60 @@ sub measures {
 sub _dbh {
 	my ($self) = @_;
 	return connect_cached_dbh( ref($self), $self->{dsn}, $self->{user}, $self->{pass} );
+}
+
+# The per-query context every aggregation method starts from: the window
+# validated, the handle connected, and the WHERE pieces rendered. Split from
+# the callers so the six of them do not each spell out the same five lines.
+# The caller does its own _table (and any column/side validation) first, so a
+# request bad in those ways still dies before anything touches the database.
+#
+# Args:
+#
+#   - $type :: the short table type, already through _table.
+#   - $opts :: the caller's option hash ref, read for go_back_minutes,
+#     start/end, and exclude_classification.
+#
+# Returns: a list of ( $tbl, $tc, $dbh, $where ) -- the real table name, its
+# time column, the shared handle, and the window fragment with any exclusion
+# already appended, ready to sit after "where".
+#
+#     my ( $tbl, $tc, $dbh, $where ) = $self->_query_ctx( $type, \%opts );
+#     my ($n) = $dbh->selectrow_array("select count(*) from $tbl where $where");
+sub _query_ctx {
+	my ( $self, $type, $opts ) = @_;
+
+	my $mins = $self->_minutes( $opts->{go_back_minutes} );
+	my ( $tbl, $tc ) = ( $TABLE{$type}, $TIME_COL{$type} );
+
+	my $dbh = $self->_dbh;
+	my $exf = $self->_exclude_frag( $dbh, $type, $opts );
+	my $win = $self->_window_frag( $dbh, $tc, $opts, $mins );
+
+	return ( $tbl, $tc, $dbh, $win . $exf );
+} ## end sub _query_ctx
+
+# count(*) over the window with an optional extra WHERE tail -- the whole of
+# total and escalated once the context is built.
+#
+# Args:
+#
+#   - $opts :: the caller's option hash ref, as _query_ctx reads it plus
+#     'table'.
+#   - $extra :: SQL appended after the window fragment, carrying its own
+#     leading ' and ', or '' for a bare count.
+#
+# Returns: the count as an integer, 0 when the window is empty.
+#
+#     $self->_count_where( \%opts, '' );
+sub _count_where {
+	my ( $self, $opts, $extra ) = @_;
+
+	my $type = $self->_table( $opts->{table} );
+	my ( $tbl, $tc, $dbh, $where ) = $self->_query_ctx( $type, $opts );
+	my ($n) = $dbh->selectrow_array("select count(*) from $tbl where $where$extra");
+
+	return ( $n // 0 ) + 0;
 }
 
 # The time-window WHERE fragment for time column $tc: an explicit absolute range
@@ -1061,11 +1073,8 @@ sub _dimension {
 	die("a column is required\n") unless defined $col && $col ne '';
 
 	if ( my $enrich = $self->_enrich_for( $type, $col ) ) {
-		die("the shodan_cache table is not present (needs schema version 15)\n") unless $self->_shodan_available;
-		die("the suricata_alerts cves column is not present (needs schema version 16)\n")
-			if $enrich->{needs_cves} && !$self->_column_available( 'suricata_alerts', 'cves' );
-		die("the shodan_cache os/org/isp/asn columns are not present (needs schema version 17)\n")
-			if $enrich->{needs_host_columns} && !$self->_column_available( 'shodan_cache', 'os' );
+		my $unavailable = $self->_enrich_unavailable_reason($enrich);
+		die($unavailable) if defined $unavailable;
 		return $col;
 	}
 
@@ -1077,6 +1086,33 @@ sub _dimension {
 		unless $DIMENSION{$type}{$col} || ( $VIRTUAL{$type} && $VIRTUAL{$type}{$col} );
 	return $col;
 } ## end sub _dimension
+
+# Why an enrichment dimension cannot be served right now, or undef when it
+# can: the shodan_cache table itself, then the schema-version-gated columns
+# the entry needs. The one list of these checks -- _dimension dies with the
+# reason and columns() drops the dimension on any reason, so the picker and
+# the validator cannot drift when a new needs_* flag arrives.
+#
+# Args:
+#
+#   - $enrich :: the dimension's %ENRICH entry, already table-scoped by the
+#     caller (via _enrich_for or columns()'s own tables check).
+#
+# Returns: undef when the dimension can be served, else the reason as a
+# newline-terminated string ready to die with.
+#
+#     my $unavailable = $self->_enrich_unavailable_reason( $ENRICH{shodan_src_tag} );
+sub _enrich_unavailable_reason {
+	my ( $self, $enrich ) = @_;
+
+	return "the shodan_cache table is not present (needs schema version 15)\n" unless $self->_shodan_available;
+	return "the suricata_alerts cves column is not present (needs schema version 16)\n"
+		if $enrich->{needs_cves} && !$self->_column_available( 'suricata_alerts', 'cves' );
+	return "the shodan_cache os/org/isp/asn columns are not present (needs schema version 17)\n"
+		if $enrich->{needs_host_columns} && !$self->_column_available( 'shodan_cache', 'os' );
+
+	return undef;
+} ## end sub _enrich_unavailable_reason
 
 # The %ENRICH entry for a dimension, when that dimension applies to the table
 # in play: the table must be one whose addresses are enriched at all, and the
@@ -1403,22 +1439,15 @@ sub _value_expr {
 } ## end sub _value_expr
 
 # Count a column's distinct values in the window by walking an index rather than
-# reading the rows, when that is the better trade.
+# reading the rows, when that is the better trade. The walk itself lives in
+# Lilith::DBUtil::distinct_by_skip_scan, shared with Lilith::Allani.
 #
-# The recursive term is the trick: having found one value, ask for the smallest
-# value greater than it. Against a btree that is a single descent, so the walk
-# visits one index entry per distinct value and never touches the table. Each
-# value found is then checked for a row inside the window, which the timestamp
-# as the index's second key answers with another descent.
-#
-# Whether that is worth doing is decided by skip_scan_viable, which wants both
+# Whether it is worth doing is decided by skip_scan_viable, which wants both
 # an index of the right shape and few enough values to be worth walking. Getting
 # either wrong is worse than not trying: over a day's window a walk with only a
-# (column, id) index measured ten times slower than the count it replaces.
-#
-# The walk is capped even so, because the cardinality figure is an estimate from
-# a sample. Hitting the cap gives undef rather than an undercount, and the caller
-# counts the rows instead.
+# (column, id) index measured ten times slower than the count it replaces. The
+# cache belongs to this object because the two readers are pointed at different
+# databases.
 #
 # Args:
 #
@@ -1432,8 +1461,7 @@ sub _value_expr {
 # Returns: the number of distinct non-null values with at least one row in the
 # window, as an integer. undef when a skip scan is not the right choice for this
 # column, when the walk hit the cap, or when the query failed -- in every case
-# meaning the caller should count the rows instead. An optimization must not
-# turn a working dashboard into an error.
+# meaning the caller should count the rows instead.
 #
 #     $self->_distinct_by_skip_scan( 'suricata_alerts', 'classification',
 #         'timestamp', $win . $exf );
@@ -1452,32 +1480,13 @@ sub _distinct_by_skip_scan {
 			cache        => ( $self->{_skip_scan_cache} ||= {} ),
 		);
 
-	# one over the cap, so a full result set is recognisable as "too many"
-	my $walk_limit = $SKIP_SCAN_CAP + 1;
-
-	my $sql = <<"SQL";
-with recursive walk as (
-    (select $col as value from $tbl where $col is not null order by $col limit 1)
-    union all
-    select (select nxt.$col from $tbl nxt where nxt.$col > walk.value order by nxt.$col limit 1)
-    from walk where walk.value is not null
-),
-values_found as (
-    select value from walk where value is not null limit $walk_limit
-)
-select
-    (select count(*) from values_found) as walked,
-    (select count(*) from values_found v
-     where exists (select 1 from $tbl s where s.$col = v.value and $where)) as in_window
-SQL
-
-	my ( $walked, $in_window ) = eval { $dbh->selectrow_array($sql) };
-	return undef unless defined $walked && defined $in_window;
-
-	# the walk was truncated, so in_window is an undercount rather than an answer
-	return undef if $walked > $SKIP_SCAN_CAP;
-
-	return $in_window + 0;
+	return distinct_by_skip_scan(
+		dbh    => $dbh,
+		table  => $tbl,
+		column => $col,
+		where  => $where,
+		cap    => $SKIP_SCAN_CAP,
+	);
 } ## end sub _distinct_by_skip_scan
 
 # Optional "and classification <> ..." fragment for the exclude_classification

@@ -44,8 +44,7 @@ sub virani_sets {
 		sub {
 			my ( $subprocess, $err, $raw ) = @_;
 			if ($err) {
-				chomp( my $why = $err );
-				return $self->render( json => { error => 'set lookup failed: ' . $why }, status => 502 );
+				return $self->render_error( 'set lookup failed: ' . $err, 502 );
 			}
 			my $data = eval { decode_json($raw) };
 			if ( $@ || ref $data ne 'HASH' ) {
@@ -58,6 +57,58 @@ sub virani_sets {
 	return;
 } ## end sub virani_sets
 
+# The preamble every virani_search_enable-gated action shares: the feature
+# gate (404, so a frontend with the search off does not advertise it), then
+# resolving the :remote parameter to a ready Virani::Client. Renders the
+# refusal itself and returns an empty list, so a caller reads as
+#
+#     my ($client) = $self->_virani_search_client or return;
+#
+# Args:
+#
+#   - json :: render the refusals as { error => ... } JSON rather than plain
+#     text, matching what the action itself renders. Optional, default text.
+#
+# Returns: the client on success. On refusal, an empty list -- the response
+# has already been rendered.
+sub _virani_search_client {
+	my ( $self, %opts ) = @_;
+
+	my $refuse
+		= $opts{json}
+		? sub { $self->render( json => { error => $_[0] }, status => $_[1] ) }
+		: sub { $self->render( text => $_[0],              status => $_[1] ) };
+
+	unless ( $self->virani_search_enable ) {
+		$refuse->( 'virani search is disabled', 404 );
+		return;
+	}
+
+	my $remote = $self->param('remote');
+	my $client = ( defined $remote && $self->virani_remotes->{$remote} ) ? $self->virani_client_for($remote) : undef;
+	unless ($client) {
+		$refuse->( 'unknown virani instance', 400 );
+		return;
+	}
+
+	return $client;
+} ## end sub _virani_search_client
+
+# Whether a :id route parameter is a plausible Virani cache id -- the character
+# set cache ids are built from, nothing more. What keeps a hostile id out of
+# the Content-Disposition filename and the remote request.
+#
+# Args:
+#
+#   - $id :: the :id parameter, possibly undef.
+#
+# Returns: 1 when usable, 0 when not.
+sub _valid_cache_id {
+	my ( $self, $id ) = @_;
+
+	return ( defined $id && $id =~ /^[A-Za-z0-9._:-]+$/ ) ? 1 : 0;
+}
+
 =head2 virani_pcap
 
 Standalone Virani PCAP search: fetches a capture for an arbitrary BPF filter and
@@ -69,16 +120,8 @@ by virani_search_enable, since it exposes arbitrary captures.
 sub virani_pcap {
 	my $self = shift;
 
-	unless ( $self->virani_search_enable ) {
-		return $self->render( text => 'virani search is disabled', status => 404 );
-	}
-
-	my $remote = $self->param('remote');
-	my $cfg    = ( defined $remote ) ? $self->virani_remotes->{$remote} : undef;
-	my $client = $self->virani_client_for($remote);
-	unless ( $cfg && $client ) {
-		return $self->render( text => 'unknown or unusable virani instance', status => 400 );
-	}
+	my ($client) = $self->_virani_search_client or return;
+	my $cfg = $self->virani_remotes->{ $self->param('remote') };
 
 	my $filter = $self->param('filter');
 	unless ( defined $filter && $filter =~ /\S/ ) {
@@ -131,14 +174,7 @@ virani_search_enable. Runs in a subprocess.
 sub virani_cached_list {
 	my $self = shift;
 
-	unless ( $self->virani_search_enable ) {
-		return $self->render( json => { error => 'virani search is disabled' }, status => 404 );
-	}
-	my $remote = $self->param('remote');
-	my $client = ( defined $remote && $self->virani_remotes->{$remote} ) ? $self->virani_client_for($remote) : undef;
-	unless ($client) {
-		return $self->render( json => { error => 'unknown virani instance' }, status => 400 );
-	}
+	my ($client) = $self->_virani_search_client( json => 1 ) or return;
 
 	$self->render_later;
 	Mojo::IOLoop->subprocess(
@@ -169,8 +205,7 @@ sub virani_cached_list {
 		sub {
 			my ( $subprocess, $err, $list ) = @_;
 			if ($err) {
-				chomp( my $why = $err );
-				return $self->render( json => { error => 'cached list lookup failed: ' . $why }, status => 502 );
+				return $self->render_error( 'cached list lookup failed: ' . $err, 502 );
 			}
 			if ( ref $list ne 'ARRAY' ) {
 				return $self->render( json => { error => 'cached list lookup returned no data' }, status => 502 );
@@ -191,16 +226,9 @@ virani_search_enable.
 sub virani_cached_pcap {
 	my $self = shift;
 
-	unless ( $self->virani_search_enable ) {
-		return $self->render( text => 'virani search is disabled', status => 404 );
-	}
-	my $remote = $self->param('remote');
-	my $id     = $self->param('id');
-	my $client = ( defined $remote && $self->virani_remotes->{$remote} ) ? $self->virani_client_for($remote) : undef;
-	unless ($client) {
-		return $self->render( text => 'unknown virani instance', status => 400 );
-	}
-	unless ( defined $id && $id =~ /^[A-Za-z0-9._:-]+$/ ) {
+	my ($client) = $self->_virani_search_client or return;
+	my $id = $self->param('id');
+	unless ( $self->_valid_cache_id($id) ) {
 		return $self->render( text => 'invalid cache id', status => 400 );
 	}
 
@@ -220,16 +248,9 @@ virani_search_enable. Runs in a subprocess.
 sub virani_cached_meta {
 	my $self = shift;
 
-	unless ( $self->virani_search_enable ) {
-		return $self->render( text => 'virani search is disabled', status => 404 );
-	}
-	my $remote = $self->param('remote');
-	my $id     = $self->param('id');
-	my $client = ( defined $remote && $self->virani_remotes->{$remote} ) ? $self->virani_client_for($remote) : undef;
-	unless ($client) {
-		return $self->render( text => 'unknown virani instance', status => 400 );
-	}
-	unless ( defined $id && $id =~ /^[A-Za-z0-9._:-]+$/ ) {
+	my ($client) = $self->_virani_search_client or return;
+	my $id = $self->param('id');
+	unless ( $self->_valid_cache_id($id) ) {
 		return $self->render( text => 'invalid cache id', status => 400 );
 	}
 

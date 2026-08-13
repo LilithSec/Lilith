@@ -14,8 +14,6 @@ sub command_names { 'receiver_key_get' }
 
 sub abstract { 'show a receiver API key' }
 
-sub usage_desc { '%c receiver_key_get %o' }
-
 sub opt_spec {
 	return (
 		[ 'id=s',   'the receiver API key ID' ],

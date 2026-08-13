@@ -9,6 +9,7 @@ our @EXPORT_OK = qw(
 	clamped_int
 	column_exists
 	connect_cached_dbh
+	distinct_by_skip_scan
 	host_or_text_expr
 	local_networks_frag
 	measure_expr
@@ -131,6 +132,40 @@ The second is the estimated number of distinct values. The walk is capped in any
 case, but reaching the cap means paying for thousands of descents before falling
 back, so a column already known to be wide is not started. The estimate comes
 from C<pg_stats> and is only a sample, hence the cap staying as the backstop.
+
+=head2 distinct_by_skip_scan( %args )
+
+Count a column's distinct values inside a window by walking an index rather
+than reading the rows. The recursive term is the trick: having found one
+value, ask for the smallest value greater than it. Against a btree that is a
+single descent, so the walk visits one index entry per distinct value and
+never touches the table. Each value found is then checked for a row inside
+the window, which the timestamp as the index's second key answers with
+another descent.
+
+Whether the walk is the better trade is C<skip_scan_viable>'s question and is
+not asked here; callers check first. The walk is capped even so, because the
+cardinality figure that check relies on is an estimate from a sample and can
+be badly wrong. Args:
+
+    - dbh :: the handle to run the walk through. Required.
+    - table :: the table to read. Required.
+    - column :: the column to count. Must be the first key of a btree index
+        whose second key is the window's timestamp column. Required.
+    - where :: the window WHERE fragment, plus any exclusion. Required.
+    - binds :: array ref of bind values the fragment's placeholders take.
+        Omit for a fragment rendered with quoted literals.
+    - cap :: the most distinct values worth walking. Required.
+
+Returns the number of distinct non-null values with at least one row in the
+window, as an integer. undef when the walk hit the cap (an undercount is not
+an answer) or when the query failed -- in either case meaning the caller
+should count the rows instead. An optimization must not turn a working page
+into an error.
+
+    distinct_by_skip_scan( dbh => $dbh, table => 'suricata_alerts',
+        column => 'classification', where => $win, cap => 5000 );
+    # 16
 
 =head2 column_exists( $dbh, $table, $column )
 
@@ -303,6 +338,47 @@ SQL
 	$args{cache}{$table}{$column} = $viable;
 	return $viable;
 } ## end sub skip_scan_viable
+
+sub distinct_by_skip_scan {
+	my (%args) = @_;
+
+	my ( $table, $column, $where, $cap ) = @args{qw( table column where cap )};
+	my @binds = $args{binds} ? @{ $args{binds} } : ();
+
+	# one over the cap, so a full result set is recognisable as "too many"
+	my $walk_limit = $cap + 1;
+
+	my $sql = <<"SQL";
+WITH RECURSIVE walk AS (
+    (SELECT $column AS value FROM $table WHERE $column IS NOT NULL ORDER BY $column LIMIT 1)
+    UNION ALL
+    SELECT (SELECT next_row.$column FROM $table next_row
+            WHERE next_row.$column > walk.value ORDER BY next_row.$column LIMIT 1)
+    FROM walk WHERE walk.value IS NOT NULL
+),
+values_found AS (
+    SELECT value FROM walk WHERE value IS NOT NULL LIMIT $walk_limit
+)
+SELECT
+    (SELECT count(*) FROM values_found) AS walked,
+    (SELECT count(*) FROM values_found v
+     WHERE EXISTS (SELECT 1 FROM $table s WHERE s.$column = v.value AND $where)) AS in_window
+SQL
+
+	my ( $walked, $in_window ) = eval {
+		my $sth = $args{dbh}->prepare($sql);
+		$sth->execute(@binds);
+		my $row = $sth->fetchrow_arrayref;
+		$sth->finish;
+		return $row ? ( $row->[0], $row->[1] ) : ( undef, undef );
+	};
+	return undef unless defined $walked && defined $in_window;
+
+	# the walk was truncated, so in_window is an undercount rather than an answer
+	return undef if $walked > $cap;
+
+	return $in_window + 0;
+} ## end sub distinct_by_skip_scan
 
 sub column_exists {
 	my ( $dbh, $table, $column ) = @_;

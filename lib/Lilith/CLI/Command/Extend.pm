@@ -20,8 +20,6 @@ use Gzip::Faster qw( gzip );
 
 sub abstract { 'print a LibreNMS style extend' }
 
-sub usage_desc { '%c extend %o' }
-
 sub opt_spec {
 	return (
 		[ 'm=s',    'how far back to search, in minutes', { default => 5 } ],

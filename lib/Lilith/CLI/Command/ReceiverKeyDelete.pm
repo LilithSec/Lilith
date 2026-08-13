@@ -15,8 +15,6 @@ sub command_names { 'receiver_key_delete' }
 
 sub abstract { 'delete a receiver API key' }
 
-sub usage_desc { '%c receiver_key_delete %o' }
-
 sub opt_spec {
 	return ( [ 'id=s', 'the receiver API key ID' ], [ 'name=s', 'the receiver API key name' ], );
 }

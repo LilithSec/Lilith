@@ -40,8 +40,6 @@ sub command_names { 'cvedb_cache' }
 
 sub abstract { 'look up the CVE ids the Shodan cache names and cache what CVEDB knows' }
 
-sub usage_desc { '%c cvedb_cache %o' }
-
 sub opt_spec {
 	my ($class) = @_;
 	return (

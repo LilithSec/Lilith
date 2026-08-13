@@ -997,16 +997,9 @@ sub receiver_apikeys {
 	my ($self) = @_;
 
 	my $dbh = $self->_escalation_dbh;
-	my $sth = $dbh->prepare('select * from receiver_apikeys order by name;');
-	$sth->execute();
 
-	my @keys;
-	while ( my $row = $sth->fetchrow_hashref ) {
-		push( @keys, $row );
-	}
-
-	return \@keys;
-} ## end sub receiver_apikeys
+	return $dbh->selectall_arrayref( 'select * from receiver_apikeys order by name;', { Slice => {} } );
+}
 
 =head2 receiver_apikey_update
 
@@ -1283,8 +1276,14 @@ sub extend {
 	# Do the search in eval incase of failure
 	#
 
-	my $sagan_found    = ();
-	my $suricata_found = ();
+	# The suricata and sagan sides only differ by table and by which column
+	# holds the local hostname (sagan records it as instance_host), so both the
+	# fetch and the aggregation below run through the same loop.
+	my %daemon_source = (
+		suricata => [ 'suricata_alerts', 'host' ],
+		sagan    => [ 'sagan_alerts',    'instance_host' ],
+	);
+	my %found_rows_by_daemon = ( suricata => [], sagan => [] );
 	eval {
 		my $dbh;
 		eval { $dbh = DBI->connect_cached( $self->{dsn}, $self->{user}, $self->{pass} ); };
@@ -1294,62 +1293,31 @@ sub extend {
 
 		my $hostname = hostname;
 
-		#
-		# suricata SQL bit
-		#
+		foreach my $daemon ( 'suricata', 'sagan' ) {
+			my ( $alert_table, $host_column ) = @{ $daemon_source{$daemon} };
 
-		my $sql
-			= 'select * from suricata_alerts'
-			. " where timestamp >= CURRENT_TIMESTAMP - interval '"
-			. $opts{go_back_minutes}
-			. " minutes' and host ='"
-			. $hostname . "'";
+			my $sql
+				= 'select * from '
+				. $alert_table
+				. " where timestamp >= CURRENT_TIMESTAMP - interval '"
+				. $opts{go_back_minutes}
+				. " minutes' and "
+				. $host_column . " ='"
+				. $hostname . "';";
 
-		$sql = $sql . ';';
-		if ( $self->{debug} ) {
-			warn( 'SQL search "' . $sql . '"' );
-		}
-		my $sth = $dbh->prepare($sql);
-		$sth->execute();
-
-		while ( my $row = $sth->fetchrow_hashref ) {
-			push( @{$suricata_found}, $row );
-		}
-
-		#
-		# Sagan SQL bit
-		#
-
-		$sql
-			= 'select * from sagan_alerts'
-			. " where timestamp >= CURRENT_TIMESTAMP - interval '"
-			. $opts{go_back_minutes}
-			. " minutes' and instance_host = '"
-			. $hostname . "'";
-
-		$sql = $sql . ';';
-		if ( $self->{debug} ) {
-			warn( 'SQL search "' . $sql . '"' );
-		}
-		$sth = $dbh->prepare($sql);
-		$sth->execute();
-
-		while ( my $row = $sth->fetchrow_hashref ) {
-			push( @{$sagan_found}, $row );
-		}
-
+			if ( $self->{debug} ) {
+				warn( 'SQL search "' . $sql . '"' );
+			}
+			my $sth = $dbh->prepare($sql);
+			$sth->execute();
+			$found_rows_by_daemon{$daemon} = $sth->fetchall_arrayref( {} );
+		} ## end foreach my $daemon ( 'suricata', 'sagan' )
 	};
 	if ($@) {
 		$to_return->{error}       = 1;
 		$to_return->{errorString} = $@;
 	}
 
-	# The suricata and sagan aggregation only differs by the key prefix used
-	# for the per-daemon totals/instances, so both run through the same loop.
-	my %found_rows_by_daemon = (
-		suricata => $suricata_found,
-		sagan    => $sagan_found,
-	);
 	foreach my $daemon ( 'suricata', 'sagan' ) {
 		my $totals_key    = $daemon . '_totals';
 		my $instances_key = $daemon . '_instances';
@@ -1865,6 +1833,24 @@ sub _validate_table {
 	return $table;
 }
 
+# The column a table is windowed on in time terms. CAPE has no ingest
+# timestamp; its analysis 'stop' time is the closest analogue, so it stands in
+# everywhere a window or a time value is wanted. The one place this fact lives.
+#
+# Args:
+#
+#   - $table :: the short table type, already validated.
+#
+# Returns: the column name as a string -- 'stop' for cape, 'timestamp' for
+# everything else.
+#
+#     my $time_column = $self->_time_column('cape');    # 'stop'
+sub _time_column {
+	my ( $self, $table ) = @_;
+
+	return $table eq 'cape' ? 'stop' : 'timestamp';
+}
+
 sub search {
 	my ( $self, %opts ) = @_;
 
@@ -1914,10 +1900,7 @@ sub search {
 		$opts{order_dir} = 'ASC';
 	}
 
-	my $go_back_column = 'timestamp';
-	if ( $opts{table} eq 'cape' ) {
-		$go_back_column = 'stop';
-	}
+	my $go_back_column = $self->_time_column( $opts{table} );
 
 	my $schema = Lilith::Schema->connect( $self->{dsn}, $self->{user}, $self->{pass}, );
 
@@ -2464,16 +2447,10 @@ sub escalation_targets {
 
 	my $dbh = $self->_escalation_dbh;
 
-	my $sth = $dbh->prepare('select * from escalation_targets order by name;');
-	$sth->execute();
+	my $targets = $dbh->selectall_arrayref( 'select * from escalation_targets order by name;', { Slice => {} } );
+	$_->{config} = $self->_decode_jsonb_hash( $_->{config} ) foreach @{$targets};
 
-	my @targets;
-	while ( my $row = $sth->fetchrow_hashref ) {
-		$row->{config} = $self->_escalation_decode_config( $row->{config} );
-		push( @targets, $row );
-	}
-
-	return \@targets;
+	return $targets;
 } ## end sub escalation_targets
 
 =head2 escalation_target_get
@@ -2502,7 +2479,7 @@ sub escalation_target_get {
 		die( 'no escalation target with the id "' . $id . '"' );
 	}
 
-	$row->{config} = $self->_escalation_decode_config( $row->{config} );
+	$row->{config} = $self->_decode_jsonb_hash( $row->{config} );
 
 	return $row;
 } ## end sub escalation_target_get
@@ -2754,7 +2731,7 @@ sub escalate {
 			$payload = $module->escalate(
 				event        => $event,
 				table        => $opts{table},
-				config       => $self->_escalation_decode_config( $target->{config} ),
+				config       => $self->_decode_jsonb_hash( $target->{config} ),
 				note         => $opts{note},
 				requested_by => $opts{requested_by},
 				target_name  => $target->{name},
@@ -2858,22 +2835,20 @@ sub escalations_for {
 
 	my $dbh = $self->_escalation_dbh;
 
-	my $sth
-		= $dbh->prepare( 'select e.*, t.name as target_current_name, t.type as target_type from escalations e'
+	my $escalations = $dbh->selectall_arrayref(
+		'select e.*, t.name as target_current_name, t.type as target_type from escalations e'
 			. ' left join escalation_targets t on e.target_id = t.id'
-			. ' where e.table_name = ? and e.alert_id = ? order by e.timestamp desc, e.id desc;' );
-	$sth->execute( $opts{table}, $opts{id} );
-
-	my @escalations;
-	while ( my $row = $sth->fetchrow_hashref ) {
+			. ' where e.table_name = ? and e.alert_id = ? order by e.timestamp desc, e.id desc;',
+		{ Slice => {} }, $opts{table}, $opts{id}
+	);
+	foreach my $row ( @{$escalations} ) {
 		if ( !defined( $row->{target_name} ) ) {
 			$row->{target_name} = $row->{target_current_name};
 		}
 		delete( $row->{target_current_name} );
-		push( @escalations, $row );
 	}
 
-	return \@escalations;
+	return $escalations;
 } ## end sub escalations_for
 
 =head2 auto_escalations
@@ -2891,17 +2866,15 @@ sub auto_escalations {
 
 	my $dbh = $self->_escalation_dbh;
 
-	my $sth = $dbh->prepare('select * from auto_escalations order by priority asc, name asc;');
-	$sth->execute();
-
-	my @rules;
-	while ( my $row = $sth->fetchrow_hashref ) {
-		$row->{rule}   = $self->_auto_decode_rule( $row->{rule} );
+	my $rules
+		= $dbh->selectall_arrayref( 'select * from auto_escalations order by priority asc, name asc;',
+			{ Slice => {} } );
+	foreach my $row ( @{$rules} ) {
+		$row->{rule}   = $self->_decode_jsonb_hash( $row->{rule} );
 		$row->{tables} = $self->_auto_decode_tables( $row->{tables} );
-		push( @rules, $row );
 	}
 
-	return \@rules;
+	return $rules;
 } ## end sub auto_escalations
 
 =head2 auto_escalation_get
@@ -2931,7 +2904,7 @@ sub auto_escalation_get {
 		die( 'no auto escalation with the id "' . $id . '"' );
 	}
 
-	$row->{rule}   = $self->_auto_decode_rule( $row->{rule} );
+	$row->{rule}   = $self->_decode_jsonb_hash( $row->{rule} );
 	$row->{tables} = $self->_auto_decode_tables( $row->{tables} );
 
 	return $row;
@@ -3112,11 +3085,12 @@ sub auto_escalation_preview {
 		die('"limit" must be numeric');
 	}
 
+	# order_by is left to search(), whose per-table default is exactly the
+	# newest-first column wanted here
 	my $events = $self->search(
 		table           => $table,
 		go_back_minutes => $minutes,
 		limit           => $limit,
-		order_by        => ( $table eq 'cape' ? 'id' : 'timestamp' ),
 		order_dir       => 'DESC',
 	);
 
@@ -3159,7 +3133,7 @@ sub auto_escalation_preview {
 			{
 				id             => $event->{id},
 				event_id       => $event->{event_id},
-				timestamp      => ( $table eq 'cape' ? $event->{stop} : $event->{timestamp} ),
+				timestamp      => $event->{ $self->_time_column($table) },
 				signature      => $event->{signature},
 				classification => $event->{classification},
 				src_ip         => $event->{src_ip},
@@ -3231,12 +3205,8 @@ sub auto_escalate {
 	my $dbh = $self->_escalation_dbh;
 
 	# name -> id map so escalate_to can use target names
-	my %target_id;
-	my $tsth = $dbh->prepare('select id, name from escalation_targets;');
-	$tsth->execute();
-	while ( my $row = $tsth->fetchrow_hashref ) {
-		$target_id{ $row->{name} } = $row->{id};
-	}
+	my %target_id = map { $_->{name} => $_->{id} }
+		@{ $dbh->selectall_arrayref( 'select id, name from escalation_targets;', { Slice => {} } ) };
 
 	my @summaries;
 	foreach my $table (@tables) {
@@ -3318,48 +3288,42 @@ sub _auto_escalate_table {
 	my $dbh         = $opts{dbh};
 	my $table       = $opts{table};
 	my $alert_table = $table . '_alerts';
-	my $time_column = $table eq 'cape' ? 'stop' : 'timestamp';
+	my $time_column = $self->_time_column($table);
 
 	# enabled rules scoped to this table
-	my $rsth = $dbh->prepare(
-		'select * from auto_escalations where enabled = true and ? = ANY(tables) order by priority asc, id asc;');
-	$rsth->execute($table);
-	my @rules;
-	while ( my $row = $rsth->fetchrow_hashref ) {
-		$row->{rule} = $self->_auto_decode_rule( $row->{rule} );
-		push( @rules, $row );
-	}
+	my $rules
+		= $dbh->selectall_arrayref(
+			'select * from auto_escalations where enabled = true and ? = ANY(tables) order by priority asc, id asc;',
+			{ Slice => {} }, $table );
+	$_->{rule} = $self->_decode_jsonb_hash( $_->{rule} ) foreach @{$rules};
 
 	# candidate alerts: not yet considered, within the window
-	my $esth
-		= $dbh->prepare( 'select * from '
+	my $events = $dbh->selectall_arrayref(
+		'select * from '
 			. $alert_table
 			. ' where auto_escalated is null and '
 			. $time_column
 			. ' >= CURRENT_TIMESTAMP - interval \''
 			. ( $opts{minutes} + 0 )
-			. ' minutes\' order by id asc;' );
-	$esth->execute();
-	my @events;
-	while ( my $row = $esth->fetchrow_hashref ) {
-		push( @events, $row );
-	}
+			. ' minutes\' order by id asc;',
+		{ Slice => {} }
+	);
 
 	my $summary = {
 		table       => $table,
-		scanned     => scalar(@events),
-		rules       => scalar(@rules),
+		scanned     => scalar( @{$events} ),
+		rules       => scalar( @{$rules} ),
 		matched     => 0,
 		dry_run     => $opts{dry_run},
 		escalations => [],
 	};
 
-	if ( !@rules || !@events ) {
-		$self->_auto_mark( \@events, $dbh, $alert_table ) if !$opts{dry_run};
+	if ( !@{$rules} || !@{$events} ) {
+		$self->_auto_mark( $events, $dbh, $alert_table ) if !$opts{dry_run};
 		return $summary;
 	}
 
-	my $matches = Lilith::AutoEscalate->evaluate( rules => \@rules, events => \@events );
+	my $matches = Lilith::AutoEscalate->evaluate( rules => $rules, events => $events );
 
 	foreach my $match ( @{$matches} ) {
 		my $rule  = $match->{rule};
@@ -3435,7 +3399,7 @@ sub _auto_escalate_table {
 		push( @{ $summary->{escalations} }, $entry );
 	} ## end foreach my $match ( @{$matches} )
 
-	$self->_auto_mark( \@events, $dbh, $alert_table ) if !$opts{dry_run};
+	$self->_auto_mark( $events, $dbh, $alert_table ) if !$opts{dry_run};
 
 	return $summary;
 } ## end sub _auto_escalate_table
@@ -3469,33 +3433,36 @@ sub _auto_mark {
 	return 1;
 } ## end sub _auto_mark
 
-# Decodes a auto_escalations rule column into a hash ref. The column is jsonb,
-# so DBD::Pg may hand it back already inflated or as JSON text depending on how
-# the row was fetched; both are accepted so callers need not care which.
+# Decodes a jsonb column into a hash ref. DBD::Pg may hand jsonb back already
+# inflated or as JSON text depending on how the row was fetched; both are
+# accepted so callers need not care which. Used for every jsonb-holding column
+# read in here: an auto escalation's rule, an escalation target's config, and
+# the shodan/cvedb caches' raw responses.
 #
 # Args:
 #
-#   - $rule :: the rule column as read from the database -- a hash ref (already
+#   - $value :: the column as read from the database -- a hash ref (already
 #     inflated), a JSON string, or undef.
 #
-# Returns: the rule as a hash ref, of the shape { match => ..., actions =>
-# [ ... ] }. Undecodable or missing JSON returns an empty hash ref rather than
-# dying, so one corrupt rule row cannot stop a whole auto escalation run; a
-# rule with no match tree simply never fires.
+# Returns: the decoded hash ref. Undecodable or missing JSON returns an empty
+# hash ref rather than dying, so one corrupt row cannot stop a whole run; a
+# rule with no match tree simply never fires, and a target with a corrupt
+# config fails at send time with a missing-field error from its type instead
+# of taking down whatever listed it.
 #
-#     my $rule = $self->_auto_decode_rule( $row->{rule} );
-sub _auto_decode_rule {
-	my ( $self, $rule ) = @_;
+#     my $rule = $self->_decode_jsonb_hash( $row->{rule} );
+sub _decode_jsonb_hash {
+	my ( $self, $value ) = @_;
 
-	return $rule if ref($rule) eq 'HASH';
+	return $value if ref($value) eq 'HASH';
 
 	my $decoded;
-	if ( defined($rule) ) {
-		eval { $decoded = decode_json($rule); };
+	if ( defined($value) ) {
+		eval { $decoded = decode_json($value); };
 	}
 
 	return ref($decoded) eq 'HASH' ? $decoded : {};
-} ## end sub _auto_decode_rule
+} ## end sub _decode_jsonb_hash
 
 # Decodes a tables column into an array ref, accepting either a expanded array
 # ref (DBD::Pg default) or a raw PostgreSQL array literal. The literal form is
@@ -3628,38 +3595,6 @@ sub _escalation_dbh {
 
 	return $dbh;
 } ## end sub _escalation_dbh
-
-# Decodes an escalation target's config column into a hash ref. Same jsonb
-# situation as _auto_decode_rule: DBD::Pg may hand the column back inflated or
-# as JSON text, so both are taken.
-#
-# Args:
-#
-#   - $config :: the config column as read from the database -- a hash ref
-#     (already inflated), a JSON string, or undef.
-#
-# Returns: the per-type config as a hash ref, whose keys depend on the target's
-# type (a Webhook has url/apikey, an Email has server/to/from, and so on).
-# Undecodable or missing JSON gives an empty hash ref rather than dying, so a
-# target with a corrupt config fails at send time with a missing-field error
-# from its type instead of taking down whatever listed it.
-#
-#     my $config = $self->_escalation_decode_config( $row->{config} );
-#     my $url    = $config->{url};
-sub _escalation_decode_config {
-	my ( $self, $config ) = @_;
-
-	if ( ref $config eq 'HASH' ) {
-		return $config;
-	}
-
-	my $decoded;
-	if ( defined($config) ) {
-		eval { $decoded = decode_json($config); };
-	}
-
-	return ref $decoded eq 'HASH' ? $decoded : {};
-} ## end sub _escalation_decode_config
 
 =head2 stats
 
@@ -3887,7 +3822,7 @@ sub shodan_cache_get {
 
 	# jsonb comes back inflated or as text depending on how the row was
 	# fetched, the same as the escalation and auto escalation columns.
-	return $self->_auto_decode_rule( $row->{raw} );
+	return $self->_decode_jsonb_hash( $row->{raw} );
 } ## end sub shodan_cache_get
 
 =head2 shodan_cache_put
@@ -4056,7 +3991,7 @@ sub alert_ips {
 		# CAPE is windowed on its completion time rather than an ingest time,
 		# the same as everywhere else that reads it -- and that time can lag,
 		# which is the reason to run this with a window wider than its interval.
-		my $time_column = $table eq 'cape' ? 'stop' : 'timestamp';
+		my $time_column = $self->_time_column($table);
 
 		# host() strips any netmask, so the values line up with the keys
 		# shodan_cache holds. Both columns in one pass over the window.
@@ -4072,9 +4007,9 @@ sub alert_ips {
 			. ( $seconds ? ' and ' . $time_column . ' >= now() - (? || \' seconds\')::interval' : '' )
 			. ' ) as both_ends;';
 
-		my $sth = $dbh->prepare($sql);
-		$sth->execute( $seconds ? ( $seconds, $seconds ) : () );
-		while ( my $row = $sth->fetchrow_hashref ) {
+		foreach
+			my $row ( @{ $dbh->selectall_arrayref( $sql, { Slice => {} }, $seconds ? ( $seconds, $seconds ) : () ) } )
+		{
 			$ips{ $row->{ip} } = 1 if defined $row->{ip} && $row->{ip} ne '';
 		}
 	} ## end for my $table ( sort @tables )
@@ -4229,7 +4164,7 @@ sub shodan_cache_info {
 	while ( my $row = $sth->fetchrow_hashref ) {
 		# jsonb comes back inflated or as text depending on how the row was
 		# fetched, the same as shodan_cache_get.
-		my $raw = $self->_auto_decode_rule( $row->{raw} );
+		my $raw = $self->_decode_jsonb_hash( $row->{raw} );
 		$info{ $row->{ip} } = {
 			found       => ( $row->{found}               ? 1                   : 0 ),
 			age_seconds => ( defined $row->{age_seconds} ? $row->{age_seconds} : 0 ),
@@ -4271,19 +4206,16 @@ sub shodan_cache_cves {
 	my $seconds = defined $opts{go_back_seconds} ? $opts{go_back_seconds} : 360;
 	die( '"' . $seconds . '" for go_back_seconds is not numeric' ) if $seconds !~ /^[0-9]+$/;
 
-	my $dbh = $self->_escalation_dbh;
-	my $sth
-		= $dbh->prepare( 'select distinct unnest(vulns) as cve from shodan_cache'
+	my $dbh  = $self->_escalation_dbh;
+	my $rows = $dbh->selectall_arrayref(
+		'select distinct unnest(vulns) as cve from shodan_cache'
 			. ( $seconds ? ' where fetched >= now() - (? || \' seconds\')::interval' : '' )
-			. ' order by cve;' );
-	$sth->execute( $seconds ? ($seconds) : () );
+			. ' order by cve;',
+		{ Slice => {} },
+		$seconds ? ($seconds) : ()
+	);
 
-	my @cves;
-	while ( my $row = $sth->fetchrow_hashref ) {
-		push( @cves, $row->{cve} ) if defined $row->{cve} && $row->{cve} ne '';
-	}
-
-	return \@cves;
+	return [ grep { defined($_) && $_ ne '' } map { $_->{cve} } @{$rows} ];
 } ## end sub shodan_cache_cves
 
 =head2 cvedb_cache_put

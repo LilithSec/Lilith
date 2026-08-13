@@ -15,8 +15,6 @@ sub command_names { 'esc_target_delete' }
 
 sub abstract { 'delete an escalation target' }
 
-sub usage_desc { '%c esc_target_delete %o' }
-
 sub opt_spec {
 	return ( [ 'tid=s', 'the escalation target ID' ], [ 'name=s', 'the escalation target name' ], );
 }

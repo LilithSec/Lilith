@@ -27,38 +27,11 @@ an update means "keep the current value".
 
 =cut
 
-# read tier gate; returns 1 when the caller may proceed, else renders the
-# 404 and returns 0. The shared logic lives in the require_escalation_view
-# helper in Lilith::Web.
+# write tier gate: the require_escalation_manage helper in Lilith::Web (which
+# documents the two refusal tiers), bound to this controller's management flag
+# and refusal message. Renders the refusal and returns 0, so a caller reads as
 #
-# A refusal is a 404 rather than a 403 so a frontend with escalation switched
-# off does not advertise that the pages exist at all.
-#
-# Args: none.
-#
-# Returns: 1 when escalation_enable is set, 0 otherwise -- having already
-# rendered the 404, so a caller returns straight away on 0.
-#
-#     return unless ->_require_view;
-sub _require_view {
-	return $_[0]->require_escalation_view;
-}
-
-# write tier gate; view must be allowed and management explicitly enabled.
-# Renders a 404 (view off) or 403 (management off) and returns 0 on refusal.
-# The shared logic lives in the require_escalation_manage helper in
-# Lilith::Web.
-#
-# The two refusals differ on purpose: with view off the page does not exist as
-# far as a caller can tell (404), while with view on but management off the
-# page is real and the action is simply not allowed (403).
-#
-# Args: none.
-#
-# Returns: 1 when both tiers allow it, 0 otherwise -- having already rendered
-# the refusal, so a caller returns straight away on 0.
-#
-#     return unless ->_require_manage;
+#     return unless $self->_require_manage;
 sub _require_manage {
 	my $self = shift;
 
@@ -77,7 +50,7 @@ delete controls and 404s unless escalation_manage_enable is set.
 sub index {
 	my $self = shift;
 
-	return unless $self->_require_view;
+	return unless $self->require_escalation_view;
 
 	# the edit page only exists when management is enabled; the read only view
 	# is always reachable with escalation_enable
@@ -116,13 +89,11 @@ UI changes.
 sub types {
 	my $self = shift;
 
-	return unless $self->_require_view;
+	return unless $self->require_escalation_view;
 
 	my $types;
 	eval { $types = $self->_type_infos; };
-	if ($@) {
-		return $self->render( json => { error => $@ }, status => 500 );
-	}
+	return $self->render_error( $@, 500 ) if $@;
 
 	$self->render( json => { types => $types } );
 } ## end sub types
@@ -137,13 +108,11 @@ masked.
 sub targets {
 	my $self = shift;
 
-	return unless $self->_require_view;
+	return unless $self->require_escalation_view;
 
 	my $targets;
 	eval { $targets = $self->_masked_targets; };
-	if ($@) {
-		return $self->render( json => { error => $@ }, status => 500 );
-	}
+	return $self->render_error( $@, 500 ) if $@;
 
 	$self->render( json => { targets => $targets } );
 } ## end sub targets
@@ -209,10 +178,7 @@ sub target_save {
 			);
 		}
 	};
-	if ($@) {
-		( my $why = $@ ) =~ s/\s+\z//;
-		return $self->render( json => { error => $why }, status => 400 );
-	}
+	return $self->render_error($@) if $@;
 
 	$self->render( json => { ok => 1, id => $id } );
 } ## end sub target_save
@@ -234,10 +200,7 @@ sub target_delete {
 	}
 
 	eval { $self->lilith->escalation_target_delete($id); };
-	if ($@) {
-		( my $why = $@ ) =~ s/\s+\z//;
-		return $self->render( json => { error => $why }, status => 400 );
-	}
+	return $self->render_error($@) if $@;
 
 	$self->render( json => { ok => 1 } );
 } ## end sub target_delete
@@ -272,8 +235,7 @@ sub target_test {
 				return $self->render( json => { error => 'test subprocess failed: ' . $sp_err }, status => 500 );
 			}
 			if ($test_err) {
-				( my $why = $test_err ) =~ s/\s+\z//;
-				return $self->render( json => { error => $why }, status => 502 );
+				return $self->render_error( $test_err, 502 );
 			}
 			$self->render( json => { ok => 1, payload => $payload } );
 		},
@@ -292,7 +254,7 @@ blocking sends run in a subprocess so the event loop stays responsive.
 sub escalate {
 	my $self = shift;
 
-	return unless $self->_require_view;
+	return unless $self->require_escalation_view;
 
 	my $json = $self->req->json;
 	if ( ref $json ne 'HASH' ) {
@@ -300,7 +262,7 @@ sub escalate {
 	}
 
 	my $table = $json->{table};
-	unless ( defined $table && $table =~ /^(?:suricata|sagan|cape|baphomet)$/ ) {
+	unless ( $self->valid_alert_table($table) ) {
 		return $self->render( json => { error => 'invalid table' }, status => 400 );
 	}
 
@@ -344,8 +306,7 @@ sub escalate {
 				);
 			}
 			if ($esc_err) {
-				( my $why = $esc_err ) =~ s/\s+\z//;
-				return $self->render( json => { error => $why }, status => 400 );
+				return $self->render_error($esc_err);
 			}
 			$self->render( json => { results => $results } );
 		},
@@ -363,10 +324,10 @@ with the raw payload decoded.
 sub history {
 	my $self = shift;
 
-	return unless $self->_require_view;
+	return unless $self->require_escalation_view;
 
 	my $table = $self->param('table');
-	unless ( defined $table && $table =~ /^(?:suricata|sagan|cape|baphomet)$/ ) {
+	unless ( $self->valid_alert_table($table) ) {
 		return $self->render( json => { error => 'invalid table' }, status => 400 );
 	}
 
@@ -377,10 +338,7 @@ sub history {
 
 	my $escalations;
 	eval { $escalations = $self->lilith->escalations_for( table => $table, id => $id ); };
-	if ($@) {
-		( my $why = $@ ) =~ s/\s+\z//;
-		return $self->render( json => { error => $why }, status => 500 );
-	}
+	return $self->render_error( $@, 500 ) if $@;
 
 	foreach my $escalation (@$escalations) {
 		if ( defined $escalation->{raw} && !ref $escalation->{raw} ) {

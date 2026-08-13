@@ -15,8 +15,6 @@ sub command_names { 'ae_list' }
 
 sub abstract { 'list the auto escalation rules' }
 
-sub usage_desc { '%c ae_list %o' }
-
 sub opt_spec {
 	my ($class) = @_;
 	return $class->output_opt_spec;

@@ -18,8 +18,6 @@ sub command_names { 'receiver_key_create' }
 
 sub abstract { 'create a receiver API key' }
 
-sub usage_desc { '%c receiver_key_create %o' }
-
 sub opt_spec {
 	return (
 		[ 'name=s',      'the name for the new key', { required => 1 } ],
