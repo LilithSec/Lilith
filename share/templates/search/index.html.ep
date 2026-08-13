@@ -48,6 +48,13 @@
 %   { value => 'unchecked', desc => 'never looked up' },
 % );
 %
+% # The locality pair takes exactly two states, judged against the config's
+% # local_networks (unset, the unroutable ranges stand in).
+% my @_locality_options = (
+%   { value => 'internal', desc => 'inside your local networks' },
+%   { value => 'external', desc => 'outside them' },
+% );
+%
 % # Likewise the cve_match pair: the four buckets of the dashboard's
 % # shodan_*_cve_match dimensions, as filters, one per end.
 % my @_cve_match_options = (
@@ -65,6 +72,8 @@
 %           { name => 'dest_port', label => 'Dst Port',  form_label => 'Dst Port(s)', suggest => 1 },
 %           { name => 'ip',        label => 'IP',        form_label => 'IP (src <em>or</em> dst)' },
 %           { name => 'port',      label => 'Port',      form_label => 'Port (src <em>or</em> dst)' },
+%           { name => 'src_locality',  label => 'Src Locality', options => \@_locality_options },
+%           { name => 'dest_locality', label => 'Dst Locality', options => \@_locality_options },
 %           { name => 'proto',     label => 'Proto',     suggest => 1 },
 %           { name => 'app_proto', label => 'App Proto', suggest => 1 },
 %           { name => 'in_iface',  label => 'Interface', suggest => 1 },

@@ -40,8 +40,10 @@ use_ok('Lilith::Stats') or BAIL_OUT('Lilith::Stats failed to load');
 	my %sc = map { $_ => 1 } @{ $s->columns('suricata') };
 	ok( $sc{classification} && $sc{src_ip} && $sc{signature}, 'columns(suricata) lists the dimensions' );
 	ok( !$sc{raw},                                            'columns omits non-dimension columns' );
+	ok( $sc{src_locality} && $sc{dest_locality},              'the locality pair rides the address columns' );
 	my %cc = map { $_ => 1 } @{ $s->columns('cape') };
 	ok( $cc{target} && $cc{malscore} && !$cc{classification}, 'columns(cape) reflects the accepted cape columns' );
+	ok( $cc{src_locality},                                    'locality needs no enrichment, so cape has it too' );
 	my %sg = map { $_ => 1 } @{ $s->columns('sagan') };
 	ok( $sc{severity}, 'severity is a (virtual) suricata dimension' );
 	ok( $sc{mitre_tactic} && $sc{mitre_technique}, 'MITRE tactic/technique are suricata dimensions' );
@@ -56,8 +58,17 @@ use_ok('Lilith::Stats') or BAIL_OUT('Lilith::Stats failed to load');
 	my %bc = map { $_ => 1 } @{ $s->columns('baphomet') };
 	ok( $bc{event_type} && $bc{username} && $bc{kur} && $bc{severity} && $bc{country},
 		'columns(baphomet) lists its distinctive dimensions' );
-	ok( $bc{src_ip} && $bc{src_port} && $bc{dest_ip} && $bc{dest_port} && $bc{classification} && $bc{signature} && $bc{gid} && $bc{sid},
-		'columns(baphomet) lists the reused dimensions' );
+	ok(
+		$bc{src_ip}
+			&& $bc{src_port}
+			&& $bc{dest_ip}
+			&& $bc{dest_port}
+			&& $bc{classification}
+			&& $bc{signature}
+			&& $bc{gid}
+			&& $bc{sid},
+		'columns(baphomet) lists the reused dimensions'
+	);
 	ok( !$bc{raw}, 'columns(baphomet) omits non-dimension columns' );
 
 	# Shodan enrichment. cape is not enriched, so shodan_src_tag is simply not one of
@@ -518,6 +529,77 @@ SKIP: {
 	eval { $es->shodan_coverage( table => 'suricata', ttl => 'soon' ) };
 	like( $@, qr/for ttl is not a non-negative integer/, 'a non-numeric ttl dies' );
 	$ed->do("update shodan_cache set fetched = now() where ip = '203.0.113.1'");
+
+	# ---- the freshness dimension ------------------------------------------
+	# The same rule as the coverage tile, as a grouping: every alert lands in
+	# Enriched / Stale / Not looked up per its end's cache row. A row cached as
+	# "not on Shodan" is still an answer, so it counts as enriched, exactly as
+	# the tile counts it.
+	is_deeply(
+		$es->top( table => 'suricata', column => 'shodan_src_freshness' ),
+		[ { value => 'Enriched', count => 6 }, { value => 'Not looked up', count => 1 } ],
+		'top shodan_src_freshness buckets every alert by its source\'s cache state'
+	);
+	$ed->do("update shodan_cache set fetched = now() - interval '40 days' where ip = '203.0.113.1'");
+	is_deeply(
+		$es->top( table => 'suricata', column => 'shodan_src_freshness' ),
+		[
+			{ value => 'Enriched',      count => 3 },
+			{ value => 'Stale',         count => 3 },
+			{ value => 'Not looked up', count => 1 }
+		],
+		'an aged answer moves its alerts to Stale, ranked between the other two'
+	);
+	$ed->do("update shodan_cache set fetched = now() where ip = '203.0.113.1'");
+	is_deeply(
+		$es->top( table => 'suricata', column => 'shodan_src_freshness', source => 'internetdb' ),
+		[ { value => 'Stale', count => 6 }, { value => 'Not looked up', count => 1 } ],
+		'against the other tier every held answer reads stale, the same as the tile'
+	);
+	eval { $es->top( table => 'suricata', column => 'shodan_src_freshness', ttl => 'soon' ) };
+	like( $@, qr/for ttl is not a non-negative integer/, 'the dimension checks ttl the same way' );
+	eval { $es->top( table => 'suricata', column => 'shodan_src_freshness', source => 'psychic' ) };
+	like( $@, qr/is not a known source/, 'and refuses a source outside the two tiers' );
+
+	# the coverage chart: distinct addresses per bucket by freshness -- the
+	# grouped-timeseries form of the tile's numbers
+	my $fresh_ts = $es->timeseries(
+		table    => 'suricata',
+		bucket   => 'hour',
+		group_by => 'shodan_src_freshness',
+		measure  => 'distinct_src_ip',
+	);
+	my %fresh_by_group;
+	$fresh_by_group{ $_->{group} } += $_->{count} for @{$fresh_ts};
+	is_deeply(
+		\%fresh_by_group,
+		{ 'Enriched' => 3, 'Not looked up' => 1 },
+		'freshness with the distinct-IP measure charts the coverage tile over time'
+	);
+
+	# ---- the locality dimensions ------------------------------------------
+	# Where each end sits relative to the deployment's networks. These test
+	# addresses are documentation ranges, which the default local networks
+	# deliberately leave outside.
+	is_deeply(
+		$es->top( table => 'suricata', column => 'src_locality' ),
+		[ { value => 'External', count => 7 } ],
+		'with no local_networks configured the documentation-range sources read External'
+	);
+	is_deeply(
+		$es->top( table => 'suricata', column => 'src_locality', local_networks => ['203.0.113.0/24'] ),
+		[ { value => 'Internal', count => 6 }, { value => 'External', count => 1 } ],
+		'a configured CIDR pulls its addresses Internal, ranked first'
+	);
+	is_deeply(
+		$es->top( table => 'suricata', column => 'dest_locality', local_networks => ['192.0.2.0/24'] ),
+		[ { value => 'Internal', count => 6 } ],
+		'dest_locality reads the far end and drops the alert naming no destination'
+	);
+	is( $es->distinct( table => 'suricata', column => 'src_locality', local_networks => ['203.0.113.0/24'] ),
+		2, 'distinct src_locality counts the sides seen' );
+	eval { $es->top( table => 'suricata', column => 'src_locality', local_networks => ['10.0.0.0/8; drop'] ) };
+	like( $@, qr/is not an address or CIDR/, 'a local_networks entry outside the address charset dies' );
 
 	# the timeseries splits the same way, and the array split is the one that
 	# sums past the alert total

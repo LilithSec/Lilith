@@ -9,7 +9,6 @@ use File::Temp     qw( tempfile );
 use HTTP::Response ();
 
 use_ok('Lilith::CapeSubmit') or BAIL_OUT('Lilith::CapeSubmit failed to load');
-use_ok('Lilith::ConfigUtil') or BAIL_OUT('Lilith::ConfigUtil failed to load');
 
 # A sample file to submit. Starts with the DOS "MZ" magic so file(1) recognizes
 # it as an executable, giving fileinfo.magic something non-empty.
@@ -185,40 +184,34 @@ qr/does not exist/, 'submit dies for an unreadable file';
 }
 
 # ===========================================================================
-# TOML-boolean handling: the TOML parser yields the bare strings 'true'/'false'
-# for booleans, both truthy in Perl, so enabled and apikey_needed must coerce
-# them rather than take them at face value.
+# TOML-boolean handling: TOML::Tiny hands booleans back as JSON::PP::Boolean
+# objects, plainly true or false in boolean context, so enabled and
+# apikey_needed take them at face value.
 # ===========================================================================
 {
-	is( Lilith::ConfigUtil::to_bool('true'),  1, 'to_bool("true") is 1' );
-	is( Lilith::ConfigUtil::to_bool('false'), 0, 'to_bool("false") is 0' );
-	is( Lilith::ConfigUtil::to_bool('0'),     0, 'to_bool("0") is 0' );
-	is( Lilith::ConfigUtil::to_bool(undef),   0, 'to_bool(undef) is 0' );
-	is( Lilith::ConfigUtil::to_bool(1),       1, 'to_bool(1) is 1' );
-
-	# enabled given the TOML string 'false' really is disabled
+	# enabled given a TOML false really is disabled
 	throws_ok {
-		Lilith::CapeSubmit->new( enabled => 'false', servers => { a => { url => 'http://x/' } } )
+		Lilith::CapeSubmit->new( enabled => JSON::false, servers => { a => { url => 'http://x/' } } )
 			->submit( file => $sample );
 	}
-	qr/not enabled/, 'enabled => "false" (TOML string) is treated as off';
+	qr/not enabled/, 'enabled => false (TOML boolean) is treated as off';
 
-	# apikey_needed => 'false' (TOML string) must NOT demand a key
+	# apikey_needed => false must NOT demand a key
 	$NEXT_RESPONSE = HTTP::Response->new( 200, 'OK' );
 	my $ok = Lilith::CapeSubmit->new(
-		enabled => 'true',
-		servers => { a => { url => 'http://127.0.0.1:9/', apikey_needed => 'false' } },
+		enabled => JSON::true,
+		servers => { a => { url => 'http://127.0.0.1:9/', apikey_needed => JSON::false } },
 	)->submit( file => $sample );
-	is( $ok->{status}, 'ok', 'apikey_needed => "false" does not require a key' );
+	is( $ok->{status}, 'ok', 'apikey_needed => false does not require a key' );
 
-	# apikey_needed => 'true' (TOML string) with no key still dies
+	# apikey_needed => true with no key still dies
 	throws_ok {
 		Lilith::CapeSubmit->new(
-			enabled => 'true',
-			servers => { a => { url => 'http://127.0.0.1:9/', apikey_needed => 'true' } },
+			enabled => JSON::true,
+			servers => { a => { url => 'http://127.0.0.1:9/', apikey_needed => JSON::true } },
 		)->submit( file => $sample );
 	}
-	qr/needs an API key/, 'apikey_needed => "true" with no key still refuses';
+	qr/needs an API key/, 'apikey_needed => true with no key still refuses';
 }
 
 done_testing();

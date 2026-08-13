@@ -51,7 +51,7 @@ my %WriteMakefileArgs = (
 		'Term::ANSIColor'        => '0',
 		'Text::ANSITable'        => '0.608',
 		'Time::Piece::Guess'     => '0',
-		'TOML'                   => '0',
+		'TOML::Tiny'             => '0',
 		'Mojolicious'            => '9.0',
 	},
 	dist       => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },

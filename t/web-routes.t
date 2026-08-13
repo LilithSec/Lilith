@@ -878,8 +878,7 @@ SKIP: {
 	$t->post_ok('/api/cape_submit/submit')->status_is( 404, 'submit endpoint is 404 when disabled' );
 }
 
-# cape_enable = false (the TOML parser yields the string "false", which is truthy
-# in Perl) must still read as off, even with a server configured.
+# cape_enable = false must read as off, even with a server configured.
 {
 	my $t = _make_app("cape_enable = false\n\n[cape_servers.main]\nurl = \"http://127.0.0.1:9/\"\n");
 	$t->get_ok('/search')
@@ -931,13 +930,16 @@ SKIP: {
 
 	$t->get_ok( '/search?search=1&shodan_src_tag=tor&shodan_src_tag=vpn'
 			. '&shodan_dest_known=unchecked&shodan_src_cvss=%3E%3D9&cve=CVE-2021-44228'
-			. '&shodan_dest_cve_match=matched&shodan_src_cve_match=unchecked' )
+			. '&shodan_dest_cve_match=matched&shodan_src_cve_match=unchecked'
+			. '&src_locality=external&dest_locality=internal' )
 		->status_is( 200, 'a search with enrichment filters renders 200' )
 		->element_exists( 'select#shodan-src-tag-input',        'the src tag field is on the form' )
 		->element_exists( 'select#shodan-dest-known-input',     'the dest known field is on the form' )
 		->element_exists( 'select#cve-input',                   'the rule CVE field is on the form' )
 		->element_exists( 'select#shodan-src-cve-match-input',  'the src CVE match field is on the form' )
-		->element_exists( 'select#shodan-dest-cve-match-input', 'the dest CVE match field is on the form' );
+		->element_exists( 'select#shodan-dest-cve-match-input', 'the dest CVE match field is on the form' )
+		->element_exists( 'select#src-locality-input',          'the src locality field is on the form' )
+		->element_exists( 'select#dest-locality-input',         'the dest locality field is on the form' );
 
 	is_deeply( $captured{shodan_src_tag},        [ 'tor', 'vpn' ],   'the tag values reach search()' );
 	is_deeply( $captured{shodan_dest_known},     ['unchecked'],      'the known value reaches search()' );
@@ -945,6 +947,9 @@ SKIP: {
 	is_deeply( $captured{cve},                   ['CVE-2021-44228'], 'the cve value reaches search()' );
 	is_deeply( $captured{shodan_dest_cve_match}, ['matched'],        'the dest cve_match state reaches search()' );
 	is_deeply( $captured{shodan_src_cve_match},  ['unchecked'],      'the src cve_match state reaches search()' );
+	is_deeply( $captured{src_locality},          ['external'],       'the src locality state reaches search()' );
+	is_deeply( $captured{dest_locality},         ['internal'],       'the dest locality state reaches search()' );
+	is_deeply( $captured{local_networks},        [], 'the network list rides in from the config, empty when unset' );
 	is( $captured{shodan_dest_tag}, undef, 'a filter left blank passes nothing' );
 
 	# the cve_match pair is fixed-vocabulary the same way the known fields
@@ -961,6 +966,11 @@ SKIP: {
 		[ 'matched', 'unmatched', 'no-cve', 'unchecked' ],
 		'and offers exactly the four buckets'
 	);
+
+	# the locality pair likewise: exactly its two states
+	my $locality_options
+		= $t->tx->res->dom->find('select#src-locality-input option')->map( sub { $_->attr('value') } )->to_array;
+	is_deeply( $locality_options, [ 'internal', 'external' ], 'the locality field offers exactly its two states' );
 
 	# the known fields are fixed-vocabulary: they offer exactly their three
 	# states rather than leaving what the filter takes to be guessed at, and

@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use parent 'App::Cmd::Command';
 use Lilith          ();
-use TOML            qw( from_toml );
+use TOML::Tiny      qw( from_toml );
 use File::Slurp     qw( read_file );
 use JSON            ();
 use Text::ANSITable ();

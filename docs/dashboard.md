@@ -166,6 +166,19 @@ reason above they too exist for both ends:
   deliberately: Shodan's port coverage is protocol-weighted rather than a
   full sweep, so absence from the list is weaker evidence than presence on
   it. Every enriched table, both tiers.
+- `shodan_src_freshness` / `shodan_dest_freshness` :: what the cache's answer
+  for that end is worth — *Enriched* (a current answer), *Stale* (held, but
+  past `shodan_cache_ttl` or from the other tier), *Not looked up*. The
+  dimension form of the coverage and staleness stats below, by the same rule.
+
+One more pair reads the alert's own addresses and needs no enrichment at all,
+so every table has it, CAPE included:
+
+- `src_locality` / `dest_locality` :: whether that end sits inside your own
+  networks — *Internal* / *External*, per the `local_networks` CIDRs in the
+  config (with none set, the private/unroutable ranges). "Top signatures with
+  an internal source" is lateral movement; the same chart of everything is
+  mostly inbound noise.
 
 Expect the destination panels to read mostly *Not looked up* on a sensor
 watching inbound traffic: there the destination is your own asset, which is a
@@ -199,11 +212,12 @@ The two ends are counted separately because they are cached to very different
 depths — `lilith shodan_cache` warms both, but only the public addresses among
 them, and on inbound traffic the destinations are not public.
 
-Coverage also charts over time: an **Alerts over time** widget whose *Group by*
-is one of the Shodan coverage entries splits each bucket's distinct addresses
-into *Enriched* / *Stale* / *Not looked up* — whether the `lilith shodan_cache`
-timer has been keeping up, and when it fell behind, rather than where the cache
-stands now. The Shodan preset ends with one.
+Coverage also charts over time: an **Alerts over time** widget grouped by
+`shodan_src_freshness` (or the dest twin) with the matching *Distinct source
+IPs* measure splits each bucket's distinct addresses into *Enriched* / *Stale*
+/ *Not looked up* — whether the `lilith shodan_cache` timer has been keeping
+up, and when it fell behind, rather than where the cache stands now. The
+Shodan preset ends with one.
 
 Run `lilith shodan_cache` on a timer to raise the coverage numbers and hold the
 staleness ones down — see [configuration](configuration.md#shodan). The

@@ -2,7 +2,7 @@ package Lilith::Receiver;
 
 use Mojo::Base 'Mojolicious';
 use Mojo::JSON  qw(encode_json decode_json);
-use TOML        qw(from_toml);
+use TOML::Tiny  qw(from_toml);
 use File::Slurp qw(read_file);
 use Lilith      ();
 

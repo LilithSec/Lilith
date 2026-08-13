@@ -7,11 +7,11 @@ use Test::More;
 use_ok('Lilith')         or BAIL_OUT('Lilith failed to load');
 use_ok('Lilith::Schema') or BAIL_OUT('Lilith::Schema failed to load');
 
-# The Shodan enrichment filters and the rule CVE filter, tested at the same
-# level as lilith-search-strings.t: Lilith::Schema->connect mocked out, the
-# search hash captured, and the clauses inspected. The literal SQL asserted
-# here is the contract; the same filters run against a real database in
-# pg-migrate.t.
+# The Shodan enrichment filters, the rule CVE filter, and the locality pair,
+# tested at the same level as lilith-search-strings.t: Lilith::Schema->connect
+# mocked out, the search hash captured, and the clauses inspected. The literal
+# SQL asserted here is the contract; the same filters run against a real
+# database in pg-migrate.t.
 
 # ---------------------------------------------------------------------------
 # Mock out Lilith::Schema->connect. Unlike the other search mocks this one
@@ -320,6 +320,53 @@ like(
 		qr/the shodan_dest_cve_match search filter needs the shodan_cache table \(schema version 15\)/,
 		'a schema without shodan_cache dies plainly'
 	);
+}
+
+# ---------------------------------------------------------------------------
+# the locality pair: the alert's own ends against the local_networks list
+# ---------------------------------------------------------------------------
+
+is_deeply(
+	filter_clauses( src_locality => 'internal', local_networks => [ '192.0.2.0/24', '203.0.113.7' ] ),
+	[ \["me.src_ip <<= any (array['192.0.2.0/24'::inet, '203.0.113.7'::inet])"] ],
+	'src_locality internal is one membership test against the given networks'
+);
+is_deeply(
+	filter_clauses( dest_locality => 'external', local_networks => ['192.0.2.0/24'] ),
+	[ \["(me.dest_ip is not null and not (me.dest_ip <<= any (array['192.0.2.0/24'::inet])))"] ],
+	'external is null-guarded, so an alert naming no address on that end matches neither'
+);
+
+# with no list given, DBUtil's unroutable defaults stand in -- the same list
+# the dashboard dimensions fall back to
+my $default_inside = Lilith::DBUtil::local_networks_frag('me.src_ip');
+is_deeply(
+	filter_clauses( src_locality => 'internal' ),
+	[ \[$default_inside] ],
+	'with no local_networks the default ranges stand in'
+);
+like( $default_inside, qr{'10\.0\.0\.0/8'::inet}, 'and they are the private ranges' );
+
+my $bad_locality = '';
+eval { filter_clauses( src_locality => 'sideways' ) };
+$bad_locality = $@ if $@;
+like(
+	$bad_locality,
+	qr/"sideways" for src_locality is not one of internal or external/,
+	'an unknown locality dies rather than matching nothing'
+);
+
+my $bad_network = '';
+eval { filter_clauses( src_locality => 'internal', local_networks => ['10.0.0.0/8; drop'] ) };
+$bad_network = $@ if $@;
+like( $bad_network, qr/is not an address or CIDR/, 'a network outside the address charset dies' );
+
+{
+	# locality reads the alert's own columns, so unlike the enrichment filters
+	# cape gets it too
+	$captured_search = undef;
+	$lilith->search( table => 'cape', src_locality => 'internal' );
+	ok( defined $captured_search->{'-and'}, 'locality needs no enrichment, so cape gets it' );
 }
 
 # ---------------------------------------------------------------------------

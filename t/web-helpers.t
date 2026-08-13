@@ -493,8 +493,7 @@ SKIP: {
 	is_deeply( $app->shodan_badges( [] ),  {}, 'no results means no badge lookup' );
 	is_deeply( $app->shodan_badges(undef), {}, 'no result set at all means no badge lookup' );
 
-	# the TOML parser yields booleans as the strings 'true'/'false' -- both
-	# truthy in Perl -- so the history switch coerces like cape_enable does
+	# a TOML false must read as off, through the whole parse path
 	{
 		my ( $false_fh, $false_cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
 		print $false_fh "dsn = \"dbi:Pg:dbname=test\"\n";

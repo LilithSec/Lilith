@@ -15,7 +15,7 @@ use Time::Piece::Guess   ();
 use Lilith::Schema       ();
 use Lilith::Escalate     ();
 use Lilith::AutoEscalate ();
-use Lilith::DBUtil       qw( column_exists );
+use Lilith::DBUtil       qw( column_exists local_networks_frag );
 
 =head1 NAME
 
@@ -1597,6 +1597,19 @@ and negated items are ANDed.
     #                    or src_port = '80' or dest_port = '80' )"
     port => '22,80'
 
+Next are the locality filters, which read the alert's own addresses against
+the deployment's C<local_networks> CIDR list (the web layer passes the
+config's; with none given, the unroutable ranges stand in):
+
+    - src_locality / dest_locality :: which side of your own networks that
+      end sits on, 'internal' or 'external' -- the search-filter form of the
+      dashboard dimensions of the same names, by the same list. '!' negates;
+      anything else dies. An alert naming no address on that end matches
+      neither.
+
+    # alerts whose destination is one of your own machines
+    dest_locality => 'internal',
+
 Below are the Shodan enrichment filters, for the suricata, sagan, and baphomet
 tables (cape is skipped -- its addresses describe the submitter). Each filters
 on what the C<shodan_cache> table (schema version 15) holds for that end of the
@@ -2142,6 +2155,34 @@ sub search {
 			}
 		}
 	}
+
+	# src_locality / dest_locality, as the POD above lays out: which side of
+	# the deployment's own networks the end sits on, per the caller's
+	# local_networks list (with none, the unroutable ranges -- see
+	# Lilith::DBUtil::local_networks_frag, which the dashboard dimensions
+	# share). Fixed vocabulary; anything else dies rather than silently
+	# matching nothing. An alert naming no address on that end matches
+	# neither, so external is null-guarded rather than a bare negation.
+	for my $side (qw(src dest)) {
+		my $locality_filter = $side . '_locality';
+		my $ip_column       = $side . '_ip';
+		next unless defined( $opts{$locality_filter} ) && $table_has_column{$ip_column};
+
+		my @locality_values = _filter_values( $opts{$locality_filter} );
+		next unless @locality_values;
+
+		my $inside       = local_networks_frag( 'me.' . $ip_column, $opts{local_networks} );
+		my %locality_sql = (
+			internal => $inside,
+			external => '(me.' . $ip_column . ' is not null and not (' . $inside . '))',
+		);
+
+		$search->{'-and'} = [] if !defined( $search->{'-and'} );
+		push(
+			@{ $search->{'-and'} },
+			_vocab_clauses( $locality_filter, \@locality_values, \%locality_sql, 'internal or external' )
+		);
+	} ## end for my $side (qw(src dest))
 
 	#
 	# Shodan enrichment filters

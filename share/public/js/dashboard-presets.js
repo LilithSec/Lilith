@@ -35,7 +35,17 @@ var PRESETS = [
     { type: 'countries',  config: {},                                  x: 8, y: 13, w: 4,  h: 4 },
     { type: 'timeseries', config: { measure: 'bytes' },                x: 0, y: 17, w: 12, h: 4 },
     { type: 'top',        config: { column: 'src_ip', measure: 'bytes' },             x: 0, y: 21, w: 6, h: 4 },
-    { type: 'top',        config: { column: 'src_ip', measure: 'distinct_dest_port' },x: 6, y: 21, w: 6, h: 4 }
+    { type: 'top',        config: { column: 'src_ip', measure: 'distinct_dest_port' },x: 6, y: 21, w: 6, h: 4 },
+    // where each end sits relative to your own networks, per the config's
+    // local_networks -- unset, the private address space stands in. Both
+    // ends, because src and dest are the triggering packet's direction, not
+    // attacker and victim: internal-to-internal traffic on either chart is
+    // the lateral-movement read, and which end your asset lands on is up to
+    // the rule that fired.
+    { type: 'timeseries', config: { group_by: 'src_locality' },               x: 0, y: 25, w: 8, h: 4 },
+    { type: 'top',        config: { column: 'src_locality', style: 'pie' },   x: 8, y: 25, w: 4, h: 4 },
+    { type: 'timeseries', config: { group_by: 'dest_locality' },              x: 0, y: 29, w: 8, h: 4 },
+    { type: 'top',        config: { column: 'dest_locality', style: 'pie' },  x: 8, y: 29, w: 4, h: 4 }
   ] },
   // CAPE -- malware sandbox detonations.
   { key: 'cape', label: 'CAPE (malware sandbox)', table: 'cape', widgets: [
@@ -142,8 +152,9 @@ var PRESETS = [
     { type: 'top',        config: { column: 'shodan_src_cve_match', style: 'pie' },   x: 8, y: 22, w: 4, h: 4 },
     { type: 'top',        config: { column: 'shodan_src_port_match', style: 'pie' },  x: 0, y: 26, w: 4, h: 4 },
     { type: 'timeseries', config: { group_by: 'shodan_dest_cve_match' },              x: 4, y: 26, w: 8, h: 4 },
-    // the coverage stat over time: has the cache timer been keeping up
-    { type: 'timeseries', config: { metric: 'shodan_src_coverage' },                  x: 0, y: 30, w: 12, h: 4 }
+    // the coverage stat over time: distinct sources per bucket by freshness --
+    // has the cache timer been keeping up
+    { type: 'timeseries', config: { group_by: 'shodan_src_freshness', measure: 'distinct_src_ip' }, x: 0, y: 30, w: 12, h: 4 }
   ] },
   // Shodan × Baphomet -- the judgments cut by what Shodan knows about the
   // judged host. The score panels are the point: does Baphomet's own scoring
@@ -164,7 +175,7 @@ var PRESETS = [
     { type: 'top',        config: { column: 'shodan_src_vuln' },                                     x: 0, y: 9, w: 4, h: 4 },
     { type: 'top',        config: { column: 'src_ip', measure: 'max_score' },                        x: 4, y: 9, w: 4, h: 4 },
     { type: 'top',        config: { column: 'shodan_src_cpe' },                                      x: 8, y: 9, w: 4, h: 4 },
-    { type: 'timeseries', config: { metric: 'shodan_src_coverage' },                                 x: 0, y: 13, w: 12, h: 4 }
+    { type: 'timeseries', config: { group_by: 'shodan_src_freshness', measure: 'distinct_src_ip' }, x: 0, y: 13, w: 12, h: 4 }
   ] },
   // Syslog (Allani log store).
   { key: 'syslog', label: 'Syslog', widgets: [

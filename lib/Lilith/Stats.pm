@@ -3,7 +3,7 @@ package Lilith::Stats;
 use strict;
 use warnings;
 use Lilith::DBUtil
-	qw( column_exists connect_cached_dbh host_or_text_expr measure_expr skip_scan_viable time_window_clause validate_bucket );
+	qw( column_exists connect_cached_dbh host_or_text_expr local_networks_frag measure_expr skip_scan_viable time_window_clause validate_bucket );
 
 =head1 NAME
 
@@ -48,6 +48,17 @@ C<shodan_dest_*> columns, and L</shodan_coverage> says, per end, how much of a
 window they actually describe. They are offered only when the database has the
 C<shodan_cache> table (schema version 15), which is detected rather than
 assumed.
+
+Two dimension families take their meaning from the request rather than from
+the alert alone. The C<shodan_src_freshness> / C<shodan_dest_freshness> pair
+buckets that end's addresses into C<Enriched> / C<Stale> / C<Not looked up>
+per the caller's C<ttl> (seconds, default 2592000) and C<source> (C<api> or
+C<internetdb>; absent means either tier counts) -- the dimension form of
+L</shodan_coverage>, sharing its freshness rule. The C<src_locality> /
+C<dest_locality> pair buckets each end into C<Internal> / C<External> against
+the caller's C<local_networks> (an array ref of CIDRs; absent means the
+unroutable ranges), and is offered for every table with the address column,
+needing no C<shodan_cache> at all.
 
 Every table name, column name, and time bucket a caller passes is checked
 against a fixed set of accepted names before it reaches SQL; the only
@@ -202,6 +213,12 @@ my %ENRICH_SIDE = (
 # columns, which is why they are code refs: the same shape is built twice, once
 # per side.
 #
+# A shape marked dynamic depends on values that only arrive with the request
+# (freshness needs the caller's ttl and source), so the catalog loop below
+# keeps its expr/order as code and _col_expr/_order_expr call them at query
+# time with the request options. Everything else is still a string built once
+# at load.
+#
 # Either shape drops an alert that names no address on that end (a Baphomet
 # judgment passed on a username, say): there is nothing for Shodan to describe,
 # and counting it as "not looked up" would read as one that had been missed.
@@ -309,6 +326,31 @@ my %ENRICH_SHAPE = (
 	#
 	# No needs_cves and no table scoping: the port columns are real columns on
 	# every enriched table, and both tiers send ports.
+	# Whether the cache's answer for that end would still be used: 'Enriched'
+	# (a fresh row from the configured tier), 'Stale' (held, but past the ttl
+	# or written by the other tier), or 'Not looked up'. The dimension form of
+	# shodan_coverage -- a chart grouped by this and the coverage tile must
+	# agree, so both build their freshness test through _freshness_frag. With
+	# measure distinct_<side>_ip a timeseries of it says whether the
+	# `lilith shodan_cache` timer has been keeping up, and when it fell behind.
+	freshness => {
+		dynamic => 1,
+		columns => [ 'fetched', 'source' ],
+		expr    => sub {
+			my ( $alias, $ip, $port, $opts ) = @_;
+			my $fresh = _freshness_frag( $alias, $opts );
+			return
+				  "case when $ip is null then null"
+				. " when $alias.${alias}_ip is null then 'Not looked up'"
+				. " when $fresh then 'Enriched' else 'Stale' end";
+		},
+		order => sub {
+			my ( $alias, $ip, $port, $opts ) = @_;
+			my $fresh = _freshness_frag( $alias, $opts );
+			return "case when $alias.${alias}_ip is null then 3" . " when $fresh then 1 else 2 end";
+		},
+	},
+
 	port_match => {
 		columns => [ 'found', 'ports' ],
 		expr    => sub {
@@ -365,12 +407,36 @@ for my $side ( keys %ENRICH_SIDE ) {
 			alias     => $alias,
 			ip_column => $ip,
 			# an array dimension groups by the unnested value; a scalar one by
-			# the CASE the shape describes
-			expr  => $spec->{array} ? $alias . '_val.v'                      : $spec->{expr}->( $alias, $ip, $port ),
-			order => $spec->{order} ? $spec->{order}->( $alias, $ip, $port ) : undef,
+			# the CASE the shape describes -- kept as code for a dynamic shape,
+			# whose CASE needs the request options
+			expr => $spec->{array} ? $alias . '_val.v'
+			: $spec->{dynamic} ? sub { $spec->{expr}->( $alias, $ip, $port, @_ ) }
+			: $spec->{expr}->( $alias, $ip, $port ),
+			order => !$spec->{order} ? undef
+			: $spec->{dynamic} ? sub { $spec->{order}->( $alias, $ip, $port, @_ ) }
+			:                    $spec->{order}->( $alias, $ip, $port ),
 		};
 	} ## end for my $shape ( keys %ENRICH_SHAPE )
 } ## end for my $side ( keys %ENRICH_SIDE )
+
+# Where each end of an alert sits relative to the deployment's own networks:
+# 'Internal' when the address is inside one of the local_networks CIDRs the
+# caller passes (the web layer passes the config's), 'External' otherwise, and
+# left out when the alert names no address on that end. This is what separates
+# lateral movement from inbound noise -- "top signatures with an internal
+# source" is a different read from the same chart of everything.
+#
+# No join and no schema requirement: the CASE tests the alert's own address
+# column, so it is offered for every table that has the column, cape included.
+# Like freshness these are dynamic -- the CIDR list only arrives with the
+# request -- so _col_expr/_order_expr build the CASE per query through
+# _locality_exprs. The membership test itself (and what Internal means when no
+# networks are configured) lives in Lilith::DBUtil::local_networks_frag,
+# shared with the search filters of the same names.
+my %LOCALITY = (
+	src_locality  => 'src_ip',
+	dest_locality => 'dest_ip',
+);
 
 # Measures: what a top/timeseries widget aggregates, beyond the default count of
 # rows. Each is a named preset resolved to a SQL aggregate: 'sum'/'avg'/'max' of
@@ -527,7 +593,7 @@ sub distinct {
 	my $dbh     = $self->_dbh;
 	my $exf     = $self->_exclude_frag( $dbh, $type, \%opts );
 	my $win     = $self->_window_frag( $dbh, $tc, \%opts, $mins );
-	my $colexpr = $self->_col_expr( $type, $col );
+	my $colexpr = $self->_col_expr( $type, $col, \%opts );
 
 	# A virtual or enriched column is an expression -- dug out of raw, or read
 	# from the joined shodan_cache -- so there is no column for an index to lead
@@ -566,16 +632,16 @@ sub top {
 	my $dbh     = $self->_dbh;
 	my $exf     = $self->_exclude_frag( $dbh, $type, \%opts );
 	my $win     = $self->_window_frag( $dbh, $tc, \%opts, $mins );
-	my $vexpr   = $self->_value_expr( $type, $col );
-	my $colexpr = $self->_col_expr( $type, $col );
-	my $magg    = $self->_measure_expr( $type, $opts{measure} );
+	my $vexpr   = $self->_value_expr( $type, $col, \%opts );
+	my $colexpr = $self->_col_expr( $type, $col, \%opts );
+	my $magg    = $self->_measure_expr( $type, $opts{measure}, \%opts );
 	my $from    = $self->_from_frag( $type, $col );
 
 	# A column with a natural rank (severity, or a Shodan CVSS band) orders by
 	# that rank via min() -- an aggregate, so it needs no GROUP BY entry --
 	# rather than by the measure (which is what everything else orders by,
 	# descending).
-	my $rank = $self->_order_expr( $type, $col );
+	my $rank = $self->_order_expr( $type, $col, \%opts );
 	my $ord  = defined $rank ? 'min(' . $rank . ') asc' : '2 desc, 1 asc';
 
 	my $sql
@@ -616,21 +682,21 @@ sub timeseries {
 
 	my $dbh    = $self->_dbh;
 	my $exf    = $self->_exclude_frag( $dbh, $type, \%opts );
-	my $magg   = $self->_measure_expr( $type, $opts{measure} );
+	my $magg   = $self->_measure_expr( $type, $opts{measure}, \%opts );
 	my $window = $self->_window_frag( $dbh, $tc, \%opts, $mins ) . $exf;
 	my $epoch  = "extract(epoch from date_trunc('$bucket', $tc))::bigint";
 
 	if ( defined $opts{group_by} && $opts{group_by} ne '' ) {
 		my $g     = $self->_dimension( $type, $opts{group_by} );
-		my $gcol  = $self->_col_expr( $type, $g );
-		my $gexpr = $self->_value_expr( $type, $g );
+		my $gcol  = $self->_col_expr( $type, $g, \%opts );
+		my $gexpr = $self->_value_expr( $type, $g, \%opts );
 		my $gfrom = $self->_from_frag( $type, $g );
 		my $where = "$window and $gcol is not null";
 
 		# A group with a natural rank (severity, or a Shodan CVSS band) orders its
 		# series by that rank via min() rather than alphabetically by the label, so
 		# the stack reads High -> Low.
-		my $grank   = $self->_order_expr( $type, $g );
+		my $grank   = $self->_order_expr( $type, $g, \%opts );
 		my $ordered = defined $grank;
 		my $gord    = $ordered ? 'min(' . $grank . ') asc' : '2 asc';
 
@@ -719,8 +785,24 @@ table.
 sub shodan_coverage {
 	my ( $self, %opts ) = @_;
 
-	my $parts = $self->_coverage_parts( \%opts );
-	my ( $dbh, $tbl, $ip, $win, $exf, $fresh, $join ) = @{$parts}{qw( dbh tbl ip win exf fresh join )};
+	my $type = $self->_table( $opts{table} );
+	die( $type . " alerts carry no Shodan enrichment\n" )                    unless $ENRICH_TABLE{$type};
+	die("the shodan_cache table is not present (needs schema version 15)\n") unless $self->_shodan_available;
+
+	my $side = defined $opts{side} && $opts{side} ne '' ? $opts{side} : 'src';
+	die( '"' . $side . '" is not a known side (src, dest)' . "\n" ) unless $ENRICH_SIDE{$side};
+	my $ip = $ENRICH_SIDE{$side}{ip_column};
+
+	my $mins = $self->_minutes( $opts{go_back_minutes} );
+	my ( $tbl, $tc ) = ( $TABLE{$type}, $TIME_COL{$type} );
+
+	my $dbh = $self->_dbh;
+	my $exf = $self->_exclude_frag( $dbh, $type, \%opts );
+	my $win = $self->_window_frag( $dbh, $tc, \%opts, $mins );
+
+	# the same rule the freshness dimension applies, so this tile and a chart
+	# grouped by shodan_*_freshness cannot disagree
+	my $fresh = _freshness_frag( 'shodan', \%opts );
 
 	# The addresses are collected first and matched after, so the cache is
 	# touched once per distinct address rather than once per alert.
@@ -728,7 +810,8 @@ sub shodan_coverage {
 		= "with addresses as (select distinct $ip as ip from $tbl where $win$exf and $ip is not null) "
 		. "select count(*), count(shodan.shodan_ip), "
 		. "count(*) filter (where shodan.shodan_ip is not null and not ($fresh)) from addresses "
-		. $join;
+		. "left join (select ip as shodan_ip, fetched as shodan_fetched, source as shodan_source"
+		. " from shodan_cache) shodan on shodan.shodan_ip = addresses.ip";
 
 	my ( $addresses, $enriched, $stale ) = $dbh->selectrow_array($sql);
 	$addresses = ( $addresses // 0 ) + 0;
@@ -744,55 +827,6 @@ sub shodan_coverage {
 	};
 } ## end sub shodan_coverage
 
-=head2 shodan_coverage_series
-
-    my $rows = $stats->shodan_coverage_series(
-        table => 'suricata', go_back_minutes => 1440, bucket => 'hour',
-        side  => 'src',      ttl => 2592000, source => 'api',
-    );
-    # [ { bucket => 1755000000, group => 'Enriched', count => 41 }, ... ]
-
-L</shodan_coverage> over time: per time bucket, the distinct addresses on one
-end split into what the cache answers for (C<Enriched>), what it answers with
-something the reads would no longer use (C<Stale>), and what it was never
-asked about (C<Not looked up>). A coverage tile says where the cache stands
-now; this says whether the C<lilith shodan_cache> timer has been keeping up,
-and when it fell behind.
-
-The rows are the shape C<timeseries> returns for a grouped query, so the same
-chart renders either. An address active across several buckets counts in each
-of them -- the question is asked per bucket, not once per window.
-
-Freshness follows the same rule as C<shodan_coverage>, and the same deaths
-apply, plus C<timeseries>'s for an unaccepted C<bucket>.
-
-=cut
-
-sub shodan_coverage_series {
-	my ( $self, %opts ) = @_;
-
-	my $parts = $self->_coverage_parts( \%opts );
-	my ( $dbh, $tbl, $tc, $ip, $win, $exf, $fresh, $join ) = @{$parts}{qw( dbh tbl tc ip win exf fresh join )};
-
-	my $bucket = $self->_bucket( $opts{bucket} );
-	my $epoch  = "extract(epoch from date_trunc('$bucket', $tc))::bigint";
-
-	# The distinct addresses per bucket are collected first and matched after,
-	# the same reasoning as shodan_coverage. The three states happen to sort
-	# alphabetically into Enriched / Not looked up / Stale, which puts the
-	# good news at the bottom of the stack.
-	my $sql
-		= "with addresses as (select $epoch as bucket, $ip as ip from $tbl"
-		. " where $win$exf and $ip is not null group by 1, 2) "
-		. "select bucket, case when shodan.shodan_ip is null then 'Not looked up'"
-		. " when $fresh then 'Enriched' else 'Stale' end as grp, count(*) as count "
-		. "from addresses $join "
-		. "group by 1, 2 order by 1 asc, 2 asc";
-
-	my $rows = $dbh->selectall_arrayref( $sql, { Slice => {} } );
-	return [ map { { bucket => $_->{bucket} + 0, group => $_->{grp}, count => ( $_->{count} // 0 ) + 0 } } @$rows ];
-} ## end sub shodan_coverage_series
-
 =head2 columns
 
     my $cols = $stats->columns('suricata');
@@ -803,7 +837,8 @@ dashboard's widget pickers stay in sync with what the backend will accept.
 
 The C<shodan_*> enrichment dimensions are listed only for a table that has them
 and only when the database has the C<shodan_cache> table, so a picker never
-offers a column that would come back as an error.
+offers a column that would come back as an error. The locality pair rides each
+side's address column and is listed wherever that column is.
 
 =cut
 
@@ -812,6 +847,7 @@ sub columns {
 	my $type = $self->_table($table);
 	my @cols = keys %{ $DIMENSION{$type} };
 	push( @cols, keys %{ $VIRTUAL{$type} } ) if $VIRTUAL{$type};
+	push( @cols, grep { $DIMENSION{$type}{ $LOCALITY{$_} } } keys %LOCALITY );
 	if ( $ENRICH_TABLE{$type} && $self->_shodan_available ) {
 		push(
 			@cols,
@@ -901,68 +937,79 @@ sub _window_frag {
 	);
 } ## end sub _window_frag
 
-# The scaffolding shodan_coverage and shodan_coverage_series share, worked out
-# once so the freshness rule and the cache join cannot drift between the tile
-# and the chart -- exactly the pair a user compares.
+# The SQL boolean saying one side's joined shodan_cache row would still be
+# used, per the request's freshness rule: fetched within the last ttl seconds,
+# and (when a source is named) written by that tier. The one place the rule
+# lives -- the freshness dimension and the shodan_coverage tile both build
+# their test here, so a chart grouped by one and the tile beside it cannot
+# disagree.
+#
+# The ttl is spliced into an interval literal, which cannot take a placeholder,
+# so it is proven a number first; the source is checked against the two tier
+# names, so both scalars reach the SQL checked. Plain function, not a method.
 #
 # Args:
 #
-#   - $opts :: the caller's option hash ref, read for table, side, ttl, source,
-#     go_back_minutes, start/end, and the exclude switches -- the options both
-#     public methods document.
+#   - $alias :: the join alias whose renamed columns the test reads --
+#     '<alias>.<alias>_fetched' and '<alias>.<alias>_source'. 'shodan_src' or
+#     'shodan_dest' for the dimension joins, 'shodan' for the coverage CTE.
+#   - $opts :: the caller's option hash ref, read for ttl (seconds, default
+#     2592000; 0 is caching off and leaves every row stale) and source ('api'
+#     or 'internetdb'; absent means either tier counts).
 #
-# Returns: a hash ref of named parts:
+# Returns: the boolean as a string, no binds. Dies for a ttl that is not a
+# non-negative integer or a source outside the two tiers.
 #
-#   - dbh :: the connected handle.
-#   - tbl / tc :: the alert table and its time column.
-#   - ip :: the side's address column, src_ip or dest_ip.
-#   - win / exf :: the window fragment and the classification-exclude fragment.
-#   - fresh :: the SQL boolean saying a joined cache row is still usable,
-#     carrying the ttl (spliced into an interval literal, which cannot take a
-#     placeholder, so it is proven a number first) and, when given, the source
-#     rule.
-#   - join :: the left join of shodan_cache onto an 'addresses' CTE, its
-#     columns riding as shodan.shodan_ip / shodan_fetched / shodan_source.
-#
-# Dies as shodan_coverage documents: an unenriched table, an unknown side, a
-# ttl that is not a non-negative integer, or no shodan_cache table.
-#
-#     my $parts = $self->_coverage_parts( \%opts );
-#     my ( $ip, $fresh ) = @{$parts}{qw( ip fresh )};
-sub _coverage_parts {
-	my ( $self, $opts ) = @_;
-
-	my $type = $self->_table( $opts->{table} );
-	die( $type . " alerts carry no Shodan enrichment\n" )                    unless $ENRICH_TABLE{$type};
-	die("the shodan_cache table is not present (needs schema version 15)\n") unless $self->_shodan_available;
-
-	my $side = defined $opts->{side} && $opts->{side} ne '' ? $opts->{side} : 'src';
-	die( '"' . $side . '" is not a known side (src, dest)' . "\n" ) unless $ENRICH_SIDE{$side};
-
-	my $mins = $self->_minutes( $opts->{go_back_minutes} );
+#     _freshness_frag( 'shodan_src', { ttl => 86400, source => 'api' } );
+#     # "shodan_src.shodan_src_fetched > now() - interval '86400 seconds'
+#     #  and shodan_src.shodan_src_source = 'api'"
+sub _freshness_frag {
+	my ( $alias, $opts ) = @_;
 
 	my $ttl = defined $opts->{ttl} && $opts->{ttl} ne '' ? $opts->{ttl} : 2592000;
 	die( '"' . $ttl . '" for ttl is not a non-negative integer' . "\n" ) unless $ttl =~ /^[0-9]+$/;
 
-	my $dbh = $self->_dbh;
-	my $tc  = $TIME_COL{$type};
+	my $fresh = "$alias.${alias}_fetched > now() - interval '$ttl seconds'";
+	if ( defined $opts->{source} && $opts->{source} ne '' ) {
+		my $source = $opts->{source};
+		die( '"' . $source . '" is not a known source (api, internetdb)' . "\n" )
+			unless $source eq 'api' || $source eq 'internetdb';
+		$fresh .= " and $alias.${alias}_source = '$source'";
+	}
 
-	my $fresh = "shodan.shodan_fetched > now() - interval '" . $ttl . " seconds'";
-	$fresh .= ' and shodan.shodan_source = ' . $dbh->quote( $opts->{source} )
-		if defined $opts->{source} && $opts->{source} ne '';
+	return $fresh;
+} ## end sub _freshness_frag
 
-	return {
-		dbh   => $dbh,
-		tbl   => $TABLE{$type},
-		tc    => $tc,
-		ip    => $ENRICH_SIDE{$side}{ip_column},
-		win   => $self->_window_frag( $dbh, $tc, $opts, $mins ),
-		exf   => $self->_exclude_frag( $dbh, $type, $opts ),
-		fresh => $fresh,
-		join  => 'left join (select ip as shodan_ip, fetched as shodan_fetched, source as shodan_source'
-			. ' from shodan_cache) shodan on shodan.shodan_ip = addresses.ip',
-	};
-} ## end sub _coverage_parts
+# The grouping and rank expressions for a locality dimension: which side of the
+# deployment's own networks an address column sits on. The membership test (and
+# what Internal means when no networks were given, and the checking of each
+# entry before it is spliced) is DBUtil's local_networks_frag, shared with the
+# search filters. Plain function, not a method.
+#
+# Args:
+#
+#   - $ip_column :: the address column the dimension is on, out of %LOCALITY --
+#     'src_ip' or 'dest_ip'.
+#   - $opts :: the caller's option hash ref, read for local_networks: an array
+#     ref of CIDR strings (a bare address counts as its /32 or /128). Absent or
+#     empty means the unroutable ranges.
+#
+# Returns: two strings -- the CASE yielding 'Internal' / 'External' (null for a
+# row naming no address, which the callers' is-not-null guard then drops), and
+# the rank putting Internal first. Dies naming the entry for a local_networks
+# value outside the address character set.
+#
+#     my ( $expr, $order ) = _locality_exprs( 'src_ip', \%opts );
+sub _locality_exprs {
+	my ( $ip_column, $opts ) = @_;
+
+	my $inside = local_networks_frag( $ip_column, $opts->{local_networks} );
+
+	return (
+		"case when $ip_column is null then null when $inside then 'Internal' else 'External' end",
+		"case when $inside then 1 else 2 end",
+	);
+} ## end sub _locality_exprs
 
 # Check the caller's short table type and hand it back. Everything public here
 # takes the short form ('suricata', not 'suricata_alerts'), and this is the one
@@ -1021,6 +1068,10 @@ sub _dimension {
 			if $enrich->{needs_host_columns} && !$self->_column_available( 'shodan_cache', 'os' );
 		return $col;
 	}
+
+	# a locality dimension rides its side's address column, so it is accepted
+	# exactly where that column is
+	return $col if $LOCALITY{$col} && $DIMENSION{$type}{ $LOCALITY{$col} };
 
 	die( '"' . $col . '" is not an aggregatable column for ' . $type . "\n" )
 		unless $DIMENSION{$type}{$col} || ( $VIRTUAL{$type} && $VIRTUAL{$type}{$col} );
@@ -1193,10 +1244,13 @@ sub _from_frag {
 #     $self->_order_expr( 'suricata', 'severity' );    # 'case severity when ...'
 #     $self->_order_expr( 'suricata', 'src_ip' );      # undef
 sub _order_expr {
-	my ( $self, $type, $col ) = @_;
+	my ( $self, $type, $col, $opts ) = @_;
 
 	if ( my $enrich = $self->_enrich_for( $type, $col ) ) {
-		return $enrich->{order};
+		return ref $enrich->{order} eq 'CODE' ? $enrich->{order}->($opts) : $enrich->{order};
+	}
+	if ( $LOCALITY{$col} ) {
+		return ( _locality_exprs( $LOCALITY{$col}, $opts ) )[1];
 	}
 
 	return undef unless $VIRTUAL{$type} && $VIRTUAL{$type}{$col} && $VIRTUAL{$type}{$col}{order};
@@ -1223,12 +1277,12 @@ sub _order_expr {
 #     my $agg = $self->_measure_expr( 'suricata', 'sum_bytes' );
 #     my $sql = "select $agg from suricata_alerts where $win";
 sub _measure_expr {
-	my ( $self, $type, $name ) = @_;
+	my ( $self, $type, $name, $opts ) = @_;
 	return measure_expr(
 		list            => $MEASURE{$type},
 		name            => $name,
 		context         => $type,
-		column_expr_for => sub { $self->_col_expr( $type, $self->_dimension( $type, $_[0] ) ) },
+		column_expr_for => sub { $self->_col_expr( $type, $self->_dimension( $type, $_[0] ), $opts ) },
 	);
 }
 
@@ -1281,30 +1335,37 @@ sub _virtual_base {
 } ## end sub _virtual_base
 
 # The raw SQL reference for an already-validated column: a virtual column's grouping
-# expression, an enrichment column's, or the bare column name. This is what null
-# checks, distinct, and the timeseries top-groups subquery reference.
+# expression, an enrichment or locality column's, or the bare column name. This
+# is what null checks, distinct, and the timeseries top-groups subquery
+# reference.
 #
 # Args:
 #
 #   - $type :: the short table type, already through _table.
 #   - $col :: the column name, already through _dimension.
+#   - $opts :: the caller's option hash ref, handed to a dynamic dimension's
+#     expression builder (freshness reads ttl/source, locality
+#     local_networks). Unread for everything else.
 #
 # Returns: the SQL to group and filter by, as a string. A real column comes
-# back as its own name; a virtual or enrichment one comes back as the
-# expression it stands for, parenthesised by whoever needs it. Anything but a
-# real column assumes the FROM clause _from_frag built for the same column.
+# back as its own name; a virtual, enrichment, or locality one comes back as
+# the expression it stands for, parenthesised by whoever needs it. Anything but
+# a real column assumes the FROM clause _from_frag built for the same column.
 #
 #     $self->_col_expr( 'suricata', 'src_ip' );          # 'src_ip'
 #     $self->_col_expr( 'suricata', 'severity' );        # "raw->'alert'->>'severity'"
 #     $self->_col_expr( 'suricata', 'shodan_src_tag' );  # 'shodan_src_val.v'
 sub _col_expr {
-	my ( $self, $type, $col ) = @_;
+	my ( $self, $type, $col, $opts ) = @_;
 	if ( my $enrich = $self->_enrich_for( $type, $col ) ) {
-		return $enrich->{expr};
+		return ref $enrich->{expr} eq 'CODE' ? $enrich->{expr}->($opts) : $enrich->{expr};
+	}
+	if ( $LOCALITY{$col} ) {
+		return ( _locality_exprs( $LOCALITY{$col}, $opts ) )[0];
 	}
 	return $self->_virtual_base( $type, $col ) if $VIRTUAL{$type} && $VIRTUAL{$type}{$col};
 	return $col;
-}
+} ## end sub _col_expr
 
 # The SQL expression yielding a column's display value: a virtual column's label
 # expression (or its bare expression when unlabelled), an inet column's bare host
@@ -1325,10 +1386,13 @@ sub _col_expr {
 #     $self->_value_expr( 'suricata', 'src_ip' );    # 'host(src_ip)'
 #     $self->_value_expr( 'suricata', 'sid' );       # '(sid)::text'
 sub _value_expr {
-	my ( $self, $type, $col ) = @_;
+	my ( $self, $type, $col, $opts ) = @_;
 	if ( my $enrich = $self->_enrich_for( $type, $col ) ) {
-		my $expr = $self->_col_expr( $type, $col );
+		my $expr = $self->_col_expr( $type, $col, $opts );
 		return $enrich->{text_cast} ? '(' . $expr . ')::text' : $expr;
+	}
+	if ( $LOCALITY{$col} ) {
+		return $self->_col_expr( $type, $col, $opts );
 	}
 	if ( $VIRTUAL{$type} && $VIRTUAL{$type}{$col} ) {
 		my $base = $self->_virtual_base( $type, $col );

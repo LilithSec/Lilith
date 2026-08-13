@@ -10,6 +10,7 @@ our @EXPORT_OK = qw(
 	column_exists
 	connect_cached_dbh
 	host_or_text_expr
+	local_networks_frag
 	measure_expr
 	skip_scan_viable
 	time_window_clause
@@ -141,6 +142,25 @@ assumed, so the feature built on it can be withheld instead of erroring.
 Answers per call and dies if the catalog cannot be read; whether and how long
 to remember the answer is the caller's business, since each caller has its own
 rules about caching a failure.
+
+=head2 local_networks_frag( $column, $networks )
+
+The SQL boolean saying an INET column's address sits inside one of the given
+networks -- one contained-in-or-equal test against the list as an inet array.
+What both faces of the locality question build on: the dashboard's
+C<src_locality>/C<dest_locality> dimensions in L<Lilith::Stats> and the search
+filters of the same names in L<Lilith>, so the two cannot disagree about what
+C<Internal> means.
+
+C<$networks> is an array ref of CIDR strings (a bare address counts as itself);
+absent or empty, the unroutable ranges stand in -- RFC 1918, loopback, link
+local, carrier-grade NAT, and their v6 counterparts -- so the answer is useful
+before it is tuned. Each entry is checked to the address/CIDR character set
+before it is spliced, so a malformed one is at worst a query error naming it,
+never an injection; an entry outside the character set dies naming it.
+
+    local_networks_frag( 'me.src_ip', [ '192.0.2.0/24' ] );
+    # "me.src_ip <<= any (array['192.0.2.0/24'::inet])"
 
 =head2 clamped_int( $value, $default, $min, $max )
 
@@ -293,6 +313,30 @@ sub column_exists {
 	);
 	return $found ? 1 : 0;
 }
+
+# What 'inside your own networks' means when the caller names none: the ranges
+# that cannot appear on the public internet. Deliberately not the whole of
+# Lilith::Shodan::is_private_ip's list, whose documentation and benchmarking
+# ranges are non-routable without being anyone's inside.
+my @DEFAULT_LOCAL_NETWORKS = qw(
+	10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 127.0.0.0/8 169.254.0.0/16
+	100.64.0.0/10 fc00::/7 fe80::/10 ::1/128
+);
+
+sub local_networks_frag {
+	my ( $column, $networks ) = @_;
+
+	$networks = \@DEFAULT_LOCAL_NETWORKS unless ref $networks eq 'ARRAY' && @{$networks};
+
+	my @literals;
+	for my $network ( @{$networks} ) {
+		die( '"' . ( defined $network ? $network : '' ) . '" in local_networks is not an address or CIDR' . "\n" )
+			unless defined $network && $network =~ m{\A[0-9a-fA-F:.]+(?:/[0-9]{1,3})?\z};
+		push( @literals, "'" . $network . "'::inet" );
+	}
+
+	return $column . ' <<= any (array[' . join( ', ', @literals ) . '])';
+} ## end sub local_networks_frag
 
 sub clamped_int {
 	my ( $value, $default, $min, $max ) = @_;

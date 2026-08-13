@@ -122,6 +122,12 @@ sub index {
 				target           => _param_list( $self, 'target' ),
 				username         => _param_list( $self, 'username' ),
 
+				# which side of the deployment's own networks each end sits
+				# on; the CIDR list itself is the config's, not the request's
+				src_locality   => _param_list( $self, 'src_locality' ),
+				dest_locality  => _param_list( $self, 'dest_locality' ),
+				local_networks => $self->local_networks,
+
 				# what the Shodan cache says about the alert's ends, and the
 				# ids the rule names -- the enrichment filters
 				shodan_src_tag    => _param_list( $self, 'shodan_src_tag' ),

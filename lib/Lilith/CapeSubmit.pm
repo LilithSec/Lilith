@@ -9,7 +9,6 @@ use LWP::UserAgent        ();
 use HTTP::Request::Common qw( POST );
 use JSON                  qw( encode_json );
 use Sys::Hostname         qw( hostname );
-use Lilith::ConfigUtil    qw( to_bool );
 
 =head1 NAME
 
@@ -92,7 +91,7 @@ sub new {
 	my ( $class, %opts ) = @_;
 
 	my $self = {
-		enabled => to_bool( $opts{enabled} ),
+		enabled => ( $opts{enabled} ? 1 : 0 ),
 		slug    => ( defined( $opts{slug} ) && $opts{slug} ne '' ) ? $opts{slug}    : 'lilith',
 		servers => ( ref( $opts{servers} ) eq 'HASH' )             ? $opts{servers} : {},
 		timeout => defined( $opts{timeout} )                       ? $opts{timeout} : 30,
@@ -163,7 +162,7 @@ sub submit {
 	# only send an API key when the server is configured to need one, and refuse
 	# to submit if it needs one but none is set rather than silently sending none
 	my $apikey = '';
-	if ( to_bool( $server->{apikey_needed} ) ) {
+	if ( $server->{apikey_needed} ) {
 		$apikey = $server->{apikey};
 		die( 'cape server "' . $server_name . '" needs an API key but none is set' . "\n" )
 			unless defined($apikey) && $apikey ne '';

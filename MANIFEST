@@ -48,7 +48,6 @@ lib/Lilith/CLI/Command/Search.pm
 lib/Lilith/CLI/Command/ShodanCache.pm
 lib/Lilith/Allani.pm
 lib/Lilith/CapeSubmit.pm
-lib/Lilith/ConfigUtil.pm
 lib/Lilith/CVEDB.pm
 lib/Lilith/DBUtil.pm
 lib/Lilith/Escalate.pm

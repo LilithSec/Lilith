@@ -1,16 +1,15 @@
 package Lilith::Web;
 
 use Mojo::Base 'Mojolicious';
-use Mojo::File         qw(curfile);
-use TOML               qw(from_toml);
-use File::Slurp        qw(read_file);
-use File::Temp         ();
-use Mojo::IOLoop       ();
-use Mojo::JSON         ();
-use Lilith             ();
-use Lilith::Shodan     ();
-use Lilith::CVEDB      ();
-use Lilith::ConfigUtil ();
+use Mojo::File     qw(curfile);
+use TOML::Tiny     qw(from_toml);
+use File::Slurp    qw(read_file);
+use File::Temp     ();
+use Mojo::IOLoop   ();
+use Mojo::JSON     ();
+use Lilith         ();
+use Lilith::Shodan ();
+use Lilith::CVEDB  ();
 
 # When run from a checkout, share/ lives three directories up from
 # lib/Lilith/Web.pm and takes priority so an installed copy of the dist
@@ -458,10 +457,9 @@ sub startup {
 	);
 
 	# Whether host lookups ask for every banner ever crawled rather than only
-	# the current ones (see Lilith::Shodan::fetch). TOML::from_toml hands
-	# booleans back as the strings 'true'/'false' -- both truthy -- so it is
-	# coerced the same way cape_enable is.
-	my $shodan_history = Lilith::ConfigUtil::to_bool( $toml->{shodan_history} );
+	# the current ones (see Lilith::Shodan::fetch). Normalized to 1/0 so the
+	# helper hands out a plain number rather than the parser's boolean object.
+	my $shodan_history = $toml->{shodan_history} ? 1 : 0;
 	$self->helper( shodan_history => sub { $shodan_history } );
 
 	# Which tier the configured key selects, and so which rows of the cache may
@@ -624,6 +622,26 @@ sub startup {
 			return \%matches;
 		}
 	);
+
+	# The deployment's own networks, for the dashboard's src/dest_locality
+	# dimensions: an address inside any of these counts as Internal. Optional;
+	# with none configured Lilith::Stats falls back to the unroutable ranges,
+	# so the dimension is useful before it is tuned. An entry outside the
+	# address/CIDR character set is dropped with a warning rather than taking
+	# every dashboard query down with it.
+	my @local_networks;
+	if ( ref $toml->{local_networks} eq 'ARRAY' ) {
+		for my $network ( @{ $toml->{local_networks} } ) {
+			if ( defined $network && !ref $network && $network =~ m{\A[0-9a-fA-F:.]+(?:/[0-9]{1,3})?\z} ) {
+				push( @local_networks, $network );
+			} else {
+				$self->log->warn( 'local_networks entry "'
+						. ( defined $network && !ref $network ? $network : '' )
+						. '" is not an address or CIDR; ignored' );
+			}
+		}
+	} ## end if ( ref $toml->{local_networks} eq 'ARRAY')
+	$self->helper( local_networks => sub { \@local_networks } );
 
 	# GeoIP / MMDB lookups.  Each database type has its own config key pointing
 	# at a MaxMind DB file; when a key is omitted the standard filename under the
@@ -884,10 +902,9 @@ sub startup {
 	}
 	my $cape_slug = ( defined $toml->{cape_slug} && $toml->{cape_slug} ne '' ) ? $toml->{cape_slug} : 'lilith';
 
-	# cape_enable comes from TOML, whose parser yields the bare strings
-	# 'true'/'false' -- both truthy in Perl -- so coerce it properly rather than
-	# with a bare truth test (a plain ? : would leave 'false' enabled).
-	my $cape_enabled = Lilith::ConfigUtil::to_bool( $toml->{cape_enable} );
+	# normalized to 1/0 so the helpers hand out a plain number rather than the
+	# parser's boolean object
+	my $cape_enabled = $toml->{cape_enable} ? 1 : 0;
 	$self->helper( cape_servers        => sub { \%cape_servers } );
 	$self->helper( cape_slug           => sub { $cape_slug } );
 	$self->helper( cape_submit_enabled => sub { ( $cape_enabled && scalar keys %cape_servers ) ? 1 : 0 } );

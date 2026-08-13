@@ -625,6 +625,54 @@ sub column_exists {
 		'shodan_dest_cve_match unmatched lists the rule whose CVE the host does not carry'
 	);
 
+	# the locality filters run the same membership test the dashboard
+	# dimensions do, against a real inet column
+	is_deeply(
+		[
+			map { $_->{event_id} } @{
+				$lilith->search(
+					table           => 'suricata',
+					go_back_minutes => 60,
+					cve             => 'CVE-2021-44228',
+					dest_locality   => 'internal',
+					local_networks  => ['198.51.100.0/24'],
+				)
+			}
+		],
+		['cve1'],
+		'dest_locality internal matches a destination inside a configured CIDR'
+	);
+	is_deeply(
+		[
+			map { $_->{event_id} } @{
+				$lilith->search(
+					table           => 'suricata',
+					go_back_minutes => 60,
+					cve             => 'CVE-2021-44228',
+					dest_locality   => 'internal',
+					local_networks  => ['203.0.113.0/24'],
+				)
+			}
+		],
+		[],
+		'and misses one outside it'
+	);
+	is_deeply(
+		[
+			map { $_->{event_id} } @{
+				$lilith->search(
+					table           => 'suricata',
+					go_back_minutes => 60,
+					cve             => 'CVE-2021-44228',
+					src_locality    => 'external',
+					local_networks  => ['198.51.100.0/24'],
+				)
+			}
+		],
+		['cve1'],
+		'src_locality external matches the source outside the list'
+	);
+
 	# DeploymentHandler downgrades toward the schema's own version; see phase 3.
 	{
 		no warnings qw(redefine once);

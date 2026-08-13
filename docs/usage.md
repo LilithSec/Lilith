@@ -116,6 +116,7 @@ never matches a positive filter.
 | `--shodan_src_cvss` / `--shodan_dest_cvss` | the worst CVSS of that end's CVEs (CVEDB standing in where the keyless tier sent no scores); takes `<`, `<=`, `>`, `>=` |
 | `--cve` | a CVE id the rule names (Suricata). Normalized before matching, so `cve_2021_44228` finds what `CVE-2021-44228` does |
 | `--shodan_src_cve_match` / `--shodan_dest_cve_match` | where the rule's CVEs and that end's cached ones stand against each other (Suricata): `matched` (the rule names a CVE that end is vulnerable to), `unmatched`, `no-cve`, or `unchecked` — the same four buckets as the dashboard dimensions of the same names |
+| `--src_locality` / `--dest_locality` | which side of the config's [`local_networks`](configuration.md#the-web-frontend) that end sits on: `internal` or `external` (with none configured, the private/unroutable ranges). Every table, no cache needed; an alert naming no address on that end matches neither |
 
 ```shell
 # alerts from tor exits or hosts Shodan tags compromised, last day
@@ -129,6 +130,9 @@ lilith search --cve CVE-2021-44228
 
 # exploits thrown at destinations actually vulnerable to them
 lilith search --shodan_dest_cve_match matched
+
+# alerts where one of your own machines is the source
+lilith search --src_locality internal
 ```
 
 ### event

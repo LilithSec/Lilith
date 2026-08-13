@@ -83,6 +83,8 @@ sub opt_spec {
 			'shodan_dest_cve_match=s@',
 			'rule CVEs against the destination cache: matched, unmatched, no-cve, or unchecked'
 		],
+		[ 'src_locality=s@',  'which side of local_networks the source sits on: internal or external' ],
+		[ 'dest_locality=s@', 'which side of local_networks the destination sits on: internal or external' ],
 	);
 } ## end sub opt_spec
 
@@ -128,19 +130,26 @@ sub execute {
 		push( @class, $class_like_value );
 	}
 
-	# The shodan/cve filters may be given multiple times and/or comma
+	# The shodan/cve/locality filters may be given multiple times and/or comma
 	# separated, the same as class. Only the ones actually used go into the
 	# search, so a blank one adds nothing.
 	my %enrich_filter;
 	foreach my $enrich_name (
 		qw( shodan_src_tag shodan_dest_tag shodan_src_known
 		shodan_dest_known shodan_src_cvss shodan_dest_cvss cve
-		shodan_src_cve_match shodan_dest_cve_match )
+		shodan_src_cve_match shodan_dest_cve_match
+		src_locality dest_locality )
 		)
 	{
 		my @values = split( /\s*,\s*/, join( ',', @{ $opt->{$enrich_name} // [] } ) );
 		$enrich_filter{$enrich_name} = \@values if @values;
-	}
+	} ## end foreach my $enrich_name ( qw( shodan_src_tag shodan_dest_tag shodan_src_known...))
+
+	# what the locality filters judge against -- the config's networks, the
+	# same list the dashboard dimensions read
+	my $toml = $self->config;
+	$enrich_filter{local_networks} = $toml->{local_networks}
+		if ref $toml->{local_networks} eq 'ARRAY' && @{ $toml->{local_networks} };
 
 	#
 	# run the search

@@ -21,8 +21,7 @@ package Lilith::CLI::Command::ShodanCache;
 use strict;
 use warnings;
 use parent 'Lilith::CLI::Command';
-use Lilith::Shodan     ();
-use Lilith::ConfigUtil ();
+use Lilith::Shodan ();
 
 sub command_names { 'shodan_cache' }
 
@@ -81,9 +80,8 @@ sub execute {
 	my $api_key = defined $toml->{shodan_api_key} ? $toml->{shodan_api_key} : '';
 	my $source  = Lilith::Shodan::source($api_key);
 
-	# See Lilith::Shodan::fetch for what history costs and buys. Coerced like
-	# cape_enable, since TOML booleans arrive as the strings 'true'/'false'.
-	my $history = Lilith::ConfigUtil::to_bool( $toml->{shodan_history} );
+	# See Lilith::Shodan::fetch for what history costs and buys.
+	my $history = $toml->{shodan_history} ? 1 : 0;
 
 	my @tables = grep { $_ ne '' } split( /\s*,\s*/, defined( $opt->{tables} ) ? $opt->{tables} : '' );
 

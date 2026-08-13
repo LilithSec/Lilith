@@ -36,13 +36,6 @@
   document.querySelectorAll('#wm-metric option[value^="shodan_"]').forEach(function(option) {
     SHODAN_METRIC[option.value] = option.textContent.trim();
   });
-  // The coverage pair may also ride a timeseries widget -- coverage over
-  // time, has the cache timer been keeping up. Picked from the Group by list
-  // and saved as config.metric.
-  var SHODAN_TS_METRIC = {
-    shodan_src_coverage:  SHODAN_METRIC.shodan_src_coverage,
-    shodan_dest_coverage: SHODAN_METRIC.shodan_dest_coverage
-  };
 
   // Built-in dashboard presets the Reset menu offers. Each is a list of ordinary
   // widgets, so anything seeded can still be reconfigured, moved, or removed. An
@@ -143,8 +136,6 @@
     // note the table only when the widget pins one different from the board's
     var suffix = widget.config.table ? (' · ' + widgetTable) : '';
     if (widget.type === 'timeseries') {
-      var coverage = SHODAN_TS_METRIC[widget.config.metric];
-      if (coverage) { return coverage + ' over time' + suffix; }
       return (measure || 'Alerts') + ' over time' + (widget.config.group_by ? ' (by ' + widget.config.group_by + ')' : '') + suffix;
     }
     if (widget.type === 'top')       { return 'Top ' + (widget.config.column || '') + (measure ? ' by ' + measure : '') + suffix; }
@@ -298,7 +289,7 @@
         .catch(function(error) { showNote(widget, error.message); });
     } else if (widget.type === 'timeseries') {
       var unit = resolveBucket(widget);
-      getJSON(base + '/timeseries' + qsFor(widgetTable, { bucket: unit, group_by: widget.config.group_by, top_groups: 6, measure: widget.config.measure, metric: widget.config.metric }))
+      getJSON(base + '/timeseries' + qsFor(widgetTable, { bucket: unit, group_by: widget.config.group_by, top_groups: 6, measure: widget.config.measure }))
         .then(function(data) {
           // log timeseries buckets are ISO strings; the renderer wants epoch seconds
           if (isLogSource(widgetTable)) { (data.rows || []).forEach(function(row) { row.bucket = Math.floor(new Date(row.bucket).getTime() / 1000); }); }
@@ -427,22 +418,11 @@
         var columnOption = document.createElement('option'); columnOption.value = column; columnOption.textContent = column; columnSelect.appendChild(columnOption);
         var groupOption = document.createElement('option'); groupOption.value = column; groupOption.textContent = column; groupSelect.appendChild(groupOption);
       });
-      // the coverage series ride the Group by list too, but only where the
-      // enrichment exists at all -- the alert tables, not the Allani logs
-      if (!isLogSource(table)) {
-        var covGroup = document.createElement('optgroup'); covGroup.label = 'Shodan';
-        Object.keys(SHODAN_TS_METRIC).forEach(function(metric) {
-          var covOption = document.createElement('option');
-          covOption.value = metric; covOption.textContent = SHODAN_TS_METRIC[metric];
-          covGroup.appendChild(covOption);
-        });
-        groupSelect.appendChild(covGroup);
-      }
       measures.forEach(function(measure) {
         var option = document.createElement('option'); option.value = measure.name; option.textContent = measure.label; measureSelect.appendChild(option);
       });
       if (widget && (widget.type === 'top' || widget.type === 'stat')) { columnSelect.value = widget.config.column || ''; }
-      if (widget && widget.type === 'timeseries') { groupSelect.value = widget.config.metric || widget.config.group_by || ''; }
+      if (widget && widget.type === 'timeseries') { groupSelect.value = widget.config.group_by || ''; }
       document.getElementById('wm-style').value = (widget && widget.config.style) ? widget.config.style : 'bar';
       document.getElementById('wm-limit').value = (widget && widget.config.limit) ? widget.config.limit : 10;
       measureSelect.value = (widget && widget.config.measure) ? widget.config.measure : 'count';
@@ -480,12 +460,10 @@
     }
     if (type === 'timeseries') {
       var group = document.getElementById('wm-group').value;
-      // a coverage entry is a metric, not a column to group by
-      if (SHODAN_TS_METRIC[group]) { config.metric = group; }
-      else if (group) { config.group_by = group; }
+      if (group) { config.group_by = group; }
       var bucket = document.getElementById('wm-bucket').value; if (bucket) { config.bucket = bucket; }
     }
-    if ((type === 'top' || type === 'timeseries') && measure && measure !== 'count' && !config.metric) { config.measure = measure; }
+    if ((type === 'top' || type === 'timeseries') && measure && measure !== 'count') { config.measure = measure; }
     if (type === 'stat') {
       var metric = document.getElementById('wm-metric').value;
       config.metric = metric;

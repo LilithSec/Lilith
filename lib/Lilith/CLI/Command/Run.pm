@@ -18,7 +18,7 @@ use strict;
 use warnings;
 use parent 'Lilith::CLI::Command';
 use Lilith::CLI::Util      qw( eve_instances );
-use TOML                   qw( to_toml );
+use TOML::Tiny             qw( to_toml );
 use Sys::Syslog            qw( openlog syslog );
 use Net::Server::Daemonize qw( daemonize );
 

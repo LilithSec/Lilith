@@ -45,8 +45,10 @@ comes back as a 400 rather than reaching SQL.
 # relative window, and the filter pairs to spread into every Lilith::Stats
 # call. The filter carries exclude_classification unless GPCD was asked for,
 # plus start and/or end when an absolute range was given (Stats prefers those
-# over the relative window). Bad values are replaced with the defaults rather
-# than refused, since this also serves the page shell.
+# over the relative window), plus the config-derived values the dynamic
+# dimensions read: the Shodan ttl/source for freshness (and the coverage
+# tile), and local_networks for locality. Bad values are replaced with the
+# defaults rather than refused, since this also serves the page shell.
 #
 #     my ( $table, $mins, @filter ) = $self->_params;
 #     $stats->total( table => $table, go_back_minutes => $mins, @filter );
@@ -72,6 +74,17 @@ sub _params {
 		my $val = $self->param($bound);
 		push( @filter, ( $bound => $val ) ) if defined $val && $val ne '';
 	}
+
+	# What the dynamic dimensions mean here is the config's business, not the
+	# request's: the freshness rule is the one the reads elsewhere apply, and
+	# Internal is this deployment's networks. Stats ignores these where they do
+	# not apply.
+	push(
+		@filter,
+		ttl            => $self->shodan_cache_ttl,
+		source         => $self->shodan_source,
+		local_networks => $self->local_networks,
+	);
 
 	return ( $table, $mins, @filter );
 } ## end sub _params
@@ -232,14 +245,11 @@ sub stat {
 			if ( $metric =~ /\Ashodan_(src|dest)_(coverage|staleness)\z/ ) {
 				my ( $side, $half ) = ( $1, $2 );
 
-				# The freshness rule is the config's, not this page's: an answer
-				# counts as held only while the reads elsewhere would still use it.
+				# the freshness rule (ttl/source) rides in with @filter
 				my $cov = $stats->shodan_coverage(
 					table           => $table,
 					go_back_minutes => $mins,
 					side            => $side,
-					ttl             => $self->shodan_cache_ttl,
-					source          => $self->shodan_source,
 					@filter,
 				);
 				my $end = ( $side eq 'src' ) ? 'sources' : 'destinations';
@@ -312,11 +322,12 @@ C<GET /api/dashboard/timeseries?bucket=&group_by=&top_groups=> -- alert counts
 bucketed over time, optionally split by a column. Returns
 C<< { grouped => 0|1, rows => [ ... ] } >>.
 
-With C<metric=shodan_src_coverage> or C<metric=shodan_dest_coverage> the widget
-becomes the coverage stat over time instead: per bucket, that end's distinct
-addresses split into C<Enriched> / C<Stale> / C<Not looked up> -- has the
-C<lilith shodan_cache> timer been keeping up. Same row shape, so the same
-chart renders it.
+Grouping by C<shodan_src_freshness> / C<shodan_dest_freshness> with the
+matching distinct-IP measure charts the coverage stat over time: per bucket,
+that end's distinct addresses split into C<Enriched> / C<Stale> /
+C<Not looked up> -- has the C<lilith shodan_cache> timer been keeping up. An
+ordinary grouped query; the freshness rule rides in from the config via
+C<_params>.
 
 =cut
 
@@ -327,28 +338,11 @@ sub timeseries {
 	my $group_by   = $self->param('group_by');
 	my $top_groups = $self->param('top_groups');
 	my $measure    = $self->param('measure');
-	my $metric     = $self->param('metric');
 
 	my $grouped = ( defined $group_by && $group_by ne '' ) ? 1 : 0;
 
 	return $self->_json(
 		sub {
-			if ( defined $metric && $metric =~ /\Ashodan_(src|dest)_coverage\z/ ) {
-				my $side = $1;
-
-				# the freshness rule is the config's, the same as the stat tile
-				my $rows = $self->lilith->stats->shodan_coverage_series(
-					table           => $table,
-					go_back_minutes => $mins,
-					side            => $side,
-					ttl             => $self->shodan_cache_ttl,
-					source          => $self->shodan_source,
-					( defined $bucket && $bucket ne '' ? ( bucket => $bucket ) : () ),
-					@filter,
-				);
-				return { grouped => 1, rows => $rows };
-			} ## end if ( defined $metric && $metric =~ /\Ashodan_(src|dest)_coverage\z/)
-
 			my $rows = $self->lilith->stats->timeseries(
 				table           => $table,
 				go_back_minutes => $mins,

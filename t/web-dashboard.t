@@ -230,11 +230,14 @@ SKIP: {
 		->status_is( 200, 'columns ok' )
 		->json_has( '/columns', 'columns returns a list' );
 	my %cols = map { $_ => 1 } @{ $t->tx->res->json->{columns} };
-	ok( $cols{shodan_src_tag}  && $cols{shodan_src_known},  'the picker is offered the enrichment columns' );
-	ok( $cols{shodan_dest_tag} && $cols{shodan_dest_known}, 'for both ends' );
+	ok( $cols{shodan_src_tag}       && $cols{shodan_src_known},      'the picker is offered the enrichment columns' );
+	ok( $cols{shodan_dest_tag}      && $cols{shodan_dest_known},     'for both ends' );
+	ok( $cols{shodan_src_freshness} && $cols{shodan_dest_freshness}, 'the freshness pair is offered' );
+	ok( $cols{src_locality}         && $cols{dest_locality},         'the locality pair is offered' );
 	$t->get_ok('/api/dashboard/columns?table=cape')->status_is( 200, 'cape columns ok' );
 	my %ccols = map { $_ => 1 } @{ $t->tx->res->json->{columns} };
 	ok( !$ccols{shodan_src_tag} && !$ccols{shodan_dest_tag}, 'cape is offered none of them' );
+	ok( $ccols{src_locality},                                'but locality needs no enrichment, so cape has it' );
 
 	$t->get_ok('/api/dashboard/stat?table=suricata&metric=shodan_src_coverage')
 		->status_is( 200, 'stat shodan_src_coverage ok' )
@@ -282,17 +285,25 @@ SKIP: {
 		->json_is( '/rows/0/count', 2,                 'with its alerts' )
 		->json_is( '/rows/1/value', 'Not looked up',   'the rest fall in their own bucket' );
 
-	# The coverage stat as a timeseries: per bucket, that end's distinct
-	# addresses split into Enriched / Stale / Not looked up -- whether the
-	# cache timer has been keeping up, not just where it stands. Everything
-	# above landed in one bucket: the held source enriched, the other two
-	# never looked up.
-	$t->get_ok('/api/dashboard/timeseries?table=suricata&metric=shodan_src_coverage&bucket=day')
-		->status_is( 200, 'coverage timeseries ok' )
-		->json_is( '/grouped', 1, 'the coverage series is grouped' );
+	# The coverage stat as a timeseries: the freshness dimension with the
+	# distinct-IP measure splits each bucket's distinct addresses into
+	# Enriched / Stale / Not looked up -- whether the cache timer has been
+	# keeping up, not just where it stands. Everything above landed in one
+	# bucket: the held source enriched, the other two never looked up.
+	$t->get_ok(
+		'/api/dashboard/timeseries?table=suricata&group_by=shodan_src_freshness&measure=distinct_src_ip&bucket=day')
+		->status_is( 200, 'freshness timeseries ok' )
+		->json_is( '/grouped', 1, 'the freshness series is grouped' );
 	my %series_group = map { $_->{group} => $_->{count} } @{ $t->tx->res->json->{rows} };
 	is( $series_group{'Enriched'},      1, 'the held source counts as enriched in its bucket' );
 	is( $series_group{'Not looked up'}, 2, 'the never-looked-up sources land in their own series' );
+
+	# Locality, on the alert's own addresses: none of these documentation-range
+	# sources sits inside the default local networks.
+	$t->get_ok('/api/dashboard/top?table=suricata&column=src_locality')
+		->status_is( 200, 'top src_locality ok' )
+		->json_is( '/rows/0/value', 'External', 'sources outside the local networks read External' )
+		->json_is( '/rows/0/count', 4,          'every non-GPCD alert lands there' );
 
 	# Layout persistence: the seeded default board is empty; a POST is stored and
 	# read back (exercises Lilith::dashboard_get/save and the version-6 table).

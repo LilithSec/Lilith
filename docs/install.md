@@ -11,7 +11,7 @@ Declared in `Makefile.PL`; the load bearing ones are below.
 | `DBI`, `DBD::Pg`                        | talking to PostgreSQL                          |
 | `DBIx::Class`, `DBIx::Class::Migration` | the schema and its versioned migrations        |
 | `Mojolicious` (>= 9.0)                  | the `mojo_lilith` frontend                      |
-| `JSON`, `TOML`                          | EVE decoding and the config file               |
+| `JSON`, `TOML::Tiny`                    | EVE decoding and the config file               |
 | `Rule::Engine`                          | evaluating auto escalation rules               |
 | `Text::ANSITable`, `Term::ANSIColor`    | the CLI's table output                         |
 | `Mail::SPF`, `Mail::DMARC`, `Mail::DKIM`| the web UI's mail checks under Domain Info     |
@@ -55,7 +55,7 @@ make install
 pkg install p5-App-cpanminus p5-App-Cmd p5-DBI p5-DBIx-Class p5-DBD-Pg \
     p5-Digest-SHA p5-File-Slurp p5-JSON p5-MIME-Base64 p5-Mojolicious \
     p5-Net-Server p5-POE p5-Sys-Syslog p5-Term-ANSIColor p5-Text-ANSITable \
-    p5-Time-Piece p5-TOML
+    p5-Time-Piece p5-TOML-Tiny
 cpanm Lilith
 ```
 
@@ -65,7 +65,7 @@ cpanm Lilith
 apt-get install cpanminus zlib1g-dev libapp-cmd-perl libdbi-perl \
     libdbix-class-perl libdbd-pg-perl libdigest-sha-perl libfile-slurp-perl \
     libjson-perl libmojolicious-perl libnet-server-perl libpoe-perl \
-    libtoml-perl
+    libtoml-tiny-perl
 cpanm Lilith
 ```
 
