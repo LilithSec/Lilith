@@ -128,6 +128,7 @@ Revision history for Lilith
 		 - Factor the EVE field extraction out of the run() POE closure
 		   into a testable parse_eve(), with %Lilith::alert_columns as
 		   the shared source of truth for each table's column order.
+		 - replace TOML with TOML::Tiny
 
 3.0.0	2026-06-25/01:00
 		 - use DBIx::Class::Migration
