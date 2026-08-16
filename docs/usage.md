@@ -66,6 +66,7 @@ General options:
 | `--order <clm>`   | Column to sort by. Default `timestamp` (`stop` for cape). |
 | `--orderdir <dir>`| `ASC` or `DSC`. Default `ASC`.                          |
 | `--limit <int>` / `--offset <int>` | Paging.                                |
+| `--bucket`        | Baphomet only: compress rows sharing an instance, signature, and subjects to the newest of them, with a `count` column of how many each stands for. |
 
 Most filters share a small grammar: an **integer** option takes a comma
 separated list, each item negatable with a `!` prefix (and the complex ones
@@ -101,6 +102,12 @@ And for the `cape` table:
 | `--target`   | the detonation target                 |
 | `--task`     | the task ID of the run                |
 | `--subip` / `--subhost` | the IP / host it was submitted from |
+
+And for the `baphomet` table:
+
+| switch       | matches                              |
+|--------------|---------------------------------------|
+| `--subjects` | the subject vars as JSON, matched structurally against the record's `subject_vars` (key order and number formatting do not matter); `none` matches records carrying no subject vars |
 
 Suricata, Sagan, and Baphomet searches can also filter on what the
 [Shodan cache](configuration.md#shodan) holds for the alert's ends — the same

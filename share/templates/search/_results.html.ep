@@ -133,6 +133,11 @@
           <th>ID</th><th>Timestamp</th><th>Instance</th><th class="col-host" style="display:none">Host</th>
           <th>Event</th><th>Src IP</th><th>Sport</th><th>Dst IP</th><th>Dport</th><th>User</th><th>Subjects</th>
           <th>Severity</th><th>Class</th><th>Signature</th>
+          % # bucketed searches compress each (instance, signature, subjects)
+          % # group to its newest row; Count is how many that row stands for
+          % if ($bucket) {
+          <th>Count</th>
+          % }
         </tr>
       </thead>
       <tbody>
@@ -154,6 +159,24 @@
             <%= $self->lilith->get_short_class($row->{classification}) %>
           </td>
           <td><% if (my $signature = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $signature %>"><%= $signature %></a><% } %></td>
+          % # The count links to the bucket's contents: the same search,
+          % # unbucketed, narrowed to this row's instance/signature/subjects
+          % # (subjects_key, the exact key the bucket was grouped on). Every
+          % # other filter and the window carry over, so the rows shown are
+          % # the rows counted. search=1 keeps the controller from re-adding
+          % # the fresh-form GPCD exclusion, and offset/partial are dropped
+          % # for the same reasons the chips drop them.
+          % if ($bucket) {
+          <td class="bucket-count"><a href="<%= url_with->query({
+               search    => 1,
+               bucket    => undef,
+               offset    => undef,
+               partial   => undef,
+               instance  => $row->{instance},
+               signature => $row->{signature},
+               subjects  => $row->{subjects_key},
+             }) %>" title="show the events this row stands for"><%= $row->{bucket_count} // '' %></a></td>
+          % }
         </tr>
         % }
       </tbody>

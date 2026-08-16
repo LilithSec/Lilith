@@ -159,6 +159,84 @@ sub _make_app {
 }
 
 # ---------------------------------------------------------------------------
+# 2b-ii.  Baphomet bucketing: the checkbox submits bucket=1, which reaches
+#         Lilith::search, and the Count column renders only when bucketed.
+# ---------------------------------------------------------------------------
+
+{
+	my ( $fh, $cf ) = tempfile( SUFFIX => '.toml', UNLINK => 1 );
+	print $fh "dsn = \"dbi:Pg:dbname=test\"\n";
+	close $fh;
+
+	local $ENV{LILITH_CONFIG} = $cf;
+	my $t = Test::Mojo->new('Lilith::Web');
+
+	my %captured;
+	no warnings qw(redefine once);
+	local *Lilith::search = sub {
+		my ( $self, %opts ) = @_;
+		%captured = %opts;
+		return [
+			{
+				id           => 9,
+				timestamp    => 't',
+				instance     => 'i1',
+				host         => 'gate1',
+				event_type   => 'sighting',
+				signature    => 'R1',
+				raw          => '{"subject_vars":{"SRC":"1.2.3.4"}}',
+				bucket_count => 7,
+			}
+		];
+	};
+	use warnings qw(redefine once);
+
+	# the checkbox is part of the form, shown for baphomet only (the same
+	# data-tables mechanism as the per-table filters), and off by default;
+	# the subjects filter is a baphomet-only field the drill-down lands on
+	$t->get_ok('/search?search=1&table=baphomet')
+		->status_is( 200, 'unbucketed baphomet search renders 200' )
+		->element_exists( '.search-filter-field[data-tables="baphomet"] input#bucket-check[name="bucket"]',
+		'the bucket checkbox is a baphomet-only form control' )
+		->element_exists( 'input#bucket-check:not([checked])', 'the checkbox is off by default' )
+		->element_exists_not( 'td.bucket-count', 'no Count column without bucket' )
+		->element_exists( '.search-filter-field[data-tables="baphomet"] select[name="subjects"][multiple]',
+		'subjects is a baphomet-only filter field' );
+	is( $captured{bucket}, 0, 'without the checkbox, search() is told not to bucket' );
+
+	$t->get_ok('/search?search=1&table=baphomet&bucket=1')
+		->status_is( 200, 'bucketed baphomet search renders 200' )
+		->element_exists( 'input#bucket-check[checked]', 'the checkbox round-trips checked' )
+		->text_is( 'td.bucket-count a', 7, 'the Count column shows how many rows the survivor stands for' );
+	is( $captured{bucket}, 1, 'bucket=1 reaches search()' );
+
+	# the count links to the bucket's contents: same search, unbucketed,
+	# narrowed to the row's instance/signature/subjects
+	my $drill = Mojo::URL->new( $t->tx->res->dom->at('td.bucket-count a')->attr('href') );
+	is( $drill->query->param('bucket'),    undef,               'the drill-down link drops bucket' );
+	is( $drill->query->param('instance'),  'i1',                'and pins the instance' );
+	is( $drill->query->param('signature'), 'R1',                'and the signature' );
+	is( $drill->query->param('subjects'),  '{"SRC":"1.2.3.4"}', 'and the exact subjects key' );
+	is( $drill->query->param('search'),    1,                   'and stays a submitted search' );
+
+	# a record with no subject_vars drills by the 'none' sentinel (its bucket
+	# key is SQL NULL, which no equality would find)
+	{
+		no warnings qw(redefine once);
+		local *Lilith::search = sub { return [ { id => 9, timestamp => 't', raw => '{}', bucket_count => 2 } ] };
+		use warnings qw(redefine once);
+		$t->get_ok('/search?search=1&table=baphomet&bucket=1');
+		my $bare = Mojo::URL->new( $t->tx->res->dom->at('td.bucket-count a')->attr('href') );
+		is( $bare->query->param('subjects'), 'none', 'a subject-less bucket drills by the none sentinel' );
+	}
+
+	# the landed-on drill-down search hands the subjects filter to search()
+	$t->get_ok('/search?search=1&table=baphomet&subjects=%7B%22SRC%22%3A%221.2.3.4%22%7D')
+		->status_is( 200, 'a subjects-filtered search renders 200' );
+	is_deeply( $captured{subjects}, ['{"SRC":"1.2.3.4"}'], 'the subjects filter reaches search()' );
+}
+
+# ---------------------------------------------------------------------------
 # 2c.  Text filters take several values — one query parameter per value, so a
 #      chip can drop one value and leave the rest of the filter alone
 # ---------------------------------------------------------------------------

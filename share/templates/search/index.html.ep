@@ -95,6 +95,9 @@
 %           { name => 'rev',       label => 'Rev' },
 %           { name => 'event_id',  label => 'Event ID', width => 3 },
 %           { name => 'username',  label => 'User', tables => 'baphomet', suggest => 1 },
+%           # the subject vars as JSON, matched structurally ('none' for
+%           # records with none) -- what a bucket's Count link drills in by
+%           { name => 'subjects',  label => 'Subjects', tables => 'baphomet', width => 3 },
 %       ],
 %   },
 %   {   heading => 'Shodan',
@@ -204,6 +207,20 @@
           <div class="form-check mt-1">
             <input class="form-check-input" type="checkbox" id="show-host-col">
             <label class="form-check-label small" for="show-host-col">Host</label>
+          </div>
+        </div>
+
+        % # Unlike the view toggles beside it this is part of the query: it
+        % # submits bucket=1, which Lilith::search honors for baphomet and
+        % # ignores elsewhere -- so it can stay checked across a table switch
+        % # without erroring, the same way the per-table filters linger.
+        <div class="col-auto search-filter-field" data-tables="baphomet">
+          <label class="form-label d-block">&nbsp;</label>
+          <div class="form-check mt-1">
+            <input class="form-check-input" type="checkbox" name="bucket" value="1" id="bucket-check"
+                   <%= param('bucket') ? 'checked' : '' %>>
+            <label class="form-check-label small" for="bucket-check"
+                   title="Compress rows sharing an instance, signature, and subjects down to the newest, with a count">Bucket</label>
           </div>
         </div>
 

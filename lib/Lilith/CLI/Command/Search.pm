@@ -30,41 +30,46 @@ sub opt_spec {
 	return (
 		[ 't=s', 'table to operate on', { default => 'suricata' } ],
 		$class->output_opt_spec,
-		[ 'm=s',                  'how far back to search, in minutes' ],
-		[ 'order=s',              'column to sort by' ],
-		[ 'orderdir=s',           'sort direction, ASC or DESC' ],
-		[ 'limit=s',              'row limit' ],
-		[ 'offset=s',             'row offset' ],
-		[ 'columns=s',            'comma separated list of columns' ],
-		[ 'columnset=s',          'named column set', { default => 'default' } ],
-		[ 'si=s',                 'source IP' ],
-		[ 'di=s',                 'destination IP' ],
-		[ 'ip=s',                 'IP, either source or destination' ],
-		[ 'sp=s@',                'source port' ],
-		[ 'dp=s@',                'destination port' ],
-		[ 'p=s',                  'port, either source or destination' ],
-		[ 'host=s',               'host' ],
-		[ 'ih=s',                 'instance host' ],
-		[ 'i=s',                  'instance' ],
-		[ 'c=s@',                 'classification' ],
-		[ 'class_not|cN=s@',      'classification to exclude; appended to the class list with a leading !' ],
-		[ 'class_like|cl=s@',     'classification to match using like; wrapped in % unless the value contains one' ],
-		[ 's=s',                  'signature' ],
-		[ 'if=s',                 'in interface' ],
-		[ 'proto=s',              'proto' ],
-		[ 'ap=s',                 'app proto' ],
-		[ 'gid=s@',               'GID' ],
-		[ 'sid=s@',               'SID' ],
-		[ 'rev=s@',               'rev' ],
-		[ 'subip=s',              'the IP the sample was submitted from' ],
-		[ 'subhost=s',            'the host the sample was submitted from' ],
-		[ 'slug=s',               'the slug it was submitted with' ],
-		[ 'pkg=s',                'the detonation package used with CAPEv2' ],
-		[ 'malscore=s@',          'the malscore of the sample' ],
-		[ 'size=s@',              'the size of the sample' ],
-		[ 'target=s',             'the detonation target' ],
-		[ 'task=s@',              'the task ID of the run' ],
-		[ 'user=s',               'the username the line was about' ],
+		[ 'm=s',         'how far back to search, in minutes' ],
+		[ 'order=s',     'column to sort by' ],
+		[ 'orderdir=s',  'sort direction, ASC or DESC' ],
+		[ 'limit=s',     'row limit' ],
+		[ 'offset=s',    'row offset' ],
+		[ 'bucket',      'baphomet only: compress rows sharing an instance, signature, and subjects to the newest' ],
+		[ 'columns=s',   'comma separated list of columns' ],
+		[ 'columnset=s', 'named column set', { default => 'default' } ],
+		[ 'si=s',             'source IP' ],
+		[ 'di=s',             'destination IP' ],
+		[ 'ip=s',             'IP, either source or destination' ],
+		[ 'sp=s@',            'source port' ],
+		[ 'dp=s@',            'destination port' ],
+		[ 'p=s',              'port, either source or destination' ],
+		[ 'host=s',           'host' ],
+		[ 'ih=s',             'instance host' ],
+		[ 'i=s',              'instance' ],
+		[ 'c=s@',             'classification' ],
+		[ 'class_not|cN=s@',  'classification to exclude; appended to the class list with a leading !' ],
+		[ 'class_like|cl=s@', 'classification to match using like; wrapped in % unless the value contains one' ],
+		[ 's=s',              'signature' ],
+		[ 'if=s',             'in interface' ],
+		[ 'proto=s',          'proto' ],
+		[ 'ap=s',             'app proto' ],
+		[ 'gid=s@',           'GID' ],
+		[ 'sid=s@',           'SID' ],
+		[ 'rev=s@',           'rev' ],
+		[ 'subip=s',          'the IP the sample was submitted from' ],
+		[ 'subhost=s',        'the host the sample was submitted from' ],
+		[ 'slug=s',           'the slug it was submitted with' ],
+		[ 'pkg=s',            'the detonation package used with CAPEv2' ],
+		[ 'malscore=s@',      'the malscore of the sample' ],
+		[ 'size=s@',          'the size of the sample' ],
+		[ 'target=s',         'the detonation target' ],
+		[ 'task=s@',          'the task ID of the run' ],
+		[ 'user=s',           'the username the line was about' ],
+		[
+			'subjects=s@',
+			"subject vars as JSON, matched structurally; 'none' matches records with none (baphomet)"
+		],
 		[ 'shodan_src_tag=s@',    'Shodan tag on the source' ],
 		[ 'shodan_dest_tag=s@',   'Shodan tag on the destination' ],
 		[ 'shodan_src_known=s@',  'Shodan cache state for the source: known, unknown, or unchecked' ],
@@ -152,6 +157,11 @@ sub execute {
 	#
 	my $returned = $lilith->search(
 		%enrich_filter,
+
+		# baphomet only; Lilith::search ignores it elsewhere, like a filter
+		# naming a column the table lacks
+		bucket => $opt->{bucket},
+
 		src_ip           => $opt->{si},
 		src_port         => $opt->{sp} // [],
 		dest_ip          => $opt->{di},
@@ -184,6 +194,7 @@ sub execute {
 		target           => $opt->{target},
 		task             => $opt->{task} // [],
 		username         => $opt->{user},
+		subjects         => $opt->{subjects} // [],
 	);
 
 	#
@@ -230,6 +241,11 @@ sub execute {
 				);
 				$columns = $column_sets{$table}{$column_set}
 					// die( '"' . $column_set . '" is not a known column set' );
+
+				# a bucketed search compresses each (instance, signature,
+				# subjects) group to its newest row; show how many each stands
+				# for, as the web Count column does
+				$columns .= ',bucket_count' if $opt->{bucket} && $table eq 'baphomet';
 			} ## end if ( !defined($columns) )
 
 			# friendly column names; a column not listed here is headed by its own
@@ -246,6 +262,7 @@ sub execute {
 				'classification'      => 'class',
 				'event_id'            => 'event',
 				'username'            => 'user',
+				'bucket_count'        => 'count',
 			};
 
 			#

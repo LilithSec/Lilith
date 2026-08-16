@@ -45,6 +45,7 @@ sub index {
 	my $offset          = $self->param('offset')          // 0;
 	my $order_dir       = $self->param('order_dir')       // 'DESC';
 	my $order_by        = $self->param('order_by')        // '';
+	my $bucket          = $self->param('bucket') ? 1 : 0;
 
 	# Sanitize
 	$table     = 'suricata' unless $self->valid_alert_table($table);
@@ -91,7 +92,12 @@ sub index {
 
 		eval {
 			$results = $self->lilith->search(
-				table            => $table,
+				table => $table,
+
+				# baphomet only; Lilith::search ignores it elsewhere, so a
+				# checked box surviving a table switch does not error
+				bucket => $bucket,
+
 				go_back_minutes  => $go_back_minutes,
 				start            => $self->param('start') || undef,
 				end              => $self->param('end')   || undef,
@@ -108,6 +114,7 @@ sub index {
 				instance         => _param_list( $self, 'instance' ),
 				class            => \@class,
 				signature        => _param_list( $self, 'signature' ),
+				subjects         => _param_list( $self, 'subjects' ),
 				app_proto        => _param_list( $self, 'app_proto' ),
 				proto            => _param_list( $self, 'proto' ),
 				in_iface         => _param_list( $self, 'in_iface' ),
@@ -162,8 +169,19 @@ sub index {
 		foreach my $row (@$results) {
 			my $decoded = eval { Mojo::JSON::from_json( $row->{raw} ) };
 			$row->{subjects} = $self->baphomet_subjects($decoded);
-		}
-	}
+
+			# What the Count cell's drill-down link filters subjects by: the
+			# raw subject_vars re-encoded as JSON, which jsonb equality reads
+			# as exactly the key the bucket was grouped on, or 'none' for a
+			# record carrying no subject_vars (whose key is SQL NULL).
+			if ($bucket) {
+				$row->{subjects_key}
+					= ( ref $decoded eq 'HASH' && exists $decoded->{subject_vars} )
+					? Mojo::JSON::to_json( $decoded->{subject_vars} )
+					: 'none';
+			}
+		} ## end foreach my $row (@$results)
+	} ## end if ( $table eq 'baphomet' && ref $results ...)
 
 	# Escalation counts for badging escalated events, read straight off each
 	# row's escalations array (maintained by Lilith::escalate), so no extra
@@ -195,6 +213,7 @@ sub index {
 
 		error           => $error,
 		table           => $table,
+		bucket          => $bucket,
 		go_back_minutes => $go_back_minutes,
 		order_by        => $order_by,
 		order_dir       => $order_dir,

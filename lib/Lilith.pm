@@ -1635,6 +1635,36 @@ like any other filter naming a column the table lacks):
     shodan_src_cve_match  => 'matched',
     shodan_dest_cve_match => 'matched',
 
+Next is the subjects filter, for baphomet only (elsewhere it is ignored, like
+a filter naming a column the table lacks):
+
+    - subjects :: the record's subject vars as JSON, matched against
+      C<< raw->'subject_vars' >> as jsonb -- so key order and number
+      formatting do not matter, and the match is exactly the bucket key
+      bucketing groups by. The value 'none' matches records with no
+      subject_vars at all. Takes a single value or an array ref of several,
+      ORed. A value that is neither 'none' nor JSON dies.
+
+    # everything Baphomet judged about this address
+    subjects => '{"SRC":"192.0.2.10"}',
+
+    # the subject-less records
+    subjects => 'none',
+
+Last is bucketing, for baphomet only (elsewhere it is ignored, like a filter
+naming a column the table lacks):
+
+    - bucket :: If true, rows sharing an instance, signature, and subject vars
+      (the raw record's subject_vars -- values only, so the accumulating
+      scores do not split a bucket) are compressed to the newest of them,
+      which carries how many it stands for as an extra bucket_count key.
+      Every other option composes unchanged, with order_by/limit/offset
+      applying to the surviving rows, and bucket_count covering the whole
+      searched window rather than the returned page.
+
+    # one row per (instance, signature, subjects), newest last event first
+    bucket => 1, order_by => 'timestamp', order_dir => 'DESC',
+
 =cut
 
 # Validate and normalize a search start/end time to a canonical
@@ -2139,6 +2169,34 @@ sub search {
 		}
 	}
 
+	# subjects, as the POD above lays out: the record's subject vars as JSON,
+	# matched against raw->'subject_vars' as jsonb -- structural equality, so
+	# key order and number formatting do not matter and the match is exactly
+	# the key bucketing partitions by (which is what makes a bucket's count
+	# clickable). 'none' matches records with no subject_vars at all, whose
+	# key is SQL NULL and would never match an equality. Values are checked
+	# to be JSON here so a typo dies with the reason rather than a DB error.
+	if ( defined( $opts{subjects} ) && $opts{table} eq 'baphomet' ) {
+		my @subject_values = _filter_values( $opts{subjects} );
+
+		my @subject_clauses;
+		foreach my $value (@subject_values) {
+			if ( $value eq 'none' ) {
+				push( @subject_clauses, \"raw->'subject_vars' is null" );
+			} else {
+				die( '"' . $value . '" for subjects is neither JSON nor \'none\'' )
+					unless eval { JSON->new->allow_nonref->decode($value); 1 };
+				push( @subject_clauses, \[ "raw->'subject_vars' = ?::jsonb", $value ] );
+			}
+		}
+
+		if (@subject_clauses) {
+			$search->{'-and'} = [] if !defined( $search->{'-and'} );
+			push( @{ $search->{'-and'} },
+				( @subject_clauses > 1 ) ? { '-or' => \@subject_clauses } : @subject_clauses );
+		}
+	} ## end if ( defined( $opts{subjects} ) && $opts{table...})
+
 	# src_locality / dest_locality, as the POD above lays out: which side of
 	# the deployment's own networks the end sits on, per the caller's
 	# local_networks list (with none, the unroutable ranges -- see
@@ -2397,6 +2455,44 @@ sub search {
 	);
 	$result_attrs{rows}   = $opts{limit}  if defined $opts{limit};
 	$result_attrs{offset} = $opts{offset} if defined $opts{offset};
+
+	# Bucketing, as the POD lays out: compress rows sharing an instance,
+	# signature, and subject vars down to the newest of them. The key's third
+	# leg is the raw record's subject_vars (jsonb equality) rather than
+	# subject_vars_scores, whose accumulating scores would split every bucket
+	# back into single rows. Window functions cannot sit in a WHERE, so the
+	# filtered query becomes a subselect that numbers each bucket's rows newest
+	# first and counts them, and the outer query keeps the number-one rows --
+	# meaning ordering and limit/offset page the buckets, and bucket_count
+	# covers the whole searched window rather than the returned page.
+	if ( $opts{bucket} && $opts{table} eq 'baphomet' ) {
+		my $partition = "partition by instance, signature, (raw->'subject_vars')";
+		my $bucketed  = $schema->resultset($table)->search(
+			$search,
+			{
+				# the AS aliases are real SQL, not just DBIC inflation names:
+				# the outer query reads both columns off the subselect by name
+				'+select' => [
+					\"row_number() over ($partition order by timestamp DESC, id DESC) AS bucket_rn",
+					\"count(*) over ($partition) AS bucket_count",
+				],
+				'+as' => [ 'bucket_rn', 'bucket_count' ],
+			}
+		);
+
+		my @fetch_results = $schema->resultset($table)->search(
+			\'bucket_rn = 1',
+			{
+				alias     => 'me',
+				from      => [ { me => $bucketed->as_query } ],
+				'+select' => ['bucket_count'],
+				'+as'     => ['bucket_count'],
+				%result_attrs,
+			}
+		)->all;
+
+		return \@fetch_results;
+	} ## end if ( $opts{bucket} && $opts{table} eq 'baphomet')
 
 	my @fetch_results = $schema->resultset($table)->search( $search, \%result_attrs )->all;
 
