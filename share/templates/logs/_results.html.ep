@@ -1,11 +1,19 @@
 % # Results fragment — shared by the full logs page and the partial (auto-refresh)
-% # render. Expects $result ({ source, headers, rows }), $offset, $limit in the stash.
+% # render. Expects $result ({ source, headers, rows }), $source_filters, $offset,
+% # and $limit in the stash.
 % my $headers = $result->{headers} || [];
 % my $rows    = $result->{rows}    || [];
 % my $count   = scalar @$rows;
 % # The free-text columns, which wrap rather than run the table off the screen.
 % # .log-wrap in lilith.css hands them the width the other columns did not take.
 % my %wrap_col = map { $_ => 1 } qw( message detail request );
+% # Which filter a column's cells click into, where header and filter names
+% # differ (the interleaved view's client column is the client_ip filter, and
+% # http_error's level is loglevel). A header absent here filters as itself. A
+% # cell is only clickable when the selected source actually accepts the filter
+% # ($source_filters, from the reader) — so e.g. http_all's mixed status column,
+% # whose filter its halves do not share, stays plain text.
+% my %header_filter = ( client => 'client_ip', level => 'loglevel' );
 <div id="log-results">
   %= include 'partials/_results_pager', count => $count, noun => 'row', offset => $offset, limit => $limit
 
@@ -23,11 +31,14 @@
         % for my $row (@$rows) {
         <tr>
           % for my $h (@$headers) {
+            % my $filter = $header_filter{$h} // $h;
             % if ($h eq 'id') {
               % my $src = $row->{source} // $result->{source};
           <td><a href="/logs/<%= $src %>/<%= $row->{id} %>" class="event-link"><%= $row->{id} %></a></td>
             % } elsif ($wrap_col{$h}) {
           <td class="log-wrap"><%= defined $row->{$h} ? $row->{$h} : '' %></td>
+            % } elsif ($source_filters->{$filter} && defined $row->{$h} && $row->{$h} ne '') {
+          <td><a href="#" class="log-filter-cell" data-filter="<%= $filter %>" data-value="<%= $row->{$h} %>"><%= $row->{$h} %></a></td>
             % } else {
           <td><%= defined $row->{$h} ? $row->{$h} : '' %></td>
             % }

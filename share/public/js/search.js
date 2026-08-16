@@ -6,16 +6,17 @@
  * Markup contract: the table <select> is #table-sel, and every filter field
  * that only applies to some tables carries class .search-filter-field with a
  * data-tables list of the tables it belongs to. Fields that do not match the
- * selected table get .filter-hidden. A text filter is a .search-token-field
- * <select multiple>, and one whose dropdown offers the values that occur names
- * its column in data-column.
+ * selected table get .filter-hidden. A text filter is a .token-filter-field
+ * <select multiple> (upgraded by the shared token-fields.js module), and one
+ * whose dropdown offers the values that occur names its column in data-column.
  *
  * The sortable columns per table are not kept here: the page publishes them as
  * window.LilithSearch.orderByColumns (from the server's order_by_columns
  * helper), so this cannot drift from what Lilith::search accepts.
  * window.LilithSearch.orderBy is the column the current results are sorted by.
  *
- * Requires lilith-util.js, lilith-table.js, and auto-refresh.js.
+ * Requires lilith-util.js, lilith-table.js, token-fields.js, and
+ * auto-refresh.js.
  */
 (function () {
 // The sortable columns per table, from the order_by_columns helper, which
@@ -40,10 +41,7 @@ function syncOrderBy() {
 
 // What /api/search/values is asked for a field: the column named in its
 // data-column, on the selected table, over the window the search itself runs
-// with -- so what is offered describes the rows the page is showing. Returned
-// as a query string, which doubles as the cache key for what a field last
-// loaded: change the table or the window and it no longer matches, so the next
-// focus fetches again.
+// with -- so what is offered describes the rows the page is showing.
 function valueSuggestionQuery(selectEl) {
   var params = new URLSearchParams();
   params.set('table',  document.getElementById('table-sel').value);
@@ -58,40 +56,10 @@ function valueSuggestionQuery(selectEl) {
   return params.toString();
 }
 
-// Fetch a field's values and hand them to Tom Select. A column the selected
-// table cannot be grouped by answers 400, and an unreachable database answers
-// 400 as well; either way the field is left as the free text one it already
-// is, since a filter that cannot suggest is not a filter that cannot be typed.
-function fetchValueSuggestions(selectEl, callback) {
-  fetch('/api/search/values?' + selectEl.dataset.suggestQuery)
-    .then(function(response) { return response.ok ? response.json() : { values: [] }; })
-    .then(function(data) {
-      callback((data.values || []).map(function(row) {
-        return { value: String(row.value), text: String(row.value), count: row.count };
-      }));
-    })
-    .catch(function() { callback([]); });
-}
-
-// Load a field's values if what it holds is not already the right list. Called
-// on focus, so a field is only ever fetched for once it is used, and the table
-// or window having changed since is what makes it fetch again. clearOptions
-// keeps the values currently selected, so refetching never drops a chip.
-function loadValueSuggestions(selectEl) {
-  if (!selectEl.dataset.column || !selectEl.tomselect) { return; }
-
-  var query = valueSuggestionQuery(selectEl);
-  if (selectEl.dataset.suggestQuery === query) { return; }
-  selectEl.dataset.suggestQuery = query;
-
-  selectEl.tomselect.clearOptions();
-  selectEl.tomselect.load('');
-}
-
 // Upgrade the filter panel's multi-selects into type-to-filter fields with a
-// removable chip per value. Two kinds, differing only in where their values
-// come from: the classification pickers choose from a fixed list, while the
-// text filters (.search-token-field) take whatever is typed.
+// removable chip per value. The text filters are the shared token fields
+// (token-fields.js); the classification pickers, which choose from a fixed
+// list rather than taking what is typed, are this page's own.
 //
 // This is enhancement only: Tom Select keeps the original <select multiple> as
 // the form control and just drives it, so the page submits the same one
@@ -100,70 +68,20 @@ function loadValueSuggestions(selectEl) {
 // dropping values rather than adding them -- which is why nothing else here
 // depends on TomSelect being defined.
 function initFilterPickers() {
+  LilithTokenFields.init({
+    valuesUrl:   '/api/search/values',
+    valuesQuery: valueSuggestionQuery
+  });
+
   if (!window.TomSelect) { return; }
 
-  document.querySelectorAll('#filter-panel select[multiple]:not(.search-token-field)').forEach(function(selectEl) {
+  document.querySelectorAll('#filter-panel select[multiple]:not(.token-filter-field)').forEach(function(selectEl) {
     new TomSelect(selectEl, {
       plugins:     ['remove_button'],
       placeholder: 'type to filter…',
       // there are more classifications than Tom Select's default cap of 50, and
       // a silently truncated dropdown is worse than a scrolling one
       maxOptions:  null
-    });
-  });
-
-  document.querySelectorAll('#filter-panel select.search-token-field').forEach(function(selectEl) {
-    // A field whose vocabulary is fixed (data-fixed, e.g. the shodan known
-    // states) offers exactly its markup options: free typing is off, since
-    // anything outside the set would die or match nothing.
-    var fixedField = selectEl.dataset.fixed === '1';
-    new TomSelect(selectEl, {
-      plugins:     ['remove_button'],
-      placeholder: 'any',
-      create:      !fixedField,
-      // per-option data riding along in the markup, e.g. a fixed value's gloss
-      dataAttr:    'data-data',
-      // The dropdown offers the values that actually occur (see
-      // loadValueSuggestions), which is a fetch on focus rather than one per
-      // keystroke: the whole list arrives at once and Tom Select filters it
-      // here. shouldLoad therefore refuses the per-keystroke load Tom Select
-      // would otherwise do.
-      shouldLoad: function() { return false; },
-      load:       function(query, callback) { fetchValueSuggestions(selectEl, callback); },
-      onFocus:    function() { loadValueSuggestions(selectEl); },
-      // the fetched values arrive most common first, which is the order to
-      // show them in when nothing has been typed to rank them by; a fixed
-      // field keeps its markup order, which is written meaningful-first
-      sortField:  fixedField ? [ { field: '$order' } ] : [ { field: '$score' }, { field: '$order' } ],
-      // a column with more values than the dropdown's default cap is exactly
-      // one worth scrolling rather than silently truncating
-      maxOptions: null,
-      render: {
-        option: function(data) {
-          var row = document.createElement('div');
-          row.textContent = data.text;
-          // the annotation beside a value: how often it occurs (suggested
-          // values) or what it means (fixed ones)
-          var note = data.count !== undefined ? data.count : data.desc;
-          if (note !== undefined) {
-            var noteEl = document.createElement('span');
-            noteEl.className   = 'text-muted small ms-2';
-            noteEl.textContent = note;
-            row.appendChild(noteEl);
-          }
-          return row;
-        }
-      },
-      // a value typed but not entered would otherwise be dropped on the floor
-      // when the search is submitted, silently running a different search than
-      // the one on screen
-      createOnBlur: true,
-      // comma is how these fields took several values before they were tokens,
-      // and how a pasted list is written
-      delimiter:   ',',
-      // a removed value should leave the dropdown with it rather than hang
-      // around as a suggestion
-      persist:     false
     });
   });
 
@@ -202,33 +120,14 @@ var VIEW_TOGGLES = [
   { checkboxId: 'show-shodan',   storageKey: 'showShodanBadges', defaultOn: true,  selector: '#search-results .shodan-badges' }
 ];
 
-// Make a filter field hold one value and nothing else. The fields are token
-// fields, so what a click-to-filter cell wants is a replacement rather than an
-// addition: clicking a second instance would otherwise widen the search to both
-// rather than narrow it to the one clicked. Handles the field either as Tom
-// Select left it or as the plain <select multiple> it is without Tom Select.
-function setFilterValue(fieldEl, value) {
-  if (fieldEl.tomselect) {
-    fieldEl.tomselect.clear(true);
-    fieldEl.tomselect.addOption({ value: value, text: value });
-    fieldEl.tomselect.addItem(value, true);
-    return;
-  }
-
-  fieldEl.innerHTML = '';
-  var option = document.createElement('option');
-  option.value = value;
-  option.textContent = value;
-  option.selected = true;
-  fieldEl.appendChild(option);
-}
-
-// Bind a class of clickable result cells to a filter field + submit.
+// Bind a class of clickable result cells to a filter field + submit. Clicking
+// replaces the field's values with the clicked one (LilithTokenFields.setValue)
+// rather than adding to them, so the search narrows to what was clicked.
 function bindFilter(selector, inputId, dataKey) {
   document.querySelectorAll(selector).forEach(function(el) {
     el.addEventListener('click', function(event) {
       event.preventDefault();
-      setFilterValue(document.getElementById(inputId), this.dataset[dataKey]);
+      LilithTokenFields.setValue(document.getElementById(inputId), this.dataset[dataKey]);
       document.getElementById('search-form').submit();
     });
   });

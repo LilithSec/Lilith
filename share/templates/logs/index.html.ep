@@ -1,19 +1,30 @@
 % layout 'default';
 % title 'Logs';
 
+% # Tom Select styles the token filter fields, as on /search. Loaded through the
+% # layout's head block so the stylesheet lands in <head> rather than mid-body.
+% content_for head => begin
+  <link href="/vendor/tom-select-2.6.2/css/tom-select.bootstrap5.min.css" rel="stylesheet">
+% end
+
 % # Filter fields, each tagged with the sources it applies to. The JS below shows
-% # only those matching the selected source, mirroring the search page's cape toggle.
+% # only those matching the selected source, mirroring the search page's per-table
+% # toggle. 'suggest' marks a field whose dropdown offers the values that occur,
+% # fetched from /api/logs/values when it is focused -- set where the column is
+% # one the source can be grouped by (a source that cannot answers 400 and the
+% # field simply stays free text). message is a substring match, so a list of
+% # exact values would say nothing.
 % my @filter_fields = (
-%   { name => 'host',      label => 'Host(s)',    sources => 'syslog http http_error http_all', placeholder => 'space-separated; % wildcard' },
-%   { name => 'program',   label => 'Program(s)', sources => 'syslog', placeholder => 'space-separated; % wildcard' },
-%   { name => 'facility',  label => 'Facility',  sources => 'syslog' },
-%   { name => 'priority',  label => 'Priority',  sources => 'syslog' },
-%   { name => 'vhost',     label => 'VHost(s)',   sources => 'http http_error http_all', placeholder => 'space-separated' },
-%   { name => 'client_ip', label => 'Client IP', sources => 'http http_error http_all' },
-%   { name => 'method',    label => 'Method',    sources => 'http' },
-%   { name => 'status',    label => 'Status',    sources => 'http' },
-%   { name => 'loglevel',  label => 'Log Level', sources => 'http_error' },
-%   { name => 'code',      label => 'Code',      sources => 'http_error' },
+%   { name => 'host',      label => 'Host(s)',    sources => 'syslog http http_error http_all', suggest => 1 },
+%   { name => 'program',   label => 'Program(s)', sources => 'syslog', suggest => 1 },
+%   { name => 'facility',  label => 'Facility',  sources => 'syslog', suggest => 1 },
+%   { name => 'priority',  label => 'Priority',  sources => 'syslog', suggest => 1 },
+%   { name => 'vhost',     label => 'VHost(s)',   sources => 'http http_error http_all', suggest => 1 },
+%   { name => 'client_ip', label => 'Client IP', sources => 'http http_error http_all', suggest => 1 },
+%   { name => 'method',    label => 'Method',    sources => 'http', suggest => 1 },
+%   { name => 'status',    label => 'Status',    sources => 'http', suggest => 1 },
+%   { name => 'loglevel',  label => 'Log Level', sources => 'http_error', suggest => 1 },
+%   { name => 'code',      label => 'Code',      sources => 'http_error', suggest => 1 },
 %   { name => 'message',   label => 'Message (substring)', sources => 'syslog http_all' },
 % );
 % my $show_filters = grep { my $value = param($_->{name}); defined($value) && $value ne '' } @filter_fields;
@@ -97,14 +108,29 @@
 
   <div class="collapse <%= $show_filters ? 'show' : '' %>" id="logs-filter-panel">
     <div class="card mb-2 border-secondary">
+      <div class="card-header py-1 small text-muted">
+        Filters — every field takes more than one value (type and press enter or comma), several values match any of them. <code>%</code> for LIKE on host/program; message is a substring match.
+      </div>
       <div class="card-body py-2">
         <div class="row g-2">
+          % # Each field is a <select multiple> holding one option per value in
+          % # force, which the shared /js/token-fields.js turns into a
+          % # type-to-add token field -- one query parameter per value, so each
+          % # gets its own chip above the results. The id convention (name,
+          % # underscores to hyphens, '-input' appended) is what the
+          % # click-to-filter cells in the results resolve their field by.
           % for my $field (@filter_fields) {
+          %   ( my $field_id = $field->{name} ) =~ s/_/-/g;
+          %   $field_id .= '-input';
+          %   my @in_force = grep { defined($_) && $_ ne '' } @{ $self->every_param( $field->{name} ) };
           <div class="col-md-2 log-filter-field" data-sources="<%= $field->{sources} %>">
-            <label class="form-label"><%= $field->{label} %></label>
-            <input type="text" name="<%= $field->{name} %>" class="form-control form-control-sm"
-                   placeholder="<%= $field->{placeholder} // '' %>"
-                   value="<%= param($field->{name}) // '' %>">
+            <label class="form-label" for="<%= $field_id %>"><%= $field->{label} %></label>
+            <select name="<%= $field->{name} %>" id="<%= $field_id %>" class="form-select form-select-sm token-filter-field" multiple
+                    <%== $field->{suggest} ? 'data-column="' . $field->{name} . '"' : '' %>>
+              % for my $value (@in_force) {
+              <option value="<%= $value %>" selected><%= $value %></option>
+              % }
+            </select>
           </div>
           % }
         </div>
@@ -132,4 +158,6 @@
 
 <script src="/js/time-range.js"></script>
 <script src="/js/auto-refresh.js"></script>
+<script src="/vendor/tom-select-2.6.2/js/tom-select.complete.min.js"></script>
+<script src="/js/token-fields.js"></script>
 <script src="/js/logs.js"></script>

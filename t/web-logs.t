@@ -81,17 +81,33 @@ sub _app {
 		->element_exists( 'div#log-results',                            'results container present' )
 		->element_exists( 'a[href="/logs/syslog/1"]',                   'result row links to the record view' )
 		->element_exists( 'div.time-range select[data-role="preset"]',  'uses the reusable time-range control' )
-		->element_exists( 'script[src="/js/time-range.js"]',            'loads the shared time-range script' );
+		->element_exists( 'script[src="/js/time-range.js"]',            'loads the shared time-range script' )
+		->element_exists( 'script[src="/js/token-fields.js"]',          'loads the shared token-fields script' )
+		->element_exists( 'select#host-input.token-filter-field[multiple][data-column="host"]',
+		'a filter is a multi-valued token field offering its occurring values' )
+		->element_exists( 'select#message-input.token-filter-field[multiple]:not([data-column])',
+		'the substring message filter offers no value list' );
 
 	# an unknown source is sanitized back to syslog
 	$t->get_ok('/logs?source=bogus')->status_is( 200, 'unknown source is sanitized' );
 	is( $search_opts{source}, 'syslog', 'unknown source falls back to syslog' );
 
-	# only source-valid filters are forwarded to the reader
-	$t->get_ok('/logs?source=syslog&host=db1&message=boom&vhost=nope');
-	is( $search_opts{filters}{host},    'db1',  'host filter forwarded' );
-	is( $search_opts{filters}{message}, 'boom', 'message filter forwarded' );
+	# only source-valid filters are forwarded to the reader, each as the list of
+	# every value submitted for it
+	$t->get_ok('/logs?source=syslog&host=db1&host=db2&message=boom&vhost=nope')
+		->element_exists( 'select#host-input option[value="db1"][selected]', 'a value in force round-trips' )
+		->element_exists( 'select#host-input option[value="db2"][selected]', 'every value in force round-trips' );
+	is_deeply( $search_opts{filters}{host},    [qw( db1 db2 )], 'host filter forwarded with every value' );
+	is_deeply( $search_opts{filters}{message}, ['boom'],        'message filter forwarded' );
 	ok( !exists $search_opts{filters}{vhost}, 'a filter not valid for the source is dropped' );
+
+	# a result cell whose column can be filtered on is a click-to-filter link;
+	# the free-text message column is not
+	$t->get_ok('/logs?source=syslog')
+		->element_exists( 'a.log-filter-cell[data-filter="host"][data-value="db1"]',
+		'a filterable column renders click-to-filter cells' )
+		->element_exists_not( 'a.log-filter-cell[data-filter="message"]',
+		'the free-text message column has no click-to-filter cell' );
 
 	# time-anchored view: around/window flow through to the reader, and the page
 	# shows the anchor badge with a clear link instead of the minutes-back field.
@@ -244,6 +260,15 @@ sub _app {
 		->status_is(200)
 		->json_is( '/value', 1234,         'log stat total value' )
 		->json_is( '/label', 'Total rows', 'log stat total label' );
+
+	# the filter-field value suggestions (fetched when a field is focused)
+	$t->get_ok('/api/logs/values?source=syslog&column=program')
+		->status_is(200)
+		->json_is( '/source',          'syslog',  'values reports the source' )
+		->json_is( '/column',          'program', 'values reports the column' )
+		->json_is( '/values/0/value',  'sshd',    'values lists the occurring values' )
+		->json_is( '/values/0/count',  10,        'each value carries its count' );
+	is( $top_opts{limit}, 200, 'the suggestion list is capped' );
 }
 
 # without [allani]: the log aggregation API is gated off (a 400 rather than
@@ -251,6 +276,8 @@ sub _app {
 {
 	my $t = _app();
 	$t->get_ok('/api/logs/stat?source=syslog&metric=total')->status_is( 400, 'log API is 400 without Allani' );
+	$t->get_ok('/api/logs/values?source=syslog&column=program')
+		->status_is( 400, 'values API is 400 without Allani' );
 }
 
 done_testing();

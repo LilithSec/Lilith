@@ -174,8 +174,8 @@ sub _make_app {
 	# every text filter is a token field rather than a plain text input, which
 	# is what makes the browser submit one parameter per value
 	$t->get_ok('/search')
-		->element_exists( 'select[name="instance"][multiple].search-token-field',  'instance is a token field' )
-		->element_exists( 'select[name="signature"][multiple].search-token-field', 'signature is a token field' )
+		->element_exists( 'select[name="instance"][multiple].token-filter-field',  'instance is a token field' )
+		->element_exists( 'select[name="signature"][multiple].token-filter-field', 'signature is a token field' )
 		->element_exists_not( 'input[name="instance"]', 'instance is no longer a plain text input' );
 
 	# both values round trip into the field

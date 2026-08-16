@@ -20,7 +20,7 @@ Lilith::Allani - Read-only reader for an Allani log store, for the web UI.
     my $out = $reader->search(
         source          => 'syslog',
         go_back_minutes => 1440,
-        filters         => { host => 'db1', message => 'error' },
+        filters         => { host => [ 'db1', 'db2' ], message => 'error' },
         limit           => 100,
     );
     # $out = { source => 'syslog', headers => [...], rows => [ {...}, ... ] }
@@ -35,8 +35,6 @@ without going through Lilith's own alert schema.
 The per-source definitions (tables, timestamp columns, exact-match filter
 columns, and the display columns) are B<not> duplicated here: they are reused
 from C<Allani::Sources>, so Allani must be installed for the C</logs> page to work.
-The only query this module authors itself is C<http_all>, the interleaved view
-of C<http_access> and C<http_error>.
 
 =cut
 
@@ -56,14 +54,8 @@ my %SOURCE = map { $_->{key} => $_ } @SOURCES;
 my @HTTP_ALL_HEADERS = qw( source id time host client vhost status detail message );
 my %HTTP_ALL_FILTER  = map { $_ => 1 } qw( host vhost client_ip message );
 
-# Filter columns that accept several whitespace-separated values on /logs,
-# matched as an OR of per-value predicates -- the same per-value rule build_where
-# applies to a single value, just spread over each token.
-my %MULTI = map { $_ => 1 } qw( host program vhost );
-
-# Of those, the columns Allani::Sources treats as LIKEABLE: a token carrying a %
-# wildcard is matched with LIKE for these, and =, wildcard taken literally, for
-# the rest -- mirroring build_where's single-value behavior per column.
+# The columns Allani::Sources treats as LIKEABLE: a value carrying a % wildcard
+# is matched with LIKE for these, and =, wildcard taken literally, for the rest.
 my %LIKEABLE = map { $_ => 1 } qw( host program );
 
 # What a top/timeseries panel may aggregate beyond counting rows, per underlying
@@ -163,18 +155,19 @@ sub filters {
         order_dir       => 'DESC',
         limit           => 100,
         offset          => 0,
-        filters         => { host => 'db1', message => 'timeout' },
+        filters         => { host => [ 'db1', 'db2' ], message => 'timeout' },
     );
 
 Runs one windowed query and returns
 C<< { source => ..., headers => [...], rows => [ {header=>value,...}, ... ] } >>.
-Column names and the WHERE come from C<Allani::Sources>; every value is bound.
+Column names and the accepted filter set come from C<Allani::Sources>; every
+value is bound.
 
-The C<host>, C<program> and C<vhost> filters each accept several
-whitespace-separated values and match any of them. For C<host> and C<program> a
-token carrying a C<%> wildcard is matched with LIKE (a plain token with C<=>);
-C<vhost> matches every token with C<=> (its C<%> is literal). The other filters
-are single exact matches.
+Each filter takes a single value or an array ref of several, matched as any of
+them. For C<host> and C<program> a value carrying a C<%> wildcard is matched
+with LIKE (a plain value with C<=>); the other columns match with C<=>, C<%>
+taken literally. C<message> is a substring (ILIKE) match, only accepted where
+the source has message text to match it against (C<syslog> and C<http_all>).
 
 The time window is, in precedence: an explicit absolute range (C<start> and/or
 C<end> timestamps); an event-anchored window (C<around> a timestamp, within
@@ -204,37 +197,37 @@ sub search {
 		or die( '"' . $entry->{src} . "\" is unknown to Allani::Sources\n" );
 	my $tscol = $self->_ts_col($meta);
 
-	# host and program each accept several whitespace-separated values; pull those
-	# out and match them ourselves (an OR of per-value = / LIKE), leaving
-	# build_where to handle the remaining single-value filters unchanged.
-	my %single = %$filt;
-	my ( @multi_where, @multi_binds );
-	for my $col ( grep { $MULTI{$_} && $meta->{eq}{$_} } sort keys %single ) {
-		my ( $frag, @vbinds ) = $self->_multi_clause( $col, delete $single{$col} );
+	# One clause per filter, each an any-of group over its values. 'message' is
+	# the substring match on the raw MESSAGE field (which only syslog populates);
+	# everything else must be one of the source's exact-match columns. The time
+	# window (now-relative, or anchored around an event) appends its binds last,
+	# so clause order and bind order stay aligned.
+	my ( @where, @binds );
+	for my $col ( sort keys %$filt ) {
+		my ( $frag, @vbinds );
+		if ( $col eq 'message' ) {
+			die( "\"message\" is not a valid filter for " . $key . "\n" ) unless $key eq 'syslog';
+			( $frag, @vbinds ) = $self->_ilike_clause( "raw->>'MESSAGE'", $filt->{$col} );
+		} else {
+			die( '"' . $col . '" is not a valid filter for ' . $key . "\n" ) unless $meta->{eq}{$col};
+			( $frag, @vbinds ) = $self->_multi_clause( $col, $filt->{$col} );
+		}
 		next unless defined $frag;
-		push( @multi_where, $frag );
-		push( @multi_binds, @vbinds );
-	}
+		push( @where, $frag );
+		push( @binds, @vbinds );
+	} ## end for my $col ( sort keys %$filt )
 
-	# Reuse Allani's column/filter definitions for the WHERE (via an accessor shim)
-	# and the selected columns; we fetch positionally and zip against its headers.
-	# The multi-value clauses follow build_where's, then the time window
-	# (now-relative, or anchored around an event) appends its own binds last, so
-	# clause order and bind order stay aligned.
-	my ( $where, $binds ) = Allani::Sources::build_where( $meta, Lilith::Allani::_Opt->new(%single) );
-	push( @$where, @multi_where );
-	push( @$binds, @multi_binds );
-	my $tclause = $self->_time_clause( $tscol, \%opts, $binds );
+	my $tclause = $self->_time_clause( $tscol, \%opts, \@binds );
 	my ( $select, $headers ) = Allani::Sources::select_and_headers( $meta, $tscol, 0, 1 );
 
 	my $sql
 		= "SELECT $select FROM "
 		. $meta->{table}
 		. ' WHERE '
-		. join( ' AND ', @$where, $tclause )
+		. join( ' AND ', @where, $tclause )
 		. " ORDER BY id $dir LIMIT ? OFFSET ?";
 
-	my $rows = $self->_run( $sql, [ @$binds, $limit, $off ], $headers );
+	my $rows = $self->_run( $sql, [ @binds, $limit, $off ], $headers );
 	return { source => $key, headers => $headers, rows => $rows };
 } ## end sub search
 
@@ -257,8 +250,8 @@ sub search {
 #   - $limit :: how many rows to return, already clamped.
 #   - $off :: how many rows to skip, for paging.
 #   - $filt :: hash ref of filter column to value, restricted to
-#     %HTTP_ALL_FILTER (host, vhost, client_ip, message). Values may carry
-#     several whitespace-separated entries, as _multi_clause allows.
+#     %HTTP_ALL_FILTER (host, vhost, client_ip, message). Each value may be a
+#     single value or an array ref of several, matched as any of them.
 #
 # Returns: a hash ref of the same shape search() gives for a real source:
 # { source => 'http_all', headers => \@HTTP_ALL_HEADERS, rows => [ ... ] }.
@@ -280,22 +273,15 @@ sub _search_http_all {
 		my @hbinds;
 		my @where = ( $self->_time_clause( 'r_isodate', $opts, \@hbinds ) );
 		for my $col (qw( host vhost client_ip )) {
-			next unless defined $filt->{$col} && $filt->{$col} ne '';
-			# host and vhost accept several whitespace-separated values (matched as an
-			# OR of per-value predicates); client_ip stays a single exact match.
-			if ( $MULTI{$col} ) {
-				my ( $frag, @vbinds ) = $self->_multi_clause( $col, $filt->{$col} );
-				next unless defined $frag;
-				push( @where,  $frag );
-				push( @hbinds, @vbinds );
-			} else {
-				push( @where,  "$col = ?" );
-				push( @hbinds, $filt->{$col} );
-			}
-		} ## end for my $col (qw( host vhost client_ip ))
-		if ( defined $filt->{message} && $filt->{message} ne '' ) {
-			push( @where,  "$msg_col ILIKE ?" );
-			push( @hbinds, '%' . $filt->{message} . '%' );
+			my ( $frag, @vbinds ) = $self->_multi_clause( $col, $filt->{$col} );
+			next unless defined $frag;
+			push( @where,  $frag );
+			push( @hbinds, @vbinds );
+		}
+		my ( $msg_frag, @msg_binds ) = $self->_ilike_clause( $msg_col, $filt->{message} );
+		if ( defined $msg_frag ) {
+			push( @where,  $msg_frag );
+			push( @hbinds, @msg_binds );
 		}
 		push( @binds, @hbinds );
 		return
@@ -879,19 +865,18 @@ sub _measure_expr {
 	);
 }
 
-# A WHERE fragment matching $col against one or more whitespace-separated values
-# from $raw, returned with its binds. For a LIKEABLE column a value carrying a %
-# wildcard is matched with LIKE; otherwise = (as build_where does for a single
-# value). Several values are ORed in one parenthesized group. Every value is
-# bound. Returns an empty list when $raw holds no non-blank tokens.
+# A WHERE fragment matching $col against one or more values, returned with its
+# binds. For a LIKEABLE column a value carrying a % wildcard is matched with
+# LIKE; otherwise =, the wildcard taken literally. Several values are ORed in
+# one parenthesized group. Every value is bound.
 #
 # Args:
 #
 #   - $col :: the column to match, already known to be a filter column for this
 #     source. Whether it takes LIKE is decided by %LIKEABLE, not by the caller.
-#   - $raw :: the filter value as typed on /logs. Whitespace separates several
-#     values, e.g. 'db1 db2'. A value may carry % wildcards when the column is
-#     likeable. undef or blank means no filter.
+#   - $values :: the filter as the web layer hands it over -- a single value or
+#     an array ref of several. undef and empty values are dropped, so a blank
+#     filter matches nothing extra rather than nothing at all.
 #
 # Returns: the two-or-more element list ( $fragment, @binds ) -- a SQL boolean
 # expression with one placeholder per value, parenthesized when there is more
@@ -899,12 +884,12 @@ sub _measure_expr {
 # there is nothing to match, so a caller can push straight onto its clause and
 # bind lists and have a blank filter add nothing.
 #
-#     my ( $frag, @binds ) = $self->_multi_clause( 'host', 'db1 db2' );
+#     my ( $frag, @binds ) = $self->_multi_clause( 'host', [ 'db1', 'db2' ] );
 #     # $frag is '(host = ? OR host = ?)', @binds is ( 'db1', 'db2' )
 sub _multi_clause {
-	my ( $self, $col, $raw ) = @_;
+	my ( $self, $col, $values ) = @_;
 
-	my @vals = split( ' ', ( defined $raw ? $raw : '' ) );
+	my @vals = grep { defined($_) && $_ ne '' } ( ref $values eq 'ARRAY' ? @$values : ($values) );
 	return unless @vals;
 
 	my ( @preds, @binds );
@@ -915,6 +900,34 @@ sub _multi_clause {
 	my $frag = ( @preds > 1 ) ? '(' . join( ' OR ', @preds ) . ')' : $preds[0];
 	return ( $frag, @binds );
 } ## end sub _multi_clause
+
+# A WHERE fragment substring-matching $expr against one or more values, each
+# bound as %value% for ILIKE and ORed in one parenthesized group. Backs the
+# message filter, whose text lives in an expression rather than a plain column.
+#
+# Args:
+#
+#   - $expr :: the SQL expression holding the text, e.g. "raw->>'MESSAGE'" or a
+#     message column name. Always authored here, never request data.
+#   - $values :: a single value or an array ref of several, as _multi_clause
+#     takes. undef and empty values are dropped.
+#
+# Returns: ( $fragment, @binds ) as _multi_clause does, or the empty list when
+# there is nothing to match.
+#
+#     my ( $frag, @binds ) = $self->_ilike_clause( 'message', [ 'boom', 'oops' ] );
+#     # $frag is '(message ILIKE ? OR message ILIKE ?)', @binds ( '%boom%', '%oops%' )
+sub _ilike_clause {
+	my ( $self, $expr, $values ) = @_;
+
+	my @vals = grep { defined($_) && $_ ne '' } ( ref $values eq 'ARRAY' ? @$values : ($values) );
+	return unless @vals;
+
+	my @binds = map { '%' . $_ . '%' } @vals;
+	my $frag  = join( ' OR ', ( $expr . ' ILIKE ?' ) x scalar(@vals) );
+	$frag = '(' . $frag . ')' if @vals > 1;
+	return ( $frag, @binds );
+} ## end sub _ilike_clause
 
 # A group/count dimension, checked against the source's Allani::Sources dims
 # (dies otherwise). Lilith keeps no dimension list of its own for log sources --
@@ -938,54 +951,6 @@ sub _dim {
 	die("a column is required\n")                            unless defined $col && $col ne '';
 	die( '"' . $col . "\" is not an aggregatable column\n" ) unless $meta->{dims}{$col};
 	return $col;
-}
-
-#
-# A minimal App::Cmd-opt-shaped object so Allani::Sources::build_where (which
-# reads its filters via $opt->accessor) can be fed a plain hash of web params.
-# AUTOLOAD returns the stored value, or undef for any filter not set.
-#
-package Lilith::Allani::_Opt;
-
-our $AUTOLOAD;
-
-# Wrap a plain hash of filters in something build_where can call accessors on.
-#
-# Args:
-#
-#   - %h :: the filters as column name to value, e.g. ( host => 'db1' ). Any
-#     key is accepted; AUTOLOAD answers for all of them and undef for the rest,
-#     so only the filters actually set need be passed.
-#
-# Returns: a blessed Lilith::Allani::_Opt object.
-#
-#     my $opt = Lilith::Allani::_Opt->new( host => 'db1', program => 'sshd' );
-sub new {
-	my ( $class, %h ) = @_;
-	return bless {%h}, $class;
-}
-
-# Stands in for whatever accessor build_where reaches for. Allani::Sources
-# reads its filters as $opt->some_column, so rather than declaring an accessor
-# per filter column of every source, any method call is answered from the hash
-# the object was built with.
-#
-# Args: whatever the caller passed, all ignored -- the method name is the only
-# input, and it is taken from $AUTOLOAD.
-#
-# Returns: the stored value for the called method's name, or undef when that
-# filter was not set (which build_where reads as "no filter"). DESTROY is
-# special-cased to return nothing, so object teardown does not go looking for a
-# filter named DESTROY.
-#
-#     my $opt = Lilith::Allani::_Opt->new( host => 'db1' );
-#     $opt->host;       # 'db1'
-#     $opt->program;    # undef
-sub AUTOLOAD {
-	my $self = shift;
-	( my $name = $AUTOLOAD ) =~ s/.*:://;
-	return if $name eq 'DESTROY';
-	return $self->{$name};
 }
 
 1;

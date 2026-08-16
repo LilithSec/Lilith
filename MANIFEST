@@ -236,6 +236,7 @@ share/public/js/lilith-lookup.js
 share/public/js/lilith-virani.js
 share/public/js/lilith-table.js
 share/public/js/search.js
+share/public/js/token-fields.js
 share/public/js/logs.js
 share/public/js/event-view.js
 share/public/js/escalation.js

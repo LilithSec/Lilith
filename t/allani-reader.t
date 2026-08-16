@@ -143,6 +143,39 @@ my $reader = Lilith::Allani->new( dsn => 'dbi:Pg:dbname=bogus' );
 	like( $sql, qr/host = \?/,    'host filter is a bound placeholder' );
 	like( $sql, qr/program = \?/, 'program filter is a bound placeholder' );
 	unlike( $sql, qr/db1|sshd/, 'filter values are not interpolated into the SQL' );
+
+	# several values for one filter are ORed in one group, per-value = / LIKE
+	@MockDbh::SQL = ();
+	$reader->search( source => 'syslog', filters => { host => [ 'db1', 'db%' ] } );
+	like(
+		$MockDbh::SQL[0],
+		qr/\(host = \? OR host LIKE \?\)/,
+		'a multi-value filter ORs its values, LIKE per wildcard-carrying value'
+	);
+
+	# a value is taken literally: whitespace inside it no longer splits it
+	@MockDbh::SQL = ();
+	$reader->search( source => 'syslog', filters => { host => 'db1 db2' } );
+	unlike( $MockDbh::SQL[0], qr/host = \? OR/, 'whitespace inside a value does not split it' );
+
+	# multi-value message: one ILIKE per value, ORed, on the raw MESSAGE field
+	@MockDbh::SQL = ();
+	$reader->search( source => 'syslog', filters => { message => [ 'boom', 'oops' ] } );
+	like(
+		$MockDbh::SQL[0],
+		qr/\(raw->>'MESSAGE' ILIKE \? OR raw->>'MESSAGE' ILIKE \?\)/,
+		'multi-value message ORs per-value substring matches'
+	);
+
+	# a filter the source does not accept dies rather than being ignored
+	eval { $reader->search( source => 'syslog', filters => { vhost => 'w1' } ) };
+	like( $@, qr/not a valid filter/, 'a filter invalid for the source is rejected' );
+
+	# http_all applies a multi-value filter to both halves of the union
+	@MockDbh::SQL = ();
+	$reader->search( source => 'http_all', filters => { client_ip => [ '192.0.2.1', '192.0.2.2' ] } );
+	my @groups = ( $MockDbh::SQL[0] =~ /\(client_ip = \? OR client_ip = \?\)/g );
+	is( scalar @groups, 2, 'http_all ORs a multi-value filter in both halves' );
 }
 
 # ---------------------------------------------------------------------------

@@ -1,12 +1,20 @@
 /*
  * The /logs page: show only the filter fields that apply to the selected
- * Allani source, and drive the shared auto-refresh over the results.
+ * Allani source, upgrade them into the shared token filter fields, wire the
+ * click-to-filter cells in the results, and drive the shared auto-refresh over
+ * them.
  *
  * Markup contract: the source <select> is #source-sel, and each filter field
- * carries class .log-filter-field with a data-sources list of the sources it
- * belongs to.
+ * wrapper carries class .log-filter-field with a data-sources list of the
+ * sources it belongs to. The fields themselves are .token-filter-field
+ * <select multiple>s (see token-fields.js), ids named after their filter
+ * (underscores to hyphens, '-input' appended). A clickable result cell is an
+ * a.log-filter-cell with data-filter naming the filter and data-value the
+ * value; they are bound by delegation, so an auto-refresh swapping the results
+ * needs no rebinding.
  *
- * Requires auto-refresh.js. Self-guards on the source selector being present.
+ * Requires token-fields.js and auto-refresh.js. Self-guards on the source
+ * selector being present.
  */
 (function() {
 // Show only the filter fields that apply to the selected source.
@@ -18,11 +26,47 @@ function syncFilters() {
   });
 }
 
+// What /api/logs/values is asked for a field: the column named in its
+// data-column, on the selected source, over the window the search itself runs
+// with -- so what is offered describes the rows the page is showing.
+function valueSuggestionQuery(selectEl) {
+  var params = new URLSearchParams();
+  params.set('source', document.getElementById('source-sel').value);
+  params.set('column', selectEl.dataset.column);
+
+  var form = document.getElementById('logs-form');
+  ['go_back_minutes', 'start', 'end'].forEach(function(name) {
+    var field = form.elements[name];
+    if (field && field.value) { params.set(name, field.value); }
+  });
+
+  return params.toString();
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   var sourceEl = document.getElementById('source-sel');
   if (!sourceEl) { return; }
   sourceEl.addEventListener('change', syncFilters);
   syncFilters();
+
+  LilithTokenFields.init({
+    valuesUrl:   '/api/logs/values',
+    valuesQuery: valueSuggestionQuery
+  });
+
+  // Click-to-filter cells, by delegation. Clicking replaces the field's values
+  // with the clicked one rather than adding to it, so the search narrows to
+  // what was clicked.
+  document.addEventListener('click', function(event) {
+    var cell = event.target.closest('a.log-filter-cell');
+    if (!cell) { return; }
+    event.preventDefault();
+
+    var fieldEl = document.getElementById(cell.dataset.filter.replace(/_/g, '-') + '-input');
+    if (!fieldEl) { return; }
+    LilithTokenFields.setValue(fieldEl, cell.dataset.value);
+    document.getElementById('logs-form').submit();
+  });
 
   // Auto-refresh (shared module): fetch fresh results every N seconds and swap
   // #log-results in place. State is kept in localStorage so it persists.

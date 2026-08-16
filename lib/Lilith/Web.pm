@@ -1070,6 +1070,7 @@ sub startup {
 	$r->get('/api/logs/countries')->to('logs#countries');
 	$r->get('/api/logs/columns')->to('logs#columns');
 	$r->get('/api/logs/measures')->to('logs#measures');
+	$r->get('/api/logs/values')->to('logs#filter_values');
 	$r->get('/logs/:source/:id')->to('logs#view');
 	$r->get('/api/ipinfo/*ip')->to('api#ipinfo');
 	$r->get('/api/domaininfo/*domain')->to('api#domaininfo');

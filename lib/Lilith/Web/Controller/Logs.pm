@@ -3,6 +3,11 @@ package Lilith::Web::Controller::Logs;
 use Mojo::Base 'Mojolicious::Controller';
 use JSON qw(decode_json);
 
+# How many values a filter field's dropdown is offered, matching the search
+# page's cap: the list is fetched once per field and filtered in the browser as
+# someone types.
+my $VALUE_SUGGESTION_LIMIT = 200;
+
 =head1 NAME
 
 Lilith::Web::Controller::Logs - browse the logs stored in Allani.
@@ -20,8 +25,9 @@ entry hidden) unless C<allani_enabled>.
 
 C<GET /logs> -- the log search form and results. Mirrors the alert Search page:
 a sanitized C<source>, a C<go_back_minutes> window, C<limit>/C<offset>, an
-C<order_dir>, and per-source filters. With C<partial=1> only the results
-fragment is rendered (for auto-refresh).
+C<order_dir>, and per-source filters, each submitted as one query parameter per
+value and matched as any of them. With C<partial=1> only the results fragment
+is rendered (for auto-refresh).
 
 =cut
 
@@ -64,12 +70,16 @@ sub index {
 
 	# Forward only the filter params this source accepts (the reader derives that
 	# set of accepted filters from Allani::Sources), so a param meant for another
-	# source cannot reach the query.
+	# source cannot reach the query. The fields are multi valued -- one query
+	# parameter per value -- so each filter goes over as an array ref, matched as
+	# any of its values.
 	my %filters;
+	my %source_filters;
 	if ($reader) {
-		for my $name ( @{ $reader->filters($source) } ) {
-			my $val = $self->param($name);
-			$filters{$name} = $val if defined $val && $val ne '';
+		%source_filters = map { $_ => 1 } @{ $reader->filters($source) };
+		for my $name ( keys %source_filters ) {
+			my @values = grep { defined($_) && $_ ne '' } @{ $self->every_param($name) };
+			$filters{$name} = \@values if @values;
 		}
 	}
 
@@ -92,8 +102,14 @@ sub index {
 	} ## end if ($reader)
 
 	$self->stash(
-		sources         => $sources,
-		source          => $source,
+		sources => $sources,
+		source  => $source,
+
+		# which filters the source accepts, for the results fragment's
+		# click-to-filter cells (a cell is only clickable when the column
+		# it shows can actually be filtered on)
+		source_filters => \%source_filters,
+
 		result          => $result,
 		error           => $error,
 		go_back_minutes => $go_back_minutes,
@@ -306,6 +322,39 @@ sub measures {
 	my $source = $self->param('source') // 'syslog';
 	return $self->_ljson( sub { return { source => $source, measures => $_[0]->measures($source) }; } );
 }
+
+=head2 filter_values
+
+C<GET /api/logs/values?source=&column=> -- what a filter field's dropdown
+offers: the most common values of that column over the window the search itself
+covers (C<go_back_minutes>, or an explicit C<start>/C<end>), most common first,
+as C<< { source, column, values => [ { value, count }, ... ] } >>. The /logs
+counterpart of C</api/search/values>.
+
+The column is not vetted here: the reader dies on one the source cannot be
+grouped by, which C<_ljson> turns into a 400 -- so a filter field whose column
+has no value list simply offers nothing and stays free text.
+
+=cut
+
+sub filter_values {
+	my $self = shift;
+	my ( $source, $mins, @range ) = $self->_dparams;
+	my $column = $self->param('column');
+
+	return $self->_ljson(
+		sub {
+			my $rows = $_[0]->top(
+				source          => $source,
+				column          => $column,
+				go_back_minutes => $mins,
+				limit           => $VALUE_SUGGESTION_LIMIT,
+				@range,
+			);
+			return { source => $source, column => $column, values => $rows };
+		}
+	);
+} ## end sub filter_values
 
 # Shared source/window parsing for the dashboard API: the source, the relative
 # window, and an absolute start/end range as a (possibly empty) list of pairs the

@@ -269,7 +269,7 @@
               <div class="col-12"><span class="text-muted small fw-semibold"><%= $group->{heading} %></span></div>
 
               % # Each field is a <select multiple> holding one option per value
-              % # in force, which /js/search.js turns into a type-to-add token
+              % # in force, which the shared /js/token-fields.js turns into a type-to-add token
               % # field. That is what makes a filter submit one query parameter
               % # per value, so the chips above the results can drop a single
               % # value and leave the rest of the filter alone.
@@ -281,7 +281,7 @@
               %   my %is_fixed = map { $_->{value} => 1 } @{ $field->{options} // [] };
               <div class="col-md-<%= $field->{width} // 2 %> search-filter-field" data-tables="<%= $field->{tables} // $all_tables %>">
                 <label class="form-label" for="<%= $field_id %>"><%== $field->{form_label} // $field->{label} %></label>
-                <select name="<%= $field->{name} %>" id="<%= $field_id %>" class="form-select form-select-sm search-token-field" multiple
+                <select name="<%= $field->{name} %>" id="<%= $field_id %>" class="form-select form-select-sm token-filter-field" multiple
                         <%== $field->{suggest} ? 'data-column="' . $field->{name} . '"' : '' %><%== $field->{options} ? ' data-fixed="1"' : '' %>>
                   % # A fixed-vocabulary field always offers its whole set, each
                   % # value with its gloss riding along for the dropdown (the
@@ -344,6 +344,7 @@
 <script src="/js/auto-refresh.js"></script>
 <script src="/js/lilith-table.js"></script>
 <script src="/vendor/tom-select-2.6.2/js/tom-select.complete.min.js"></script>
+<script src="/js/token-fields.js"></script>
 <script>
 // Server-supplied bootstrap data for /js/search.js: the sortable columns per
 // table, and the column the current results are ordered by.
