@@ -170,16 +170,36 @@ sub index {
 			my $decoded = eval { Mojo::JSON::from_json( $row->{raw} ) };
 			$row->{subjects} = $self->baphomet_subjects($decoded);
 
-			# What the Count cell's drill-down link filters subjects by: the
-			# raw subject_vars re-encoded as JSON, which jsonb equality reads
-			# as exactly the key the bucket was grouped on, or 'none' for a
-			# record carrying no subject_vars (whose key is SQL NULL).
+			# What the Count cell's drill-down link filters subjects by: one
+			# VAR=value component per var, so each gets its own droppable
+			# chip (the search side ANDs them across vars). A set that cannot
+			# be clean components -- a resolved hash value, a % that would
+			# read as LIKE, a non-word var name -- falls back to the whole
+			# set as JSON, and a record with no subject_vars at all to 'none'.
 			if ($bucket) {
-				$row->{subjects_key}
+				my $vars
 					= ( ref $decoded eq 'HASH' && exists $decoded->{subject_vars} )
-					? Mojo::JSON::to_json( $decoded->{subject_vars} )
-					: 'none';
-			}
+					? $decoded->{subject_vars}
+					: undef;
+				if (
+					   ref $vars eq 'HASH'
+					&& %{$vars}
+					&& !grep {
+							   ref( $vars->{$_} )
+							|| !defined( $vars->{$_} )
+							|| $_ !~ /^\w+$/
+							|| index( $vars->{$_}, '%' )
+							>= 0
+					} keys %{$vars}
+					)
+				{
+					$row->{subjects_key} = [ map { $_ . '=' . $vars->{$_} } sort keys %{$vars} ];
+				} elsif ( ref $decoded eq 'HASH' && exists $decoded->{subject_vars} ) {
+					$row->{subjects_key} = Mojo::JSON::to_json($vars);
+				} else {
+					$row->{subjects_key} = 'none';
+				}
+			} ## end if ($bucket)
 		} ## end foreach my $row (@$results)
 	} ## end if ( $table eq 'baphomet' && ref $results ...)
 

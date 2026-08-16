@@ -107,7 +107,7 @@ And for the `baphomet` table:
 
 | switch       | matches                              |
 |--------------|---------------------------------------|
-| `--subjects` | the subject vars as JSON, matched structurally against the record's `subject_vars` (key order and number formatting do not matter); `none` matches records carrying no subject vars |
+| `--subjects` | subject vars. JSON matches the whole set structurally; `VAR=value` matches one var (`%` for LIKE), a bare `VAR` its presence, `!` negating either; `none` matches records with no subject vars |
 
 Suricata, Sagan, and Baphomet searches can also filter on what the
 [Shodan cache](configuration.md#shodan) holds for the alert's ends — the same

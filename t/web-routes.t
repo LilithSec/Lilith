@@ -213,14 +213,53 @@ sub _make_app {
 	# the count links to the bucket's contents: same search, unbucketed,
 	# narrowed to the row's instance/signature/subjects
 	my $drill = Mojo::URL->new( $t->tx->res->dom->at('td.bucket-count a')->attr('href') );
-	is( $drill->query->param('bucket'),    undef,               'the drill-down link drops bucket' );
-	is( $drill->query->param('instance'),  'i1',                'and pins the instance' );
-	is( $drill->query->param('signature'), 'R1',                'and the signature' );
-	is( $drill->query->param('subjects'),  '{"SRC":"1.2.3.4"}', 'and the exact subjects key' );
-	is( $drill->query->param('search'),    1,                   'and stays a submitted search' );
+	is( $drill->query->param('bucket'),    undef,         'the drill-down link drops bucket' );
+	is( $drill->query->param('instance'),  'i1',          'and pins the instance' );
+	is( $drill->query->param('signature'), 'R1',          'and the signature' );
+	is( $drill->query->param('subjects'),  'SRC=1.2.3.4', 'and the subjects, as a component' );
+	is( $drill->query->param('search'),    1,             'and stays a submitted search' );
 
-	# a record with no subject_vars drills by the 'none' sentinel (its bucket
-	# key is SQL NULL, which no equality would find)
+	# a multi-var bucket drills by one component per var (which the search
+	# side ANDs), so each gets its own droppable chip
+	{
+		no warnings qw(redefine once);
+		local *Lilith::search = sub {
+			return [
+				{
+					id           => 9,
+					timestamp    => 't',
+					raw          => '{"subject_vars":{"USER":"root","SRC":"1.2.3.4"}}',
+					bucket_count => 2
+				}
+			];
+		};
+		use warnings qw(redefine once);
+		$t->get_ok('/search?search=1&table=baphomet&bucket=1');
+		my $multi = Mojo::URL->new( $t->tx->res->dom->at('td.bucket-count a')->attr('href') );
+		is_deeply(
+			$multi->query->every_param('subjects'),
+			[ 'SRC=1.2.3.4', 'USER=root' ],
+			'a multi-var bucket drills by one component per var'
+		);
+	}
+
+	# a var components cannot express -- here a resolved hash value -- falls
+	# back to the whole set as JSON, and no subject_vars at all to 'none'
+	{
+		no warnings qw(redefine once);
+		local *Lilith::search = sub {
+			return [
+				{ id => 9, timestamp => 't', raw => '{"subject_vars":{"SRC":{"hostname":"h1"}}}', bucket_count => 2 } ];
+		};
+		use warnings qw(redefine once);
+		$t->get_ok('/search?search=1&table=baphomet&bucket=1');
+		my $hashed = Mojo::URL->new( $t->tx->res->dom->at('td.bucket-count a')->attr('href') );
+		is(
+			$hashed->query->param('subjects'),
+			'{"SRC":{"hostname":"h1"}}',
+			'a set components cannot express drills by the whole JSON'
+		);
+	}
 	{
 		no warnings qw(redefine once);
 		local *Lilith::search = sub { return [ { id => 9, timestamp => 't', raw => '{}', bucket_count => 2 } ] };

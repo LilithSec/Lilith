@@ -1638,18 +1638,20 @@ like any other filter naming a column the table lacks):
 Next is the subjects filter, for baphomet only (elsewhere it is ignored, like
 a filter naming a column the table lacks):
 
-    - subjects :: the record's subject vars as JSON, matched against
-      C<< raw->'subject_vars' >> as jsonb -- so key order and number
-      formatting do not matter, and the match is exactly the bucket key
-      bucketing groups by. The value 'none' matches records with no
-      subject_vars at all. Takes a single value or an array ref of several,
-      ORed. A value that is neither 'none' nor JSON dies.
+    - subjects :: subject vars, whole or by component. A value starting with
+      C<{> is the whole set as JSON, matched structurally as jsonb -- exactly
+      the key bucketing groups by. 'none' matches records with none.
+      C<VAR=value> matches one var as extracted text ('%' for LIKE); a bare
+      C<VAR> matches its presence. '!' negates the component forms, a record
+      without the var counting as not matching. Components OR within a var
+      and AND across vars, whole-set values OR against that, and negations
+      AND. Anything else dies.
 
-    # everything Baphomet judged about this address
-    subjects => '{"SRC":"192.0.2.10"}',
+    # everything judged about this address, whatever else was a subject
+    subjects => 'SRC=192.0.2.10',
 
-    # the subject-less records
-    subjects => 'none',
+    # this address as this user -- what a bucket's count drills in by
+    subjects => [ 'SRC=192.0.2.10', 'USER=nobody' ],
 
 Last is bucketing, for baphomet only (elsewhere it is ignored, like a filter
 naming a column the table lacks):
@@ -2169,31 +2171,73 @@ sub search {
 		}
 	}
 
-	# subjects, as the POD above lays out: the record's subject vars as JSON,
-	# matched against raw->'subject_vars' as jsonb -- structural equality, so
-	# key order and number formatting do not matter and the match is exactly
-	# the key bucketing partitions by (which is what makes a bucket's count
-	# clickable). 'none' matches records with no subject_vars at all, whose
-	# key is SQL NULL and would never match an equality. Values are checked
-	# to be JSON here so a typo dies with the reason rather than a DB error.
+	# subjects, as the POD above lays out. The whole-set form is jsonb
+	# equality on raw->'subject_vars' -- exactly the key bucketing partitions
+	# by, which is what makes a bucket's count clickable -- and is checked to
+	# be JSON here so a typo dies with the reason rather than a DB error.
+	# 'none' is IS NULL, since the subject-less key is SQL NULL and no
+	# equality would find it. The component forms compare through ->> text
+	# extraction (var name and value both bound), which stringifies whatever
+	# shape the var holds; presence uses jsonb_exists() rather than jsonb's
+	# ? operator, which DBD::Pg would read as a placeholder. Negations use
+	# IS DISTINCT FROM / coalesce so a record without the var matches them.
+	#
+	# Positive components group by var: OR within a var (a record's SRC is
+	# only ever one thing), AND across vars (a record holds several at once,
+	# which is what a multi-var bucket's drill-down needs). The whole-set
+	# forms OR against that conjunction, so 'none' beside a component reads
+	# as "or subject-less" rather than an always-empty AND.
 	if ( defined( $opts{subjects} ) && $opts{table} eq 'baphomet' ) {
-		my @subject_values = _filter_values( $opts{subjects} );
-
-		my @subject_clauses;
-		foreach my $value (@subject_values) {
+		my ( @subject_whole, %subject_var, @subject_not );
+		foreach my $value ( _filter_values( $opts{subjects} ) ) {
 			if ( $value eq 'none' ) {
-				push( @subject_clauses, \"raw->'subject_vars' is null" );
-			} else {
-				die( '"' . $value . '" for subjects is neither JSON nor \'none\'' )
+				push( @subject_whole, \"raw->'subject_vars' is null" );
+			} elsif ( $value =~ /^[\{\[]/ || $value eq 'null' ) {
+				die( '"' . $value . '" for subjects is not valid JSON' )
 					unless eval { JSON->new->allow_nonref->decode($value); 1 };
-				push( @subject_clauses, \[ "raw->'subject_vars' = ?::jsonb", $value ] );
+				push( @subject_whole, \[ "raw->'subject_vars' = ?::jsonb", $value ] );
+			} elsif ( $value =~ /^(\!?)(\w+)=(.*)$/s ) {
+				my ( $negated, $var, $val ) = ( $1, $2, $3 );
+				my $like = index( $val, '%' ) >= 0;
+				if ($negated) {
+					push( @subject_not,
+						$like
+						? \[ "not coalesce(raw->'subject_vars'->>? LIKE ?, false)", $var, $val ]
+						: \[ "raw->'subject_vars'->>? IS DISTINCT FROM ?",          $var, $val ] );
+				} else {
+					push(
+						@{ $subject_var{$var} },
+						$like
+						? \[ "raw->'subject_vars'->>? LIKE ?", $var, $val ]
+						: \[ "raw->'subject_vars'->>? = ?",    $var, $val ]
+					);
+				}
+			} elsif ( $value =~ /^(\!?)(\w+)$/ ) {
+				my ( $negated, $var ) = ( $1, $2 );
+				if ($negated) {
+					push( @subject_not, \[ "not coalesce(jsonb_exists(raw->'subject_vars', ?), false)", $var ] );
+				} else {
+					push( @{ $subject_var{$var} }, \[ "jsonb_exists(raw->'subject_vars', ?)", $var ] );
+				}
+			} else {
+				die( '"' . $value . '" for subjects is not JSON, \'none\', VAR=value, or VAR' );
 			}
-		}
+		} ## end foreach my $value ( _filter_values( $opts{subjects...}))
 
-		if (@subject_clauses) {
+		my @var_groups = map { @{ $subject_var{$_} } > 1 ? { '-or' => $subject_var{$_} } : $subject_var{$_}[0] }
+			sort keys %subject_var;
+
+		if ( @subject_whole || @var_groups ) {
+			my @alternatives = @subject_whole;
+			push( @alternatives, ( @var_groups > 1 ) ? { '-and' => \@var_groups } : $var_groups[0] )
+				if @var_groups;
+
 			$search->{'-and'} = [] if !defined( $search->{'-and'} );
-			push( @{ $search->{'-and'} },
-				( @subject_clauses > 1 ) ? { '-or' => \@subject_clauses } : @subject_clauses );
+			push( @{ $search->{'-and'} }, ( @alternatives > 1 ) ? { '-or' => \@alternatives } : $alternatives[0] );
+		}
+		if (@subject_not) {
+			$search->{'-and'} = [] if !defined( $search->{'-and'} );
+			push( @{ $search->{'-and'} }, @subject_not );
 		}
 	} ## end if ( defined( $opts{subjects} ) && $opts{table...})
 

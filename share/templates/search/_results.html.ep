@@ -161,9 +161,10 @@
           <td><% if (my $signature = $row->{signature}) { %><a href="#" class="sig-filter" data-sig="<%= $signature %>"><%= $signature %></a><% } %></td>
           % # The count links to the bucket's contents: the same search,
           % # unbucketed, narrowed to this row's instance/signature/subjects
-          % # (subjects_key, the exact key the bucket was grouped on). Every
-          % # other filter and the window carry over, so the rows shown are
-          % # the rows counted. search=1 keeps the controller from re-adding
+          % # (subjects_key -- a VAR=value component per var, or the whole
+          % # set as JSON where components cannot express it). Every other
+          % # filter and the window carry over, so the rows shown are the
+          % # rows counted. search=1 keeps the controller from re-adding
           % # the fresh-form GPCD exclusion, and offset/partial are dropped
           % # for the same reasons the chips drop them.
           % if ($bucket) {

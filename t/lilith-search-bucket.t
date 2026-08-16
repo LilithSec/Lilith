@@ -119,9 +119,43 @@ SKIP: {
 	my $either = $lilith->search( table => 'baphomet', subjects => [ 'none', '{"SRC":"5.6.7.8"}' ] );
 	is( scalar @$either, 3, 'several subjects values match any of them' );
 
+	# components: VAR=value matches one var whatever else was a subject, as
+	# extracted text (so the numeric var matches), with % for LIKE
+	my $component = $lilith->search( table => 'baphomet', subjects => 'SRC=1.2.3.4' );
+	is( scalar @$component, 5, 'VAR=value matches the var across every rule that judged it' );
+	my $numeric = $lilith->search( table => 'baphomet', subjects => 'TRIES=3' );
+	is( scalar @$numeric, 2, 'a numeric var matches its text rendering' );
+	my $liked = $lilith->search( table => 'baphomet', subjects => 'SRC=1.2.3.%' );
+	is( scalar @$liked, 5, 'a % in the value makes the component a LIKE' );
+
+	# bare VAR is presence; ! negates the component forms, records without
+	# the var counting as not matching
+	my $present = $lilith->search( table => 'baphomet', subjects => 'USER' );
+	is( scalar @$present, 2, 'a bare VAR matches records where it was a subject' );
+	my $not_that = $lilith->search( table => 'baphomet', subjects => '!SRC=1.2.3.4' );
+	is( scalar @$not_that, 5, '!VAR=value takes in the subject-less records too' );
+	my $no_user = $lilith->search( table => 'baphomet', subjects => '!USER' );
+	is( scalar @$no_user, 8, '!VAR matches records where it was not a subject' );
+	my $mixed = $lilith->search( table => 'baphomet', subjects => [ 'SRC', '!SRC=1.2.3.4' ] );
+	is( scalar @$mixed, 1, 'positives OR while negations AND' );
+
+	# combining: components OR within a var, AND across vars (what a
+	# multi-var bucket's drill-down emits), and whole-set values OR against
+	# that conjunction
+	my $same_var = $lilith->search( table => 'baphomet', subjects => [ 'SRC=1.2.3.4', 'SRC=5.6.7.8' ] );
+	is( scalar @$same_var, 6, 'components of the same var OR' );
+	my $cross_var = $lilith->search( table => 'baphomet', subjects => [ 'SRC=1.2.3.4', 'USER=srv' ] );
+	is( scalar @$cross_var, 0, 'components of different vars AND' );
+	my $multi_drill = $lilith->search( table => 'baphomet', subjects => [ 'TRIES=3', 'USER=srv' ] );
+	is( scalar @$multi_drill, 2, 'a multi-var drill-down key finds its bucket' );
+	my $whole_or = $lilith->search( table => 'baphomet', subjects => [ 'none', 'SRC=5.6.7.8' ] );
+	is( scalar @$whole_or, 3, 'a whole-set value ORs against the component conjunction' );
+
 	# garbage dies with the reason rather than a DB error
-	eval { $lilith->search( table => 'baphomet', subjects => 'derp' ) };
-	like( $@, qr/neither JSON/, 'a non-JSON subjects value dies clearly' );
+	eval { $lilith->search( table => 'baphomet', subjects => '{derp' ) };
+	like( $@, qr/not valid JSON/, 'a malformed JSON subjects value dies clearly' );
+	eval { $lilith->search( table => 'baphomet', subjects => 'a b' ) };
+	like( $@, qr/not JSON/, 'a value fitting no form dies clearly' );
 
 	# and elsewhere the filter is ignored, garbage included
 	my $sur_subj = $lilith->search( table => 'suricata', subjects => 'derp' );

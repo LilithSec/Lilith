@@ -68,7 +68,7 @@ sub opt_spec {
 		[ 'user=s',           'the username the line was about' ],
 		[
 			'subjects=s@',
-			"subject vars as JSON, matched structurally; 'none' matches records with none (baphomet)"
+			"subject vars: JSON for the whole set, VAR=value or bare VAR for one (! negates), 'none' for none (baphomet)"
 		],
 		[ 'shodan_src_tag=s@',    'Shodan tag on the source' ],
 		[ 'shodan_dest_tag=s@',   'Shodan tag on the destination' ],
