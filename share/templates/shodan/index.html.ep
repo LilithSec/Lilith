@@ -240,8 +240,11 @@
             % }
           </td>
           <td class="small cell-wrap">
+            % # each port followed by what the crawl saw running on it, where
+            % # the row paired one (API-tier rows only)
+            % my $products_by_port = $self->shodan_port_products( $row->{port_products} );
             % for my $port (@{ $row->{ports} || [] }) {
-            <a href="<%= $filter_url->( 'port', $port ) %>"><%= $port %></a>
+            <a href="<%= $filter_url->( 'port', $port ) %>"><%= $port %></a><% if ($products_by_port->{$port}) { %> <span class="text-muted">(<%= $products_by_port->{$port} %>)</span><% } %>
             % }
           </td>
           <td class="cell-wrap">

@@ -518,6 +518,12 @@ sub startup {
 		}
 	);
 
+	# A port_products list (a cache row's column or a normalized result's key)
+	# as a per-port lookup, for the templates that annotate port lists with what
+	# runs on each. Lilith::Shodan::port_product_map behind a helper so the
+	# templates match the other shodan_* reads.
+	$self->helper( shodan_port_products => sub { Lilith::Shodan::port_product_map( $_[1] ) } );
+
 	# What the cache holds for the addresses in a page of results, as
 	# { ip => { ports => [...], tags => [...], vulns => 12, max_cvss => 9.8 } },
 	# for the badges on the results tables' IP cells.

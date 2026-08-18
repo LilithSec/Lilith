@@ -16,6 +16,19 @@
 %   my $shodan = $shodan_badges->{ $row->{ $end . '_ip' } // '' };
 %   return $shodan && grep { $_ == $port } @{ $shodan->{ports} || [] };
 % };
+% # What the crawl saw running on the port the flow names at an end, '' when
+% # nothing was paired. The per-address map is built once however many rows
+% # name the address.
+% my %port_product_maps;
+% my $port_product = sub {
+%   my ( $row, $end ) = @_;
+%   my $port = $row->{ $end . '_port' };
+%   return '' unless defined $port && $port ne '';
+%   my $ip = $row->{ $end . '_ip' } // '';
+%   my $shodan = $shodan_badges->{$ip} or return '';
+%   my $map = $port_product_maps{$ip} ||= $self->shodan_port_products( $shodan->{port_products} );
+%   return $map->{$port} // '';
+% };
 <div id="search-results">
   %= include 'partials/_results_pager', count => $count, noun => 'result', offset => $offset, limit => $limit
 
@@ -49,10 +62,12 @@
           <td class="ip-cell"><%= include 'partials/_ip_cell', ip => $row->{src_ip} %><%
             if (my $matched = $row_matches->{src}) { %> <span class="shodan-badges"><span class="badge bg-danger" title="rule CVE the source is vulnerable to per Shodan: <%= join(', ', @$matched) %>">CVE match</span></span><% } %></td>
           <td><% if (my $src_port = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $src_port %>"><%= $src_port %></a><%
+            if (my $product = $port_product->($row, 'src')) { %> <span class="shodan-badges text-muted">(<%= $product %>)</span><% } %><%
             if ($port_open->($row, 'src')) { %> <span class="shodan-badges"><span class="badge bg-secondary" title="Shodan sees this port open on the source">open</span></span><% } %><% } %></td>
           <td class="ip-cell"><%= include 'partials/_ip_cell', ip => $row->{dest_ip} %><%
             if (my $matched = $row_matches->{dest}) { %> <span class="shodan-badges"><span class="badge bg-danger" title="rule CVE the destination is vulnerable to per Shodan: <%= join(', ', @$matched) %>">CVE match</span></span><% } %></td>
           <td><% if (my $dest_port = $row->{dest_port}) { %><a href="#" class="port-filter" data-port="<%= $dest_port %>"><%= $dest_port %></a><%
+            if (my $product = $port_product->($row, 'dest')) { %> <span class="shodan-badges text-muted">(<%= $product %>)</span><% } %><%
             if ($port_open->($row, 'dest')) { %> <span class="shodan-badges"><span class="badge bg-secondary" title="Shodan sees this port open on the destination">open</span></span><% } %><% } %></td>
           <td><% if (my $proto = $row->{proto}) { %><a href="#" class="proto-filter" data-proto="<%= $proto %>"><%= $proto %></a><% } %></td>
           <td><% if (my $app_proto = $row->{app_proto}) { %><a href="#" class="aproto-filter" data-aproto="<%= $app_proto %>"><%= $app_proto %></a><% } %></td>
@@ -82,7 +97,8 @@
           <td><% if (my $instance = $row->{instance}) { %><a href="#" class="instance-filter" data-instance="<%= $instance %>"><%= $instance %></a><% } %></td>
           <td class="col-host" style="display:none"><% if (my $instance_host = $row->{instance_host}) { %><a href="#" class="instance-host-filter" data-instance-host="<%= $instance_host %>"><%= $instance_host %></a><% } %></td>
           <td class="ip-cell"><%= include 'partials/_ip_cell', ip => $row->{src_ip} %></td>
-          <td><% if (my $src_port = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $src_port %>"><%= $src_port %></a><% } %></td>
+          <td><% if (my $src_port = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $src_port %>"><%= $src_port %></a><%
+            if (my $product = $port_product->($row, 'src')) { %> <span class="shodan-badges text-muted">(<%= $product %>)</span><% } %><% } %></td>
           <td><%= $row->{host}      // '' %></td>
           <td><%= $row->{program}   // '' %></td>
           <td><%= $row->{facility}  // '' %></td>
@@ -149,9 +165,11 @@
           <td class="col-host" style="display:none"><% if (my $host = $row->{host}) { %><a href="#" class="host-filter" data-host="<%= $host %>"><%= $host %></a><% } %></td>
           <td><%= $row->{event_type} // '' %></td>
           <td class="ip-cell"><%= include 'partials/_ip_cell', ip => $row->{src_ip} %></td>
-          <td><% if (my $src_port = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $src_port %>"><%= $src_port %></a><% } %></td>
+          <td><% if (my $src_port = $row->{src_port})  { %><a href="#" class="port-filter" data-port="<%= $src_port %>"><%= $src_port %></a><%
+            if (my $product = $port_product->($row, 'src')) { %> <span class="shodan-badges text-muted">(<%= $product %>)</span><% } %><% } %></td>
           <td class="ip-cell"><%= include 'partials/_ip_cell', ip => $row->{dest_ip} %></td>
-          <td><% if (my $dest_port = $row->{dest_port}) { %><a href="#" class="port-filter" data-port="<%= $dest_port %>"><%= $dest_port %></a><% } %></td>
+          <td><% if (my $dest_port = $row->{dest_port}) { %><a href="#" class="port-filter" data-port="<%= $dest_port %>"><%= $dest_port %></a><%
+            if (my $product = $port_product->($row, 'dest')) { %> <span class="shodan-badges text-muted">(<%= $product %>)</span><% } %><% } %></td>
           <td><% if (my $username = $row->{username}) { %><a href="#" class="user-filter" data-user="<%= $username %>"><%= $username %></a><% } %></td>
           <td><small><%= include 'partials/_subjects_cell', subjects => $row->{subjects} %></small></td>
           <td><%= $row->{severity} // '' %></td>

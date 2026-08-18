@@ -49,12 +49,13 @@ $lilith->shodan_cache_put(
 		asn         => 'AS64496',
 		callouts    => [
 			{ text => 'self-signed certificate', level => 'warning', key => 'self-signed' },
-			{ text => 'exposed RDP',              level => 'danger',  key => 'exposed-rdp' },
+			{ text => 'exposed RDP',             level => 'danger',  key => 'exposed-rdp' },
 		],
 		html_hashes       => [12345678],
 		cert_fingerprints => ['aabbcc'],
 		banner_hashes     => [-1524570663],
 		products          => ['nginx'],
+		port_products     => ['80 nginx 1.18.0'],
 	},
 	ttl => 3600,
 );
@@ -81,7 +82,7 @@ $lilith->shodan_cache_put( ip => '45.0.0.3', source => 'api', raw => {}, info =>
 	$dbh->do(
 		q{update shodan_cache set ports = NULL, tags = NULL, cpes = NULL, vulns = NULL,
 		hostnames = NULL, callouts = NULL, html_hashes = NULL, cert_fingerprints = NULL,
-		banner_hashes = NULL, products = NULL where ip = '45.0.0.3'}
+		banner_hashes = NULL, products = NULL, port_products = NULL where ip = '45.0.0.3'}
 	);
 	$dbh->disconnect;
 }
@@ -104,8 +105,9 @@ is( scalar @{$rows}, 3,          'no filters returns the whole cache' );
 is( $rows->[0]{ip},  '45.0.0.1', 'ordered by ip ascending' );
 ok( $rows->[0]{found},  'the crawled host reads found' );
 ok( !$rows->[2]{found}, 'the never-crawled address reads not found' );
-is_deeply( $rows->[0]{ports}, [ 22,         80 ],      'ports come back as an array ref' );
-is_deeply( $rows->[0]{tags},  [ 'honeypot', 'cloud' ], 'tags come back as an array ref' );
+is_deeply( $rows->[0]{ports},         [ 22,         80 ],      'ports come back as an array ref' );
+is_deeply( $rows->[0]{tags},          [ 'honeypot', 'cloud' ], 'tags come back as an array ref' );
+is_deeply( $rows->[0]{port_products}, ['80 nginx 1.18.0'], 'the port-to-product pairing rides back with the row' );
 is( $rows->[0]{max_cvss} + 0, 9.8,         'max_cvss carries the stored worst score' );
 is( $rows->[0]{os},           'Linux 3.x', 'the schema 17 host columns ride along' );
 is( $rows->[0]{source},       'api',       'source rides along' );
@@ -170,12 +172,12 @@ is_deeply(
 is_deeply( matched_ips( html_hash   => '12345678' ),    ['45.0.0.1'], 'html_hash membership' );
 is_deeply( matched_ips( banner_hash => '-1524570663' ), ['45.0.0.1'], 'banner_hash membership, negative and all' );
 is_deeply( matched_ips( cert        => 'aabbcc' ),      ['45.0.0.1'], 'cert fingerprint membership' );
-is_deeply( matched_ips( html_hash => '!12345678' ), [ '45.0.0.2', '45.0.0.3' ], 'html_hash negation' );
+is_deeply( matched_ips( html_hash   => '!12345678' ),   [ '45.0.0.2', '45.0.0.3' ], 'html_hash negation' );
 
 # the version 19 product column
-is_deeply( matched_ips( product => 'nginx' ),  ['45.0.0.1'],                  'product membership' );
-is_deeply( matched_ips( product => 'ngin%' ),  ['45.0.0.1'],                  'product % pattern' );
-is_deeply( matched_ips( product => '!nginx' ), [ '45.0.0.2', '45.0.0.3' ],    'product negation' );
+is_deeply( matched_ips( product => 'nginx' ),  ['45.0.0.1'],               'product membership' );
+is_deeply( matched_ips( product => 'ngin%' ),  ['45.0.0.1'],               'product % pattern' );
+is_deeply( matched_ips( product => '!nginx' ), [ '45.0.0.2', '45.0.0.3' ], 'product negation' );
 
 is_deeply( matched_ips( tag => 'honeypot', port => '80' ), ['45.0.0.1'], 'filters AND across each other' );
 is_deeply(
@@ -301,8 +303,9 @@ like( $@, qr/fetched_within_minutes/, 'a non-numeric window dies' );
 	# coverage counts rows written since the upgrade -- an empty array is still a
 	# write (it is not NULL); only the row NULLed to mimic a pre-upgrade one is
 	# uncovered.
-	is( $stats->{with_callouts}, 2, 'callout coverage excludes only the NULL (pre-upgrade) row' );
-	is( $stats->{with_products}, 2, 'product coverage excludes only the NULL (pre-upgrade) row' );
+	is( $stats->{with_callouts},      2, 'callout coverage excludes only the NULL (pre-upgrade) row' );
+	is( $stats->{with_products},      2, 'product coverage excludes only the NULL (pre-upgrade) row' );
+	is( $stats->{with_port_products}, 2, 'port product coverage excludes only the NULL (pre-upgrade) row' );
 
 	like( $stats->{newest}, qr/^\d{4}-\d{2}-\d{2} /, 'newest is a timestamp string' );
 
@@ -315,16 +318,16 @@ like( $@, qr/fetched_within_minutes/, 'a non-numeric window dies' );
 # ----------------------------------------------------------------------------
 
 for my $bad (
-	[ { order_by               => 'raw' },       qr/not a sortable/, 'an unknown order_by dies' ],
-	[ { order_dir              => 'SIDEWAYS' },  qr/order_dir/,      'a bad order_dir dies' ],
-	[ { limit                  => 'all' },       qr/limit/,          'a non-numeric limit dies' ],
-	[ { ip                     => 'not an ip' }, qr/for ip/,         'a malformed ip dies naming the filter' ],
-	[ { port                   => 'ssh' },       qr/for port/,       'a non-numeric port dies' ],
-	[ { max_cvss               => 'high' },      qr/for max_cvss/,   'a non-numeric max_cvss dies' ],
-	[ { html_hash             => 'abc' },        qr/for html_hash/,   'a non-integer html_hash dies' ],
-	[ { banner_hash           => 'xyz' },        qr/for banner_hash/, 'a non-integer banner_hash dies' ],
-	[ { found                  => 'maybe' },     qr/for found/,      'a value outside the found vocabulary dies' ],
-	[ { source                 => 'psychic' },   qr/for source/,     'a value outside the source vocabulary dies' ],
+	[ { order_by               => 'raw' },       qr/not a sortable/,  'an unknown order_by dies' ],
+	[ { order_dir              => 'SIDEWAYS' },  qr/order_dir/,       'a bad order_dir dies' ],
+	[ { limit                  => 'all' },       qr/limit/,           'a non-numeric limit dies' ],
+	[ { ip                     => 'not an ip' }, qr/for ip/,          'a malformed ip dies naming the filter' ],
+	[ { port                   => 'ssh' },       qr/for port/,        'a non-numeric port dies' ],
+	[ { max_cvss               => 'high' },      qr/for max_cvss/,    'a non-numeric max_cvss dies' ],
+	[ { html_hash              => 'abc' },       qr/for html_hash/,   'a non-integer html_hash dies' ],
+	[ { banner_hash            => 'xyz' },       qr/for banner_hash/, 'a non-integer banner_hash dies' ],
+	[ { found                  => 'maybe' },     qr/for found/,       'a value outside the found vocabulary dies' ],
+	[ { source                 => 'psychic' },   qr/for source/,      'a value outside the source vocabulary dies' ],
 	[ { fetched_within_minutes => 'week' },      qr/fetched_within_minutes/, 'a non-numeric window dies' ],
 	)
 {

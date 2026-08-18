@@ -35,7 +35,7 @@ sub opt_spec {
 		[ 'top=s', 'how many top values to show per facet; 0 for none', { default => 5 } ],
 		$class->output_opt_spec,
 	);
-} ## end sub opt_spec
+}
 
 # Gather the summary and the top facet values, and render them.
 #
@@ -58,7 +58,7 @@ sub execute {
 		= ( defined $opt->{ttl} && $opt->{ttl} =~ /^[0-9]+$/ ) ? $opt->{ttl} + 0
 		: ( defined $toml->{shodan_cache_ttl} && $toml->{shodan_cache_ttl} =~ /^[0-9]+$/ )
 		? $toml->{shodan_cache_ttl} + 0
-		:   2592000;
+		: 2592000;
 
 	my $top = ( defined $opt->{top} && $opt->{top} =~ /^[0-9]+$/ ) ? $opt->{top} + 0 : 5;
 
@@ -84,7 +84,8 @@ sub execute {
 
 	return $self->output_dispatch(
 		$opt,
-		json  => sub { $self->print_json( { ttl => $ttl, summary => $stats, top => \%top_values }, $opt->{pretty} ) },
+		json =>
+			sub { $self->print_json( { ttl => $ttl, summary => $stats, top => \%top_values }, $opt->{pretty} ) },
 		table => sub {
 			my $tb   = $self->table( 'Metric', 'Value' );
 			my @rows = (
@@ -95,12 +96,14 @@ sub execute {
 				[ 'source: internetdb',        $stats->{by_source}{internetdb} ],
 			);
 			push( @rows, [ 'fresh (within ' . $ttl . 's)', $stats->{fresh} ] ) if exists $stats->{fresh};
-			push( @rows, [ 'with CVEs',     $stats->{with_vulns} ] );
-			push( @rows, [ 'max CVSS >= 9', $stats->{high_cvss} ] );
+			push( @rows, [ 'with CVEs',           $stats->{with_vulns} ] );
+			push( @rows, [ 'max CVSS >= 9',       $stats->{high_cvss} ] );
 			push( @rows, [ 'with callouts (v18)', $stats->{with_callouts} . ' / ' . $stats->{total} ] )
 				if exists $stats->{with_callouts};
 			push( @rows, [ 'with products (v19)', $stats->{with_products} . ' / ' . $stats->{total} ] )
 				if exists $stats->{with_products};
+			push( @rows, [ 'with port products (v20)', $stats->{with_port_products} . ' / ' . $stats->{total} ] )
+				if exists $stats->{with_port_products};
 			push( @rows, [ 'oldest fetch', defined $stats->{oldest} ? $stats->{oldest} : '(none)' ] );
 			push( @rows, [ 'newest fetch', defined $stats->{newest} ? $stats->{newest} : '(none)' ] );
 			$tb->add_rows( \@rows );
@@ -113,7 +116,7 @@ sub execute {
 				my $ft = $self->table( 'Value', 'Count' );
 				$ft->add_rows( [ map { [ $_->{value}, $_->{count} ] } @{$rows} ] );
 				print $ft->draw;
-			} ## end for my $facet (@facets)
+			}
 
 			return;
 		},

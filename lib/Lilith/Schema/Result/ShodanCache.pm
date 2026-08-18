@@ -27,7 +27,10 @@ C<cert_fingerprints>, C<banner_hashes>), and C<products> are the interpretive
 projection of C<raw>: the callout keys the modal shows, the service
 fingerprints it pivots on, and the product names its banners identify, as
 columns so the C</shodan> browser can filter on them and the neighborhood panel
-can find other cached hosts sharing them.
+can find other cached hosts sharing them. C<port_products> keeps the
+port-to-product pairing those flatten away, as C<'PORT product version'>
+strings, so the port lists rendered from columns can name what runs on each
+port without opening C<raw>.
 
 =cut
 
@@ -126,6 +129,11 @@ __PACKAGE__->table("shodan_cache");
   data_type: 'varchar[]'
   is_nullable: 1
 
+=head2 port_products
+
+  data_type: 'varchar[]'
+  is_nullable: 1
+
 =head2 raw
 
   data_type: 'jsonb'
@@ -154,6 +162,7 @@ __PACKAGE__->add_columns(
 	"cert_fingerprints", { data_type => "varchar[]",                is_nullable => 1 },
 	"banner_hashes",     { data_type => "bigint[]",                 is_nullable => 1 },
 	"products",          { data_type => "varchar[]",                is_nullable => 1 },
+	"port_products",     { data_type => "varchar[]",                is_nullable => 1 },
 	"raw",               { data_type => "jsonb",                    is_nullable => 1 },
 );
 

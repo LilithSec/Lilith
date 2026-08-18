@@ -217,6 +217,12 @@ lilith shodan_cache -s 600
 
 # the whole database, five hundred addresses at a time
 lilith shodan_cache -s 0 --limit 500
+
+# refetch everything, fresh or not -- after a schema or plan change
+lilith shodan_cache -s 0 --force
+
+# refetch one address right now
+lilith shodan_cache --ip 8.8.8.8
 ```
 
 | option      | what                                                          |
@@ -224,13 +230,18 @@ lilith shodan_cache -s 0 --limit 500
 | `-s`        | How far back to read, in seconds. Default `180`; `0` reads everything. |
 | `--tables`  | Comma separated alert tables to read. All four by default.     |
 | `--limit`   | Stop after this many lookups. `0`, the default, is no limit.   |
+| `--force`   | Look up even addresses the cache already holds fresh.          |
+| `--ip`      | Update just this address instead of reading the alert tables. Implies `--force`. |
 | `--dry-run` | Report what would be looked up without asking Shodan.          |
 
 Three kinds of address are dropped before anything leaves the machine, in
 this order: the ones that are not public (nothing to learn, and nothing that
 should go to a third party), the ones the cache already holds fresh, and
 anything past `--limit`. The summary line accounts for all of them, so a run
-that did nothing says why.
+that did nothing says why. `--force` skips the freshness drop — that is what
+makes it a refetch — and `--ip` implies it, since asking to update an address
+that is held fresh would otherwise do nothing. The public-only drop is never
+skipped.
 
 `-s` only bounds how far back a run reads. What stops an address being looked
 up twice is its own cache entry, so a window wider than the interval it runs

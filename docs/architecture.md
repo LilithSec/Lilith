@@ -70,7 +70,7 @@ the sensors carry a much smaller dependency chain. See
 PostgreSQL is required — the `raw` column is jsonb, and the schema is
 managed with
 [DBIx::Class::Migration](https://metacpan.org/pod/DBIx::Class::Migration)
-(currently schema version 19; see [install](install.md) for the `lilith deploy`
+(currently schema version 20; see [install](install.md) for the `lilith deploy`
 and `lilith migrate` commands that wrap it).
 
 | table                | what                                                         |

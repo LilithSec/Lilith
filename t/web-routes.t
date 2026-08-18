@@ -188,7 +188,7 @@ sub _make_app {
 				bucket_count => 7,
 			}
 		];
-	};
+	}; ## end *Lilith::search = sub
 	use warnings qw(redefine once);
 
 	# the checkbox is part of the form, shown for baphomet only (the same
@@ -197,11 +197,11 @@ sub _make_app {
 	$t->get_ok('/search?search=1&table=baphomet')
 		->status_is( 200, 'unbucketed baphomet search renders 200' )
 		->element_exists( '.search-filter-field[data-tables="baphomet"] input#bucket-check[name="bucket"]',
-		'the bucket checkbox is a baphomet-only form control' )
+			'the bucket checkbox is a baphomet-only form control' )
 		->element_exists( 'input#bucket-check:not([checked])', 'the checkbox is off by default' )
 		->element_exists_not( 'td.bucket-count', 'no Count column without bucket' )
 		->element_exists( '.search-filter-field[data-tables="baphomet"] select[name="subjects"][multiple]',
-		'subjects is a baphomet-only filter field' );
+			'subjects is a baphomet-only filter field' );
 	is( $captured{bucket}, 0, 'without the checkbox, search() is told not to bucket' );
 
 	$t->get_ok('/search?search=1&table=baphomet&bucket=1')
@@ -232,7 +232,7 @@ sub _make_app {
 					bucket_count => 2
 				}
 			];
-		};
+		}; ## end *Lilith::search = sub
 		use warnings qw(redefine once);
 		$t->get_ok('/search?search=1&table=baphomet&bucket=1');
 		my $multi = Mojo::URL->new( $t->tx->res->dom->at('td.bucket-count a')->attr('href') );
@@ -249,16 +249,19 @@ sub _make_app {
 		no warnings qw(redefine once);
 		local *Lilith::search = sub {
 			return [
-				{ id => 9, timestamp => 't', raw => '{"subject_vars":{"SRC":{"hostname":"h1"}}}', bucket_count => 2 } ];
-		};
+				{
+					id           => 9,
+					timestamp    => 't',
+					raw          => '{"subject_vars":{"SRC":{"hostname":"h1"}}}',
+					bucket_count => 2
+				}
+			];
+		}; ## end *Lilith::search = sub
 		use warnings qw(redefine once);
 		$t->get_ok('/search?search=1&table=baphomet&bucket=1');
 		my $hashed = Mojo::URL->new( $t->tx->res->dom->at('td.bucket-count a')->attr('href') );
-		is(
-			$hashed->query->param('subjects'),
-			'{"SRC":{"hostname":"h1"}}',
-			'a set components cannot express drills by the whole JSON'
-		);
+		is( $hashed->query->param('subjects'),
+			'{"SRC":{"hostname":"h1"}}', 'a set components cannot express drills by the whole JSON' );
 	}
 	{
 		no warnings qw(redefine once);
@@ -1155,11 +1158,12 @@ SKIP: {
 	local *Lilith::shodan_cache_badges = sub {
 		return {
 			'198.51.100.9' => {
-				ports    => [80],
-				tags     => [],
-				vulns    => 1,
-				vuln_ids => ['CVE-2021-44228'],
-				max_cvss => 10,
+				ports         => [80],
+				port_products => ['80 nginx 1.18.0'],
+				tags          => [],
+				vulns         => 1,
+				vuln_ids      => ['CVE-2021-44228'],
+				max_cvss      => 10,
 			},
 			'203.0.113.5' => {
 				ports    => [51515],
@@ -1189,6 +1193,12 @@ SKIP: {
 	is( $open_badges->size, 2, 'each end hitting a cached-open port carries the open badge' );
 	like( $open_badges->first->attr('title'), qr/on the destination/, 'row 7 on the destination side' );
 	like( $open_badges->last->attr('title'),  qr/on the source/,      'row 8 on the source side' );
+
+	# the product half: only row 7's dest port has a cached pairing, and it
+	# renders beside the port; row 8's ports have none and stay bare
+	my $products = $t->tx->res->dom->find('span.shodan-badges.text-muted')->grep( sub { $_->text =~ /nginx/ } );
+	is( $products->size,        1,                'only the port with a cached pairing names its product' );
+	is( $products->first->text, '(nginx 1.18.0)', 'the product renders as the port_products label' );
 }
 
 # ---------------------------------------------------------------------------
@@ -1341,21 +1351,22 @@ SKIP: {
 		$captured = \%opts;
 		return [
 			{
-				ip          => '45.0.0.1',
-				source      => 'api',
-				found       => 1,
-				fetched     => '2026-08-01 00:00:00+00',
-				last_update => undef,
-				ports       => [ 22, 80 ],
-				tags        => ['honeypot'],
-				cpes        => [],
-				vulns       => ['CVE-2021-44228'],
-				hostnames   => ['gate1.example.org'],
-				max_cvss    => 9.8,
-				os          => 'Linux 3.x',
-				org         => 'Example Hosting LLC',
-				isp         => undef,
-				asn         => 'AS64496',
+				ip            => '45.0.0.1',
+				source        => 'api',
+				found         => 1,
+				fetched       => '2026-08-01 00:00:00+00',
+				last_update   => undef,
+				ports         => [ 22, 80 ],
+				port_products => ['80 nginx 1.18.0'],
+				tags          => ['honeypot'],
+				cpes          => [],
+				vulns         => ['CVE-2021-44228'],
+				hostnames     => ['gate1.example.org'],
+				max_cvss      => 9.8,
+				os            => 'Linux 3.x',
+				org           => 'Example Hosting LLC',
+				isp           => undef,
+				asn           => 'AS64496',
 			}
 		];
 	}; ## end *Lilith::shodan_cache_search = sub
@@ -1368,7 +1379,8 @@ SKIP: {
 		->content_like( qr/honeypot/,            'the tag badge renders' )
 		->content_like( qr/1 CVE/,               'the CVE badge renders' )
 		->content_like( qr/gate1\.example\.org/, 'the hostnames render' )
-		->content_like( qr/Example Hosting LLC/, 'the org renders' );
+		->content_like( qr/Example Hosting LLC/, 'the org renders' )
+		->content_like( qr/\(nginx 1\.18\.0\)/,  'a port shows what runs on it' );
 
 	is_deeply( $captured->{tag},  [ 'honeypot', '!cloud' ], 'a multi-value filter forwards one parameter per value' );
 	is_deeply( $captured->{port}, ['22'],                   'the port filter forwards' );
@@ -1404,10 +1416,11 @@ SKIP: {
 		->content_like( qr/alerts naming this address/, 'the alerts link renders' )
 		->content_unlike( qr/log lines mentioning/, 'no logs link without an Allani store' );
 	{
-		my $t_allani = _make_app( "enable_shodan = true\n\n[allani]\ndsn = \"dbi:Pg:dbname=allani\"\n" );
+		my $t_allani = _make_app("enable_shodan = true\n\n[allani]\ndsn = \"dbi:Pg:dbname=allani\"\n");
 		$t_allani->get_ok('/shodan')
 			->status_is( 200, 'GET /shodan renders 200 with Allani' )
-			->content_like( qr{/logs\?message=45\.0\.0\.1}, 'the logs link searches the message field for the address' );
+			->content_like( qr{/logs\?message=45\.0\.0\.1},
+				'the logs link searches the message field for the address' );
 	}
 
 	# the filter fields' value suggestions

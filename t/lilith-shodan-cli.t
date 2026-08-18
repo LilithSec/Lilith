@@ -194,6 +194,27 @@ sub add_alert {
 }
 
 # ---------------------------------------------------------------------------
+# 7.  --force refetches what is held fresh, --ip names one address
+# ---------------------------------------------------------------------------
+
+{
+	# 45.0.0.1 is still held fresh from section 3, so a plain run skips it.
+	my ($forced) = run_cmd( dry_run => 1, force => 1 );
+	like( $forced, qr/already cached: 0/, '--force counts nothing as fresh' );
+	like( $forced, qr/would look up: 2/,  'so the held address is a candidate again' );
+	like( $forced, qr/45\.0\.0\.1/,       'and is listed' );
+
+	my ($one) = run_cmd( dry_run => 1, ip => '45.0.0.1' );
+	like( $one, qr/scanned: 1/,       '--ip scans just the named address' );
+	like( $one, qr/would look up: 1/, 'which is a candidate even while held fresh' );
+	unlike( $one, qr/45\.0\.0\.2/, 'the alert tables are not read' );
+
+	my ($private) = run_cmd( dry_run => 1, ip => '10.0.0.5' );
+	like( $private, qr/private: 1/,       'a private --ip is still dropped' );
+	like( $private, qr/would look up: 0/, 'and nothing would be asked' );
+}
+
+# ---------------------------------------------------------------------------
 # shodan_cache_stats -- summarize the table the other command fills
 # ---------------------------------------------------------------------------
 
@@ -217,8 +238,8 @@ sub add_alert {
 	# Run the stats command with the config/lilith stubs the file already set.
 	my $run_stats = sub {
 		my (%opt) = @_;
-		my $cmd = bless {}, 'Lilith::CLI::Command::ShodanCacheStats';
-		my $out = '';
+		my $cmd   = bless {}, 'Lilith::CLI::Command::ShodanCacheStats';
+		my $out   = '';
 		open( my $fh, '>', \$out ) or die $!;
 		my $old = select($fh);
 		eval { $cmd->execute( \%opt, [] ) };
@@ -226,7 +247,7 @@ sub add_alert {
 		select($old);
 		close($fh);
 		return ( $out, $err );
-	};
+	}; ## end $run_stats = sub
 
 	my ( $table, $terr ) = $run_stats->( ttl => 3600, top => 5, output => 'table' );
 	is( $terr, '', 'shodan_cache_stats runs without error' );

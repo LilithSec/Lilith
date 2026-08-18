@@ -180,7 +180,10 @@
       <span class="badge <%= $self->shodan_tag_class($tag) %>"><%= $tag %></span>
       %   }
       %   if (my $port_count = scalar @{ $s->{info}{ports} || [] }) {
-      <span class="badge bg-secondary" title="open ports: <%= join(', ', @{ $s->{info}{ports} }) %>"><%= $port_count %> port<%= $port_count == 1 ? '' : 's' %></span>
+      %     # each port carries what the crawl saw running on it, where the
+      %     # entry paired one (API-tier depth)
+      %     my $products_by_port = $self->shodan_port_products( $s->{info}{port_products} );
+      <span class="badge bg-secondary" title="open ports: <%= join(', ', map { $products_by_port->{$_} ? $_ . ' (' . $products_by_port->{$_} . ')' : $_ } @{ $s->{info}{ports} }) %>"><%= $port_count %> port<%= $port_count == 1 ? '' : 's' %></span>
       %   }
       %   if ($s->{vuln_count}) {
       %     my $worst = $s->{worst_cvss};

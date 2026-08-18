@@ -31,8 +31,10 @@
 %   }
 %   if (my $port_count = scalar @{ $shodan->{ports} }) {
 %     # The ports themselves go in the tooltip: a host with thirty open would
-%     # otherwise be the widest cell in the table.
-<span class="badge bg-secondary" title="open ports: <%= join(', ', @{ $shodan->{ports} }) %>"><%= $port_count %> port<%= $port_count == 1 ? '' : 's' %></span>
+%     # otherwise be the widest cell in the table. Each carries what the crawl
+%     # saw running on it, where the cache paired one (API-tier rows only).
+%     my $products_by_port = $self->shodan_port_products( $shodan->{port_products} );
+<span class="badge bg-secondary" title="open ports: <%= join(', ', map { $products_by_port->{$_} ? $_ . ' (' . $products_by_port->{$_} . ')' : $_ } @{ $shodan->{ports} }) %>"><%= $port_count %> port<%= $port_count == 1 ? '' : 's' %></span>
 %   }
 %   if (my $vuln_count = $shodan->{vulns}) {
 %     # Coloured by the worst score rather than by how many, since one critical

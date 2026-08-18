@@ -382,7 +382,7 @@ sub _service {
 		# stack) share it, so it is a search facet the modal pivots on.
 		hash => _str( $banner, 'hash' ),
 
-		cpes  => $cpes,
+		cpes   => $cpes,
 		banner => $text,
 		vulns  => [],
 		http   => {},
@@ -418,7 +418,7 @@ sub _service {
 			# presence, not content: both are pages in their own right and the
 			# modal only reports that the server serves one.
 			securitytxt => ( _str( $http, 'securitytxt' ) ne '' ? 1 : 0 ),
-			robots      => ( _str( $http, 'robots' )      ne '' ? 1 : 0 ),
+			robots      => ( _str( $http, 'robots' ) ne ''      ? 1 : 0 ),
 
 			# how many hops the crawler was bounced through before the banner --
 			# a login page that redirects elsewhere is worth seeing at a glance.
@@ -566,6 +566,8 @@ sub _service {
 #         cert_fingerprints => [ 'aabbcc...' ],          # deduped across services,
 #         banner_hashes     => [ -1524570663 ],          # stored and matched locally
 #         products          => [ 'nginx' ],              # distinct product names, no versions
+#         port_products     => [ '443 nginx 1.18.0' ],   # the port-to-product pairing, current
+#                                                        # ports only; see port_product_map
 #       },
 #       '',                                              # the error string
 #       { ... },                                         # Shodan's own response
@@ -724,7 +726,7 @@ sub _callouts {
 		( my $slug = lc $EXPOSED_PORT{$port} ) =~ s/[^a-z0-9]+/-/g;
 		$slug =~ s/^-+|-+$//g;
 		push( @danger, { text => 'exposed ' . $EXPOSED_PORT{$port}, level => 'danger', key => 'exposed-' . $slug } );
-	} ## end for my $port ( @{ $info...})
+	}
 
 	# The certificate and TLS weaknesses are gathered across every service and
 	# each reported once, rather than once per port that shares the fault.
@@ -741,10 +743,11 @@ sub _callouts {
 		# what _service already dropped the refused protocols from.
 		my $versions = defined $ssl->{versions} ? $ssl->{versions} : '';
 		while ( $versions =~ /(SSLv[23]|TLSv1\.[01])\b/g ) { $weak_tls{$1} = 1; }
-	} ## end for my $service ( @{ $info...})
+	} ## end for my $service ( @{ $info->{services} } )
 
 	my @warning;
-	push( @warning, { text => 'weak TLS (' . join( ', ', sort keys %weak_tls ) . ')', level => 'warning', key => 'weak-tls' } )
+	push( @warning,
+		{ text => 'weak TLS (' . join( ', ', sort keys %weak_tls ) . ')', level => 'warning', key => 'weak-tls' } )
 		if %weak_tls;
 	push( @warning, { text => 'self-signed certificate', level => 'warning', key => 'self-signed' } )  if $self_signed;
 	push( @warning, { text => 'expired certificate',     level => 'warning', key => 'expired-cert' } ) if $expired;
@@ -753,8 +756,9 @@ sub _callouts {
 	# the grey tag row into a finding, since "runs software past its support" is
 	# exactly what the callouts are for.
 	my %tag = map { $_ => 1 } @{ $info->{tags} };
-	push( @warning, { text => 'end-of-life OS',      level => 'warning', key => 'eol-os' } )      if $tag{'eol-os'};
-	push( @warning, { text => 'end-of-life product', level => 'warning', key => 'eol-product' } ) if $tag{'eol-product'};
+	push( @warning, { text => 'end-of-life OS',      level => 'warning', key => 'eol-os' } ) if $tag{'eol-os'};
+	push( @warning, { text => 'end-of-life product', level => 'warning', key => 'eol-product' } )
+		if $tag{'eol-product'};
 
 	return [ @danger, @warning ];
 } ## end sub _callouts
@@ -880,7 +884,8 @@ sub normalize {
 	# projection shodan_cache_put stores and the neighborhood panel matches on:
 	# a host commonly presents one panel or certificate on several ports, and
 	# that is one fingerprint, not one per port.
-	my ( %html_hash, %cert_fp, %banner_hash, %product );
+	my ( %html_hash, %cert_fp, %banner_hash, %product, %port_product );
+	my %open_port = map { $_ => 1 } @{ $info{ports} };
 	for my $service ( @{ $info{services} } ) {
 		my $html = $service->{http}{html_hash};
 		$html_hash{$html} = 1 if defined $html && $html ne '' && $html ne '0';
@@ -892,12 +897,24 @@ sub normalize {
 		# the product name only; the version rides along per-service and is not
 		# what a "which hosts run nginx" facet groups by.
 		my $name = $service->{product};
-		$product{$name} = 1 if defined $name && $name ne '';
-	} ## end for my $service ( @{ $info...})
+		next unless defined $name && $name ne '';
+		$product{$name} = 1;
+
+		# the pairing too, since the flat list cannot say which port runs what.
+		# 'PORT product version', one per distinct pair (both transports of a
+		# port commonly carry the same banner, and that is one pairing). Current
+		# ports only, so a history response's since-closed services do not
+		# annotate a port list they are no longer on.
+		next unless $open_port{ $service->{port} };
+		my $pairing = $service->{port} . ' ' . $name . ( $service->{version} ne '' ? ' ' . $service->{version} : '' );
+		$port_product{$pairing} = $service->{port};
+	} ## end for my $service ( @{ $info{services} } )
 	$info{html_hashes}       = [ sort { $a <=> $b } keys %html_hash ];
 	$info{cert_fingerprints} = [ sort keys %cert_fp ];
 	$info{banner_hashes}     = [ sort { $a <=> $b } keys %banner_hash ];
 	$info{products}          = [ sort keys %product ];
+	$info{port_products}
+		= [ sort { $port_product{$a} <=> $port_product{$b} || $a cmp $b } keys %port_product ];
 
 	# The plain-language findings, drawn from everything just built. Last, so it
 	# reads ports, services, and tags in their final form.
@@ -905,6 +922,43 @@ sub normalize {
 
 	return \%info;
 } ## end sub normalize
+
+# The port_products list back as a per-port lookup, for annotating a port list
+# with what runs on each. The one reader of the format normalize writes (and
+# shodan_cache stores), so the two cannot drift apart in separate template
+# copies.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $port_products :: an array ref of 'PORT product version' strings, as
+#     normalize's port_products or the shodan_cache column. Anything else
+#     (undef, a non-ref, a malformed entry) is ignored rather than died on,
+#     since a row from before schema 20 hands in undef.
+#
+# Returns: a hash ref keyed by port number. Each value is the product (with
+# its version when one was identified), several on one port joined with ' / '.
+# A port nothing was identified on is simply absent. Empty hash ref when there
+# is nothing to correlate.
+#
+#     my $products_by_port = port_product_map( [ '443 nginx 1.18.0' ] );
+#     # $products_by_port->{443} is 'nginx 1.18.0'
+sub port_product_map {
+	my $port_products = shift;
+
+	my %map;
+	return \%map unless ref $port_products eq 'ARRAY';
+
+	for my $pairing ( @{$port_products} ) {
+		next unless defined $pairing && !ref $pairing;
+		my ( $port, $label ) = $pairing =~ /^([0-9]+) (.+)$/;
+		next unless defined $label;
+		$map{$port} = defined $map{$port} ? $map{$port} . ' / ' . $label : $label;
+	}
+
+	return \%map;
+} ## end sub port_product_map
 
 # A count facet, as the [ { value, count } ] list the modal renders, sorted the
 # way Shodan already returns it (most common first). Shodan sends each facet as
@@ -1042,7 +1096,7 @@ sub neighborhood_count {
 	return ( {}, 'neighborhood count needs a Shodan API key', 0 )
 		unless defined $api_key && $api_key ne '';
 
-	$limit = 6 unless defined $limit && $limit =~ /^[0-9]+$/;
+	$limit        = 6  unless defined $limit && $limit =~ /^[0-9]+$/;
 	$fingerprints = [] unless ref $fingerprints eq 'ARRAY';
 
 	my $shodan = eval {
@@ -1060,7 +1114,8 @@ sub neighborhood_count {
 	# phrase; an org that cleans away to nothing simply skips the count.
 	my $org_query = _query_value( $org, 1 );
 	if ( $org_query ne '' ) {
-		my $raw = eval { $shodan->count( { org => $org_query }, [ { port => 10 }, { product => 10 }, { vuln => 10 } ] ); };
+		my $raw
+			= eval { $shodan->count( { org => $org_query }, [ { port => 10 }, { product => 10 }, { vuln => 10 } ] ); };
 		return ( \%result, 'org count: ' . _trim($@), 0 ) if $@;
 		$first = 0;
 
@@ -1103,7 +1158,7 @@ sub neighborhood_count {
 				total  => ( ref $raw eq 'HASH' && defined $raw->{total} ? $raw->{total} + 0 : 0 ),
 			}
 		);
-	} ## end for my $fp ( @{$fingerprints...})
+	} ## end for my $fp ( @{$fingerprints} )
 
 	return ( \%result, '', $skipped );
 } ## end sub neighborhood_count

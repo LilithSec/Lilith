@@ -16,6 +16,8 @@
 #     lilith shodan_cache
 #     lilith shodan_cache -s 900 --tables suricata,sagan
 #     lilith shodan_cache -s 0 --limit 500      # backfill, 500 at a time
+#     lilith shodan_cache -s 0 --force          # refetch everything held
+#     lilith shodan_cache --ip 8.8.8.8          # refetch one address now
 package Lilith::CLI::Command::ShodanCache;
 
 use strict;
@@ -33,6 +35,8 @@ sub opt_spec {
 		[ 'tables=s', 'comma separated alert tables to read' ],
 		[ 's=s',      'how far back to read, in seconds; 0 for everything', { default => 180 } ],
 		[ 'limit=s',  'stop after this many lookups; 0 for no limit',       { default => 0 } ],
+		[ 'force',    'look up even addresses the cache already holds fresh' ],
+		[ 'ip=s',     'update just this address instead of reading the alert tables; implies --force' ],
 		[ 'dry-run',  'report what would be looked up without asking Shodan' ],
 		$class->output_opt_spec,
 	);
@@ -46,6 +50,13 @@ sub opt_spec {
 # (nothing to learn, and nothing that should be handed to a third party),
 # addresses already held fresh in the cache (one query for the whole set), and
 # anything past --limit.
+#
+# --force skips the freshness drop, refetching everything the window names --
+# for after a schema change or a Shodan plan change, when what is held is
+# stale in shape rather than in age. --ip skips the window read instead,
+# taking the one named address as the whole candidate list; it implies
+# --force, since asking to update an address that is held fresh would
+# otherwise do nothing. The public-only drop is never skipped.
 #
 # Not gated on enable_shodan. That switch exists for the unauthenticated web
 # frontend; running this command is already the operator saying so, the same
@@ -83,7 +94,10 @@ sub execute {
 
 	my @tables = grep { $_ ne '' } split( /\s*,\s*/, defined( $opt->{tables} ) ? $opt->{tables} : '' );
 
-	my $ips     = $lilith->alert_ips( go_back_seconds => $opt->{s}, tables => \@tables );
+	my $ips
+		= defined $opt->{ip} && $opt->{ip} ne ''
+		? [ $opt->{ip} ]
+		: $lilith->alert_ips( go_back_seconds => $opt->{s}, tables => \@tables );
 	my $scanned = scalar @{$ips};
 
 	# Public addresses only.
@@ -91,10 +105,15 @@ sub execute {
 	my $private = $scanned - scalar @public;
 
 	# Whatever the cache already holds fresh, in one statement rather than one
-	# per address.
-	my $held   = $lilith->shodan_cache_badges( ips => \@public, source => $source, ttl => $ttl );
-	my @wanted = grep { !$held->{$_} } @public;
-	my $fresh  = scalar(@public) - scalar(@wanted);
+	# per address. --force wants those refetched, so it skips the question
+	# entirely; --ip is a request to update that address, which is the same ask.
+	my @wanted = @public;
+	my $fresh  = 0;
+	unless ( $opt->{force} || defined $opt->{ip} ) {
+		my $held = $lilith->shodan_cache_badges( ips => \@public, source => $source, ttl => $ttl );
+		@wanted = grep { !$held->{$_} } @public;
+		$fresh  = scalar(@public) - scalar(@wanted);
+	}
 
 	# --limit truncates, and says how much it left -- a run that quietly covered
 	# part of its window would read as one that covered all of it.

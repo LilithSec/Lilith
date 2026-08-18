@@ -244,7 +244,22 @@
       chip(calloutsEl, callout.text, callout.level === 'danger' ? 'bg-danger' : 'bg-warning text-dark');
     });
     (shodan.tags || []).forEach(function (tag) { chip(tagsEl, tag, SHODAN_TAG_CLASS[tag]); });
-    ports.forEach(function (port) { chip(portsEl, port, 'bg-secondary'); });
+
+    // Each port chip carries what the crawl saw running on it, right on the
+    // chip -- the same product-and-version the service blocks below head
+    // with. Correlated from the services in this same payload; the keyless
+    // tier carries none, so its chips stay bare port numbers.
+    var productsByPort = {};
+    (shodan.services || []).forEach(function (service) {
+      if (!service.product) { return; }
+      var label = service.product + (service.version ? ' ' + service.version : '');
+      var labels = productsByPort[service.port] || (productsByPort[service.port] = []);
+      if (labels.indexOf(label) === -1) { labels.push(label); }
+    });
+    ports.forEach(function (port) {
+      var label = productsByPort[port] ? ' · ' + productsByPort[port].join(' / ') : '';
+      chip(portsEl, port + label, 'bg-secondary');
+    });
 
     // Whether this was served from the cache matters for the same reason
     // "Last seen" does — it says how old the answer on screen actually is.
