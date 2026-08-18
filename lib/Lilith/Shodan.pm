@@ -324,18 +324,28 @@ sub _add_vulns {
 #       label     => 'nginx 1.18.0',     # what to call it; see below
 #       cpes      => [ 'cpe:2.3:a:nginx:nginx:1.18.0:...' ],
 #       timestamp => '2026-06-14T02:11:33.123456',
+#       hash      => -1524570663,          # Shodan's banner hash, a pivot facet
 #       banner    => "HTTP/1.1 200 OK\r\n...",   # capped at 4000 characters
 #       vulns     => [ 'CVE-2021-23017' ],
-#       http      => { title => '...', server => 'nginx', waf => '',
-#                      status => 200, components => 'jQuery, Bootstrap',
-#                      favicon_hash => -1234567890 },
+#       http      => { title => '...', server => 'nginx', host => 'example.org',
+#                      waf => '', status => 200, components => 'jQuery, Bootstrap',
+#                      favicon_hash => -1234567890, html_hash => 12345678,
+#                      securitytxt => 0, robots => 1, redirects => 2 },
 #       ssl       => { versions => 'TLSv1.2, TLSv1.3', cipher => 'TLS_AES_256_GCM_SHA384 (256 bit)',
 #                      jarm => '...', ja3s => '...', cert_subject => 'CN=example.org',
-#                      cert_issuer => 'CN=R3, O=Let\'s Encrypt', cert_serial => '...',
+#                      cert_issuer => 'CN=R3, O=Let\'s Encrypt', self_signed => 0,
+#                      cert_serial => '...', cert_issued => '20260601000000Z',
 #                      cert_expires => '20260901000000Z', cert_expired => 0,
-#                      cert_fingerprint => '...' },
-#       ssh       => { type => 'ssh-rsa', fingerprint => '...', hassh => '...' },
+#                      cert_sig_alg => 'sha256WithRSAEncryption', cert_pubkey => 'RSA 2048-bit',
+#                      chain_len => 2, dh_bits => '', cert_fingerprint => '...' },
+#       ssh       => { type => 'ssh-rsa', fingerprint => '...', hassh => '...',
+#                      cipher => 'aes128-ctr', mac => 'hmac-sha2-256' },
 #     }
+#
+# securitytxt and robots are 1/0 presence flags, not the files themselves; html
+# and favicon hashes, like the banner hash, are search facets. self_signed is
+# derived (subject == issuer). dh_bits is '' rather than 0 on the ECDHE
+# handshakes that never negotiate a DH group.
 #
 # The banner is capped because Shodan stores whatever the service sent, which
 # for some HTTP servers is the whole page -- and this one lives in a modal
@@ -367,12 +377,17 @@ sub _service {
 		product   => _str( $banner,            'product' ),
 		version   => _str( $banner,            'version' ),
 		timestamp => _str( $banner,            'timestamp' ),
-		cpes      => $cpes,
-		banner    => $text,
-		vulns     => [],
-		http      => {},
-		ssl       => {},
-		ssh       => {},
+
+		# Shodan's banner hash: identical services (a cloned panel, a reused
+		# stack) share it, so it is a search facet the modal pivots on.
+		hash => _str( $banner, 'hash' ),
+
+		cpes  => $cpes,
+		banner => $text,
+		vulns  => [],
+		http   => {},
+		ssl    => {},
+		ssh    => {},
 	);
 
 	# The CVEs this particular service is answerable for, as bare ids -- their
@@ -389,11 +404,25 @@ sub _service {
 		$service{http} = {
 			title      => _str( $http, 'title' ),
 			server     => _str( $http, 'server' ),
+			host       => _str( $http, 'host' ),
 			waf        => _str( $http, 'waf' ),
 			status     => _str( $http, 'status' ),
 			components =>
 				( ref $http->{components} eq 'HASH' ? join( ', ', sort keys %{ $http->{components} } ) : '' ),
 			favicon_hash => _str( $http->{favicon}, 'hash' ),
+
+			# another pivot facet, like the favicon hash: the whole page's hash,
+			# which clones of one deployment share.
+			html_hash => _str( $http, 'html_hash' ),
+
+			# presence, not content: both are pages in their own right and the
+			# modal only reports that the server serves one.
+			securitytxt => ( _str( $http, 'securitytxt' ) ne '' ? 1 : 0 ),
+			robots      => ( _str( $http, 'robots' )      ne '' ? 1 : 0 ),
+
+			# how many hops the crawler was bounced through before the banner --
+			# a login page that redirects elsewhere is worth seeing at a glance.
+			redirects => ( ref $http->{redirects} eq 'ARRAY' ? scalar @{ $http->{redirects} } : 0 ),
 		};
 	} ## end if ( ref $banner->{http} eq 'HASH' )
 
@@ -406,6 +435,15 @@ sub _service {
 		# refused with a '-'. Only the supported ones are worth showing.
 		my @versions = grep { $_ !~ /^-/ } @{ _list( $ssl->{versions} ) };
 
+		my $cert_subject = _dn( $cert->{subject} );
+		my $cert_issuer  = _dn( $cert->{issuer} );
+
+		# The public key as 'RSA 2048-bit', from Shodan's { type, bits }. Weak
+		# keys (1024-bit RSA) read at a glance where the raw pair would not.
+		my $pubkey      = ref $cert->{pubkey} eq 'HASH' ? $cert->{pubkey} : {};
+		my $pubkey_type = _str( $pubkey, 'type' );
+		my $pubkey_bits = _str( $pubkey, 'bits' );
+
 		$service{ssl} = {
 			versions => join( ', ', @versions ),
 			cipher   => (
@@ -413,14 +451,34 @@ sub _service {
 				? $cipher->{name} . ( defined $cipher->{bits} ? ' (' . $cipher->{bits} . ' bit)' : '' )
 				: ''
 			),
-			jarm             => _str( $ssl, 'jarm' ),
-			ja3s             => _str( $ssl, 'ja3s' ),
-			cert_subject     => _dn( $cert->{subject} ),
-			cert_issuer      => _dn( $cert->{issuer} ),
-			cert_serial      => _str( $cert, 'serial' ),
-			cert_expires     => _str( $cert, 'expires' ),
-			cert_expired     => ( $cert->{expired} ? 1 : 0 ),
+			jarm         => _str( $ssl, 'jarm' ),
+			ja3s         => _str( $ssl, 'ja3s' ),
+			cert_subject => $cert_subject,
+			cert_issuer  => $cert_issuer,
+
+			# subject == issuer is a self-signed certificate: no CA vouches for
+			# it, which for anything public-facing is worth a flag of its own.
+			self_signed  => ( $cert_subject ne '' && $cert_subject eq $cert_issuer ) ? 1 : 0,
+			cert_serial  => _str( $cert, 'serial' ),
+			cert_issued  => _str( $cert, 'issued' ),
+			cert_expires => _str( $cert, 'expires' ),
+			cert_expired => ( $cert->{expired} ? 1 : 0 ),
+			cert_sig_alg => _str( $cert, 'sig_alg' ),
+			cert_pubkey  => (
+				$pubkey_type ne ''
+				? uc($pubkey_type) . ( $pubkey_bits ne '' ? ' ' . $pubkey_bits . '-bit' : '' )
+				: ''
+			),
 			cert_fingerprint => _str( $cert->{fingerprint}, 'sha256' ),
+
+			# how many certificates the server presented: a chain of one means no
+			# intermediate was sent, which corroborates a self-signed leaf.
+			chain_len => scalar @{ _list( $ssl->{chain} ) },
+
+			# Diffie-Hellman parameter size, present only when the handshake used
+			# it; under 2048 bits is weak. Absent on the ECDHE handshakes that
+			# are now the common case, hence '' rather than 0.
+			dh_bits => _str( $ssl->{dhparams}, 'bits' ),
 		};
 	} ## end if ( ref $banner->{ssl} eq 'HASH' )
 
@@ -430,8 +488,14 @@ sub _service {
 			type        => _str( $ssh, 'type' ),
 			fingerprint => _str( $ssh, 'fingerprint' ),
 			hassh       => _str( $ssh, 'hassh' ),
+
+			# the negotiated symmetric cipher and MAC, both plain strings (the
+			# kex field beside them is the whole algorithm list, not one value);
+			# a weak choice here dates an old or misconfigured daemon.
+			cipher => _str( $ssh, 'cipher' ),
+			mac    => _str( $ssh, 'mac' ),
 		};
-	}
+	} ## end if ( ref $banner->{ssh} eq 'HASH' )
 
 	$service{label}
 		= $service{product} ne '' ? $service{product} . ( $service{version} ne '' ? ' ' . $service{version} : '' )
@@ -497,6 +561,7 @@ sub _service {
 #         cpes        => [ 'cpe:2.3:a:nginx:nginx:...' ],
 #         vulns       => [ { cve => 'CVE-2021-23017', cvss => 9.8, ... } ],
 #         services    => [ { port => 443, ... } ],       # see _service
+#         callouts    => [ { text => 'exposed RDP', level => 'danger' } ],  # see _callouts
 #       },
 #       '',                                              # the error string
 #       { ... },                                         # Shodan's own response
@@ -591,6 +656,98 @@ sub fetch {
 
 	return ( ref $raw eq 'HASH' ? $raw : {}, '' );
 } ## end sub fetch
+
+# Ports that are a finding in themselves when they answer on the public
+# internet: remote access, unauthenticated-by-default datastores, and container
+# orchestration control planes. Kept deliberately short -- a port common enough
+# to be background noise (FTP, SMTP) would drown the real signal -- so every
+# entry here is one an analyst would want called out by name.
+#
+# Keyed by port, valued by what to call it in the callout.
+my %EXPOSED_PORT = (
+	23    => 'Telnet',
+	445   => 'SMB',
+	1433  => 'MSSQL',
+	2375  => 'Docker API',
+	2379  => 'etcd',
+	3306  => 'MySQL',
+	3389  => 'RDP',
+	5432  => 'PostgreSQL',
+	5900  => 'VNC',
+	5984  => 'CouchDB',
+	6379  => 'Redis',
+	9200  => 'Elasticsearch',
+	10250 => 'Kubelet',
+	11211 => 'Memcached',
+	27017 => 'MongoDB',
+);
+
+# The plain-language findings drawn out of an already-normalized result: the
+# things an analyst wants at the top of the modal rather than reconstructed from
+# a port list and a row of certificate fields. Descriptive, not exhaustive --
+# what is wrong with the host, in the words for it.
+#
+# Pure, and derived entirely from what normalize has already built, so it stays
+# in step with the modal without a second read of the raw. Nothing here needs
+# the clock; the one time-relative finding (a certificate not yet expired but
+# nearly) is added by the controller, which has the clock and the freshness
+# rules, so this function can stay pure and testable.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $info :: the result hash normalize is building, read after its ports,
+#     services, and tags are set. Its services carry the ssl fields _service
+#     produced (self_signed, cert_expired, versions); its tags are Shodan's own.
+#
+# Returns: an array ref of findings, each { text => 'exposed RDP', level =>
+# 'danger' | 'warning' }, danger first so the exposed services lead. Empty when
+# nothing stood out.
+#
+#     my $callouts = _callouts( \%info );
+#     # $callouts->[0] is { text => 'exposed MongoDB', level => 'danger' }
+sub _callouts {
+	my $info = shift;
+
+	my @danger;
+	for my $port ( @{ $info->{ports} } ) {
+		next unless $EXPOSED_PORT{$port};
+		push( @danger, { text => 'exposed ' . $EXPOSED_PORT{$port}, level => 'danger' } );
+	}
+
+	# The certificate and TLS weaknesses are gathered across every service and
+	# each reported once, rather than once per port that shares the fault.
+	my %weak_tls;
+	my $self_signed = 0;
+	my $expired     = 0;
+	for my $service ( @{ $info->{services} } ) {
+		my $ssl = $service->{ssl};
+		next unless ref $ssl eq 'HASH';
+		$self_signed = 1 if $ssl->{self_signed};
+		$expired     = 1 if $ssl->{cert_expired};
+
+		# SSLv2/3 and TLS 1.0/1.1 are the deprecated ones; the versions string is
+		# what _service already dropped the refused protocols from.
+		my $versions = defined $ssl->{versions} ? $ssl->{versions} : '';
+		while ( $versions =~ /(SSLv[23]|TLSv1\.[01])\b/g ) { $weak_tls{$1} = 1; }
+	} ## end for my $service ( @{ $info...})
+
+	my @warning;
+	push( @warning, { text => 'weak TLS (' . join( ', ', sort keys %weak_tls ) . ')', level => 'warning' } )
+		if %weak_tls;
+	push( @warning, { text => 'self-signed certificate', level => 'warning' } ) if $self_signed;
+	push( @warning, { text => 'expired certificate',     level => 'warning' } ) if $expired;
+
+	# End-of-life software, from the tags Shodan already sets -- promoted out of
+	# the grey tag row into a finding, since "runs software past its support" is
+	# exactly what the callouts are for.
+	my %tag = map { $_ => 1 } @{ $info->{tags} };
+	push( @warning, { text => 'end-of-life OS',      level => 'warning' } ) if $tag{'eol-os'};
+	push( @warning, { text => 'end-of-life product', level => 'warning' } ) if $tag{'eol-product'};
+
+	return [ @danger, @warning ];
+} ## end sub _callouts
 
 # One Shodan response, reduced to what the IP info modal shows.
 #
@@ -709,8 +866,232 @@ sub normalize {
 		} values %vulns
 	];
 
+	# The plain-language findings, drawn from everything just built. Last, so it
+	# reads ports, services, and tags in their final form.
+	$info{callouts} = _callouts( \%info );
+
 	return \%info;
 } ## end sub normalize
+
+# A count facet, as the [ { value, count } ] list the modal renders, sorted the
+# way Shodan already returns it (most common first). Shodan sends each facet as
+# an array of { count, value }, but omits a facet it has nothing for -- so every
+# read of one has to cope with the key being absent.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $facets :: the response's 'facets' value, a hash ref keyed by facet name.
+#     Anything that is not a hash ref reads as holding nothing.
+#   - $key :: the facet wanted, e.g. 'port'.
+#
+# Returns: an array ref of { value => ..., count => ... }, empty when the facet
+# was absent or malformed. Values are left as Shodan typed them (a port is a
+# number, a product a string); counts are forced numeric.
+#
+#     _facet( $raw->{facets}, 'port' )   # [ { value => 443, count => 1200 }, ... ]
+sub _facet {
+	my ( $facets, $key ) = @_;
+
+	my $list = ref $facets eq 'HASH' ? $facets->{$key} : undef;
+	return [] unless ref $list eq 'ARRAY';
+
+	my @out;
+	for my $entry ( @{$list} ) {
+		next unless ref $entry eq 'HASH' && defined $entry->{value};
+		push( @out, { value => $entry->{value}, count => ( ( $entry->{count} // 0 ) + 0 ) } );
+	}
+
+	return \@out;
+} ## end sub _facet
+
+# A value safe to splice into a Shodan search query, or '' when there is none.
+# The count queries are built from Shodan's own data about the host -- an org
+# name, a hash, a certificate serial -- none of which is trusted for shape, and
+# all of which is about to become part of a query string. A stray quote or space
+# would at best break the query and at worst change what it matches, so anything
+# outside a conservative set is dropped rather than escaped.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $value :: the raw value.
+#   - $quote :: when true, the cleaned value is wrapped in double quotes for a
+#     phrase match (what an org name with spaces needs); when false it is left
+#     bare (what a single-token hash or serial needs).
+#
+# Returns: the query-safe fragment, or '' when nothing usable was left.
+#
+#     _query_value( 'Example Hosting LLC', 1 )   # '"Example Hosting LLC"'
+#     _query_value( -1524570663, 0 )             # '-1524570663'
+sub _query_value {
+	my ( $value, $quote ) = @_;
+
+	return '' unless defined $value && !ref $value;
+
+	if ($quote) {
+
+		# a phrase: keep spaces, drop only what would break out of the quotes
+		( my $clean = $value ) =~ s/["\\\r\n]//g;
+		$clean =~ s/^\s+|\s+$//g;
+		return $clean eq '' ? '' : '"' . $clean . '"';
+	}
+
+	# a single token: only the characters a hash, serial, or fingerprint uses
+	return $value =~ /^-?[\w:.-]+$/ ? $value : '';
+} ## end sub _query_value
+
+# How many hosts Shodan sees matching the neighborhood of an address: the org it
+# belongs to, and the fingerprints its services carry. The count endpoint costs
+# no query credits and returns no host detail, only totals and facets -- which
+# is all the modal's neighborhood panel wants, and is why this is separate from
+# the per-host gather.
+#
+# Two kinds of question, both answered by /shodan/host/count:
+#
+#   - the org :: one count of org:"..." faceted by port, product, and vuln --
+#     what the rest of this owner's internet-facing fleet is running. Only as
+#     useful as the org is specific; a hosting provider's org is every kind of
+#     host at once, which the caller is left to judge from the total.
+#   - each fingerprint :: one bare count per html hash, certificate, or banner
+#     hash the host presents -- how much else on the internet shares that exact
+#     panel or TLS stack, which clusters reused infrastructure the org never
+#     could.
+#
+# API tier only: the count endpoint needs a key, and the tag facet it would most
+# want is plan-gated, so this asks only for the facets a Freelancer key answers.
+# Blocking HTTP throughout -- one request per count, paced a second apart for the
+# rate limit, so it is only ever called inside a subprocess. Nothing here dies.
+#
+# Args:
+#
+#   - $org :: the host's org string, or '' to skip the org count.
+#   - $fingerprints :: an array ref of { label, filter, value } to count one
+#     apiece, e.g. { label => 'HTML hash', filter => 'http.html_hash',
+#     value => 12345678 }. filter is the Shodan search filter; value is spliced
+#     through _query_value, so an unusable one is simply skipped.
+#   - $api_key :: the configured key. Required; '' returns an error.
+#   - $limit :: the most fingerprint counts to actually run, since each is a
+#     paced request. Default 6. Any past it are reported as skipped rather than
+#     run, so a host with many services does not stall the panel.
+#
+# Returns: three values -- the result, an error string, and the number of
+# fingerprints skipped for the limit:
+#
+#     (
+#       {
+#         org => {                                   # undef when org was ''
+#           query    => 'Example Hosting LLC',
+#           total    => 1240,
+#           ports    => [ { value => 443, count => 900 }, ... ],
+#           products => [ { value => 'nginx', count => 410 }, ... ],
+#           vulns    => [ { value => 'CVE-2021-23017', count => 88 }, ... ],
+#         },
+#         fingerprints => [
+#           { label => 'HTML hash', filter => 'http.html_hash',
+#             value => 12345678, total => 37 },
+#         ],
+#       },
+#       '',     # error string, set only on a transport/HTTP failure
+#       0,      # fingerprints skipped for the limit
+#     )
+#
+# A count that fails stops the run and fills the error; the partial result so
+# far still rides back, so one bad fingerprint does not lose the org count.
+#
+#     my ( $near, $error ) = neighborhood_count( 'Example Hosting LLC', \@fp, $key );
+#     # $near->{org}{total} is how many hosts Shodan sees in that org
+sub neighborhood_count {
+	my ( $org, $fingerprints, $api_key, $limit ) = @_;
+
+	return ( {}, 'neighborhood count needs a Shodan API key', 0 )
+		unless defined $api_key && $api_key ne '';
+
+	$limit = 6 unless defined $limit && $limit =~ /^[0-9]+$/;
+	$fingerprints = [] unless ref $fingerprints eq 'ARRAY';
+
+	my $shodan = eval {
+		require WWW::Shodan::API;
+		my $client = WWW::Shodan::API->new($api_key);
+		$client->_ua->timeout(15);
+		$client;
+	};
+	return ( {}, 'WWW::Shodan::API: ' . _trim($@), 0 ) if $@ || !$shodan;
+
+	my %result = ( org => undef, fingerprints => [] );
+	my $first  = 1;
+
+	# The org count, faceted. _query_value quotes it, since an org name is a
+	# phrase; an org that cleans away to nothing simply skips the count.
+	my $org_query = _query_value( $org, 1 );
+	if ( $org_query ne '' ) {
+		my $raw = eval { $shodan->count( { org => $org_query }, [ { port => 10 }, { product => 10 }, { vuln => 10 } ] ); };
+		return ( \%result, 'org count: ' . _trim($@), 0 ) if $@;
+		$first = 0;
+
+		$result{org} = {
+			query    => $org,
+			total    => ( ref $raw eq 'HASH' && defined $raw->{total} ? $raw->{total} + 0 : 0 ),
+			ports    => _facet( ref $raw eq 'HASH' ? $raw->{facets} : undef, 'port' ),
+			products => _facet( ref $raw eq 'HASH' ? $raw->{facets} : undef, 'product' ),
+			vulns    => _facet( ref $raw eq 'HASH' ? $raw->{facets} : undef, 'vuln' ),
+		};
+	} ## end if ( $org_query ne '' )
+
+	# The fingerprint counts, one bare total apiece, capped at the limit.
+	my $run     = 0;
+	my $skipped = 0;
+	for my $fp ( @{$fingerprints} ) {
+		next unless ref $fp eq 'HASH';
+		my $value = _query_value( $fp->{value}, 0 );
+		next if $value eq '' || !defined $fp->{filter} || $fp->{filter} eq '';
+
+		if ( $run >= $limit ) {
+			$skipped++;
+			next;
+		}
+
+		# the rate limit is about a request a second; pace all but the first
+		sleep(1) unless $first;
+		$first = 0;
+		$run++;
+
+		my $raw = eval { $shodan->count( { $fp->{filter} => $value }, [] ); };
+		return ( \%result, 'fingerprint count (' . $fp->{filter} . '): ' . _trim($@), $skipped ) if $@;
+
+		push(
+			@{ $result{fingerprints} },
+			{
+				label  => ( defined $fp->{label} ? $fp->{label} : $fp->{filter} ),
+				filter => $fp->{filter},
+				value  => $fp->{value},
+				total  => ( ref $raw eq 'HASH' && defined $raw->{total} ? $raw->{total} + 0 : 0 ),
+			}
+		);
+	} ## end for my $fp ( @{$fingerprints...})
+
+	return ( \%result, '', $skipped );
+} ## end sub neighborhood_count
+
+# An error string with its trailing whitespace stripped, or a stand-in when it
+# was empty -- so a failure never comes back as a blank the caller reads as
+# success. Plain function, not a method.
+#
+# Args:
+#
+#   - $error :: the caught $@, or anything stringifiable.
+#
+# Returns: the trimmed string, or 'request failed' when there was nothing.
+#
+#     _trim("boom\n")   # 'boom'
+sub _trim {
+	my $error = shift;
+	my $why   = defined $error ? "$error" : '';
+	$why =~ s/\s+\z//;
+	return $why eq '' ? 'request failed' : $why;
+}
 
 =head1 SEE ALSO
 

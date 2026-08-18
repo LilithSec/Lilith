@@ -4691,6 +4691,85 @@ sub shodan_cache_values {
 	return $dbh->selectall_arrayref( $statement, { Slice => {} }, ( $minutes > 0 ? ($minutes) : () ) );
 } ## end sub shodan_cache_values
 
+=head2 shodan_neighbors
+
+How many other cached addresses share an address's neighborhood: its org, and
+each of its tags. The local counterpart to C<Lilith::Shodan::neighborhood_count>
+-- where that asks Shodan about the whole internet, this asks the cache about
+the hosts Lilith has actually seen, which is both free and grounded in the
+sensors' own traffic.
+
+It also answers what the API tier will not: the C<tag> facet the Shodan key is
+plan-gated out of is here just another column, because the tags were gathered a
+free per-address lookup at a time.
+
+The queried address is excluded from its own counts, so a host is never counted
+as its own neighbor.
+
+Takes:
+
+- C<ip> :: the address whose neighborhood is wanted, excluded from the counts.
+  Required.
+- C<org> :: the address's org string, or '' / unset to skip the org count.
+  Needs the schema version 17 C<org> column; without it the org count is
+  quietly skipped rather than dying, since the tag counts still stand.
+- C<tags> :: an array ref of the address's tags, each counted on its own.
+
+Returns a hash ref:
+
+    {
+      org  => { value => 'Example Hosting LLC', count => 12 },   # or undef
+      tags => [ { value => 'honeypot', count => 4 }, ... ],      # most common first
+    }
+
+A count that comes to zero is left out -- an org or tag no other cached host
+shares is not a neighborhood. Dies only if the database cannot be reached.
+
+    my $near = $lilith->shodan_neighbors( ip => '192.0.2.10', org => 'Example Hosting LLC',
+        tags => [ 'honeypot', 'cloud' ] );
+    # $near->{org}{count} is how many other cached hosts share that org
+
+=cut
+
+sub shodan_neighbors {
+	my ( $self, %opts ) = @_;
+
+	my $ip = defined $opts{ip} ? $opts{ip} : '';
+	die('shodan neighbors: an ip is required') if $ip eq '';
+
+	my $org  = defined $opts{org} ? $opts{org} : '';
+	my $tags = ref $opts{tags} eq 'ARRAY' ? $opts{tags} : [];
+
+	my $dbh = $self->_escalation_dbh;
+	my %out = ( org => undef, tags => [] );
+
+	# org is a schema version 17 column; on an older schema its count is skipped
+	# rather than fatal, using the same one-shot probe shodan_cache_values keeps.
+	if ( $org ne '' ) {
+		my $has_host_columns = $self->{_shodan_cache_host_columns};
+		$has_host_columns = $self->{_shodan_cache_host_columns} = column_exists( $dbh, 'shodan_cache', 'os' )
+			if !defined $has_host_columns;
+
+		if ($has_host_columns) {
+			my ($count) = $dbh->selectrow_array(
+				'select count(*) from shodan_cache where org = ? and ip <> ?::inet',
+				undef, $org, $ip );
+			$out{org} = { value => $org, count => $count + 0 } if $count;
+		}
+	} ## end if ( $org ne '' )
+
+	for my $tag ( @{$tags} ) {
+		next unless defined $tag && $tag ne '';
+		my ($count) = $dbh->selectrow_array(
+			'select count(*) from shodan_cache where ?::varchar = any(tags) and ip <> ?::inet',
+			undef, $tag, $ip );
+		push( @{ $out{tags} }, { value => $tag, count => $count + 0 } ) if $count;
+	}
+	@{ $out{tags} } = sort { $b->{count} <=> $a->{count} || $a->{value} cmp $b->{value} } @{ $out{tags} };
+
+	return \%out;
+} ## end sub shodan_neighbors
+
 =head2 cvedb_cache_put
 
 Store CVEDB's answer for a CVE, replacing whatever was held for it.

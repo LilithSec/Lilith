@@ -119,6 +119,133 @@ use_ok('Lilith::Shodan') or BAIL_OUT('Lilith::Shodan failed to load');
 }
 
 # ---------------------------------------------------------------------------
+# 2b.  Shodan — the enrichment fields pulled from a fuller banner
+# ---------------------------------------------------------------------------
+
+{
+	my $service = Lilith::Shodan::_service(
+		{
+			port    => 443,
+			hash    => -1524570663,
+			data    => 'HTTP/1.1 200 OK',
+			http    => {
+				server      => 'nginx',
+				host        => 'example.org',
+				html_hash   => 12345678,
+				favicon     => { hash => -98765 },
+				securitytxt => "Contact: mailto:sec\@example.org\n",
+				robots      => "User-agent: *\n",
+				redirects   => [ {}, {} ],
+			},
+			ssl => {
+				versions => [ 'TLSv1.2', 'TLSv1.3' ],
+				jarm     => '29d3fd00029d',
+				chain    => [ 'PEM-LEAF', 'PEM-INTERMEDIATE' ],
+				cert     => {
+					subject => { CN => 'example.org' },
+					issuer  => { CN => 'example.org' },
+					issued  => '20260601000000Z',
+					expires => '20260901000000Z',
+					sig_alg => 'sha256WithRSAEncryption',
+					pubkey  => { type => 'rsa', bits => 2048 },
+				},
+			},
+			ssh => { type => 'ssh-rsa', cipher => 'aes128-ctr', mac => 'hmac-sha2-256' },
+		}
+	);
+
+	is( $service->{hash}, -1524570663, 'the banner hash rides along as a pivot facet' );
+
+	is( $service->{http}{host},      'example.org', 'the HTTP host header is pulled out' );
+	is( $service->{http}{html_hash}, 12345678,      'the HTML hash rides along as a pivot facet' );
+	is( $service->{http}{securitytxt}, 1, 'a served security.txt is a presence flag, not its body' );
+	is( $service->{http}{robots},      1, 'a served robots.txt is a presence flag, not its body' );
+	is( $service->{http}{redirects},   2, 'the redirect count is the length of the chain' );
+
+	is( $service->{ssl}{self_signed}, 1, 'subject == issuer is reported as self-signed' );
+	is( $service->{ssl}{cert_issued}, '20260601000000Z', 'the certificate issuance date is pulled out' );
+	is( $service->{ssl}{cert_sig_alg}, 'sha256WithRSAEncryption', 'the signature algorithm is pulled out' );
+	is( $service->{ssl}{cert_pubkey},  'RSA 2048-bit', 'the public key is rendered type-and-bits' );
+	is( $service->{ssl}{chain_len},    2,  'the certificate chain length is counted' );
+	is( $service->{ssl}{dh_bits},      '', 'an ECDHE handshake reports no DH group as empty, not zero' );
+
+	is( $service->{ssh}{cipher}, 'aes128-ctr',    'the negotiated SSH cipher is pulled out' );
+	is( $service->{ssh}{mac},    'hmac-sha2-256', 'the negotiated SSH MAC is pulled out' );
+
+	# A CA-issued certificate is not flagged self-signed.
+	my $ca = Lilith::Shodan::_service(
+		{ port => 443, ssl => { cert => { subject => { CN => 'example.org' }, issuer => { CN => 'R3' } } } } );
+	is( $ca->{ssl}{self_signed}, 0, 'a distinct issuer is not self-signed' );
+}
+
+# ---------------------------------------------------------------------------
+# 2c.  Shodan — the plain-language callouts drawn out of a normalized result
+# ---------------------------------------------------------------------------
+
+{
+	my $raw = {
+		ports => [ 3389, 443, 27017 ],
+		tags  => [ 'cloud', 'eol-product' ],
+		data  => [
+			# a live service on a deprecated protocol with a self-signed cert
+			{
+				port      => 443,
+				transport => 'tcp',
+				_shodan   => { module => 'https' },
+				ssl       => {
+					versions => [ 'TLSv1.0', 'TLSv1.2' ],
+					cert     => { subject => { CN => 'a' }, issuer => { CN => 'a' } },
+				},
+			},
+
+			# a second service whose certificate has already expired
+			{
+				port      => 8443,
+				transport => 'tcp',
+				_shodan   => { module => 'https' },
+				ssl       => { cert => { subject => { CN => 'b' }, issuer => { CN => 'R3' }, expired => 1 } },
+			},
+		],
+	};
+	my $info = Lilith::Shodan::normalize( $raw, 'api', '192.0.2.10' );
+
+	is_deeply(
+		[ map { $_->{text} } @{ $info->{callouts} } ],
+		[
+			'exposed RDP',      'exposed MongoDB', 'weak TLS (TLSv1.0)',
+			'self-signed certificate', 'expired certificate', 'end-of-life product',
+		],
+		'every finding is drawn out, exposed services leading'
+	);
+	is( $info->{callouts}[0]{level}, 'danger',  'an exposed service is a danger finding' );
+	is( $info->{callouts}[2]{level}, 'warning', 'a weakness is a warning finding' );
+
+	# A clean host stands out for nothing.
+	my $clean = Lilith::Shodan::normalize(
+		{
+			ports => [443],
+			data  => [
+				{
+					port      => 443,
+					transport => 'tcp',
+					_shodan   => { module => 'https' },
+					ssl       => {
+						versions => ['TLSv1.3'],
+						cert     => { subject => { CN => 'example.org' }, issuer => { CN => 'R3' }, expired => 0 },
+					},
+				},
+			],
+		},
+		'api', '192.0.2.10'
+	);
+	is_deeply( $clean->{callouts}, [], 'a host with nothing wrong has no callouts' );
+
+	# An empty response -- one Shodan has never crawled -- likewise.
+	is_deeply( Lilith::Shodan::normalize( {}, 'internetdb', '192.0.2.10' )->{callouts},
+		[], 'an empty response has no callouts' );
+}
+
+# ---------------------------------------------------------------------------
 # 3.  Shodan — the response is what is stored, not the rendering
 # ---------------------------------------------------------------------------
 
@@ -228,6 +355,36 @@ use_ok('Lilith::Shodan') or BAIL_OUT('Lilith::Shodan failed to load');
 			{ ports => [80], data => [ { port => 80, transport => 'tcp', timestamp => '2026-07-01T00:00:00' } ] },
 			'api', '192.0.2.10' );
 	is( $plain->{services}[0]{first_seen}, '2026-07-01T00:00:00', 'a single crawl is its own first sighting' );
+}
+
+# ---------------------------------------------------------------------------
+# 4.  Shodan — the neighborhood count's pure parts
+# ---------------------------------------------------------------------------
+
+{
+	# _facet shapes one Shodan count facet into the modal's { value, count } list
+	# and copes with the facet being absent, as Shodan omits an empty one.
+	is_deeply(
+		Lilith::Shodan::_facet( { port => [ { count => 900, value => 443 }, { count => 5, value => 22 } ] }, 'port' ),
+		[ { value => 443, count => 900 }, { value => 22, count => 5 } ],
+		'_facet shapes a facet into value/count pairs'
+	);
+	is_deeply( Lilith::Shodan::_facet( {},    'port' ), [], '_facet turns a missing facet into an empty list' );
+	is_deeply( Lilith::Shodan::_facet( undef, 'port' ), [], '_facet copes with no facets at all' );
+
+	# _query_value quotes a phrase, leaves a token bare, and drops what would
+	# break out of the query.
+	is( Lilith::Shodan::_query_value( 'Example Hosting LLC', 1 ), '"Example Hosting LLC"', 'a phrase is quoted' );
+	is( Lilith::Shodan::_query_value( 'a "b" \\ c',          1 ), '"a b  c"',              'quotes and backslashes are stripped' );
+	is( Lilith::Shodan::_query_value( -1524570663,           0 ), -1524570663,            'a signed hash is left bare' );
+	is( Lilith::Shodan::_query_value( 'aabbcc00',            0 ), 'aabbcc00',              'a hex fingerprint is left bare' );
+	is( Lilith::Shodan::_query_value( 'no spaces here',      0 ), '',                     'a bare token with spaces is rejected' );
+
+	# Without a key the count cannot be made, and that is an error rather than an
+	# empty answer -- the endpoint is API tier.
+	my ( $result, $error, $capped ) = Lilith::Shodan::neighborhood_count( 'Example', [], '' );
+	like( $error, qr/api key/i, 'a keyless neighborhood count is an error' );
+	is( $capped, 0, 'and counts nothing as skipped' );
 }
 
 done_testing();

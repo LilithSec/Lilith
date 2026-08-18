@@ -479,6 +479,15 @@ sub startup {
 	my $shodan_history = $toml->{shodan_history} ? 1 : 0;
 	$self->helper( shodan_history => sub { $shodan_history } );
 
+	# Whether the IP info modal's neighborhood panel also asks Shodan's count
+	# endpoint about the wider internet -- the org's whole footprint and what
+	# else shares the host's fingerprints -- rather than only the local cache.
+	# Off by default: it is the one part of the panel that makes a live, paced
+	# API call, so turning it on is a deliberate choice like enable_shodan is.
+	# The count endpoint needs a key and costs no query credits; the local half
+	# of the panel runs whether this is set or not.
+	$self->helper( shodan_context => sub { $toml->{shodan_context} ? 1 : 0 } );
+
 	# Which tier the configured key selects, and so which rows of the cache may
 	# be read: the keyless summary and the keyed host API differ in depth, and a
 	# row written by the lesser must not stand in for the greater. The rule lives
@@ -1075,6 +1084,7 @@ sub startup {
 	$r->get('/api/logs/values')->to('logs#filter_values');
 	$r->get('/logs/:source/:id')->to('logs#view');
 	$r->get('/api/ipinfo/*ip')->to('api#ipinfo');
+	$r->get('/api/shodan/neighborhood/*ip')->to('api#shodan_neighborhood');
 	$r->get('/api/domaininfo/*domain')->to('api#domaininfo');
 	$r->get('/api/httpsinfo/*domain')->to('api#httpsinfo');
 	$r->get('/api/mailinfo/*domain')->to('api#mailinfo');

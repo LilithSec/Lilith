@@ -138,14 +138,27 @@
     var http = service.http || {}, ssl = service.ssl || {}, ssh = service.ssh || {};
     util.kvRow(tbody, 'HTTP title', http.title);
     util.kvRow(tbody, 'HTTP server', http.server);
+    util.kvRow(tbody, 'HTTP host', http.host);
     util.kvRow(tbody, 'HTTP status', http.status);
     util.kvRow(tbody, 'WAF', http.waf);
     util.kvRow(tbody, 'Components', http.components);
+    util.kvRow(tbody, 'Redirects', http.redirects ? String(http.redirects) : undefined);
+    util.kvRow(tbody, 'security.txt', http.securitytxt ? 'present' : undefined);
+    util.kvRow(tbody, 'robots.txt', http.robots ? 'present' : undefined);
     pivotRow(tbody, 'Favicon hash', http.favicon_hash, 'http.favicon.hash');
+    pivotRow(tbody, 'HTML hash', http.html_hash, 'http.html_hash');
+    pivotRow(tbody, 'Banner hash', service.hash, 'hash');
     util.kvRow(tbody, 'TLS versions', ssl.versions);
     util.kvRow(tbody, 'Cipher', ssl.cipher);
     util.kvRow(tbody, 'Certificate', ssl.cert_subject);
     util.kvRow(tbody, 'Issuer', ssl.cert_issuer);
+    util.kvRow(tbody, 'Self-signed', ssl.self_signed ? 'yes' : undefined, ssl.self_signed ? 'text-warning' : '');
+    util.kvRow(tbody, 'Public key', ssl.cert_pubkey);
+    util.kvRow(tbody, 'Signature alg', ssl.cert_sig_alg);
+    util.kvRow(tbody, 'DH params', ssl.dh_bits ? (ssl.dh_bits + '-bit') : undefined,
+      (ssl.dh_bits && +ssl.dh_bits < 2048) ? 'text-warning' : '');
+    util.kvRow(tbody, 'Cert chain', (ssl.chain_len ? String(ssl.chain_len) : undefined));
+    util.kvRow(tbody, 'Cert issued', ssl.cert_issued);
     util.kvRow(tbody, 'Cert expires', ssl.cert_expires
       ? (ssl.cert_expires + (ssl.cert_expired ? ' (EXPIRED)' : '')) : undefined,
       ssl.cert_expired ? 'text-warning' : '');
@@ -154,6 +167,8 @@
     pivotRow(tbody, 'JARM', ssl.jarm, 'ssl.jarm');
     pivotRow(tbody, 'JA3S', ssl.ja3s, 'ssl.ja3s');
     util.kvRow(tbody, 'SSH key type', ssh.type);
+    util.kvRow(tbody, 'SSH cipher', ssh.cipher);
+    util.kvRow(tbody, 'SSH MAC', ssh.mac);
     util.kvRow(tbody, 'SSH fingerprint', ssh.fingerprint);
     pivotRow(tbody, 'HASSH', ssh.hassh, 'ssh.hassh');
     util.kvRow(tbody, 'CPE', service.cpes);
@@ -190,6 +205,7 @@
   function fillShodan(data) {
     var shodan = data.shodan || {};
     var section = document.getElementById('ipinfo-shodan-section');
+    var calloutsEl = document.getElementById('ipinfo-shodan-callouts');
     var tagsEl = document.getElementById('ipinfo-shodan-tags');
     var portsEl = document.getElementById('ipinfo-shodan-ports');
     var summaryEl = document.getElementById('ipinfo-shodan-summary');
@@ -198,7 +214,7 @@
     var linkEl = document.getElementById('ipinfo-shodan-link');
     var noteEl = document.getElementById('ipinfo-shodan-note');
 
-    tagsEl.innerHTML = ''; portsEl.innerHTML = ''; summaryEl.innerHTML = '';
+    calloutsEl.innerHTML = ''; tagsEl.innerHTML = ''; portsEl.innerHTML = ''; summaryEl.innerHTML = '';
     vulnsEl.innerHTML = ''; servicesEl.innerHTML = '';
     setError(document.getElementById('ipinfo-shodan-error'), data.shodan_error);
     document.getElementById('ipinfo-shodan-vulns-wrap').style.display = 'none';
@@ -222,6 +238,11 @@
       noteEl.style.display = '';
     }
 
+    // The plain-language findings lead, in Shodan's own red/amber: what is wrong
+    // with the host, above the descriptive tag and port rows it was drawn from.
+    (shodan.callouts || []).forEach(function (callout) {
+      chip(calloutsEl, callout.text, callout.level === 'danger' ? 'bg-danger' : 'bg-warning text-dark');
+    });
     (shodan.tags || []).forEach(function (tag) { chip(tagsEl, tag, SHODAN_TAG_CLASS[tag]); });
     ports.forEach(function (port) { chip(portsEl, port, 'bg-secondary'); });
 
@@ -251,6 +272,92 @@
     }
 
     (shodan.services || []).forEach(function (service) { serviceBlock(servicesEl, service); });
+  }
+
+  // ---- Shodan neighborhood ------------------------------------------------
+  //
+  // A second, lazy lookup after the modal is filled: how the address sits among
+  // the hosts Lilith has cached (always), and among everything Shodan sees when
+  // shodan_context is on (a live count, hence loaded on its own rather than made
+  // to hold up the rest of the modal).
+
+  function pluralHosts(n) { return n + ' other cached host' + (n === 1 ? '' : 's'); }
+
+  // One shodan.io search chip: its text a facet value and count, its link the
+  // query that lists them. Running the search needs a Shodan login; the chip
+  // costs nothing.
+  function nbhdChip(container, text, count, query) {
+    var link = document.createElement('a');
+    link.href = 'https://www.shodan.io/search?query=' + encodeURIComponent(query);
+    link.target = '_blank'; link.rel = 'noopener';
+    link.className = 'badge me-1 mb-1 bg-secondary text-decoration-none';
+    link.textContent = text + ' (' + count.toLocaleString() + ')';
+    container.appendChild(link);
+  }
+
+  function fillShodanNeighborhood(data) {
+    var block    = document.getElementById('ipinfo-shodan-neighborhood');
+    var localEl  = document.getElementById('ipinfo-shodan-nbhd-local');
+    var shodanEl = document.getElementById('ipinfo-shodan-nbhd-shodan');
+    localEl.innerHTML = ''; shodanEl.innerHTML = '';
+    setError(document.getElementById('ipinfo-shodan-nbhd-error'), (data && data.shodan_error) || null);
+
+    if (!data || !data.available) { block.style.display = 'none'; return; }
+
+    // --- in our own cache ---
+    var local = data.local || {};
+    if (local.org) { util.kvRow(localEl, 'Same org', pluralHosts(local.org.count)); }
+    (local.tags || []).forEach(function (tag) {
+      util.kvRow(localEl, 'Tag: ' + tag.value, pluralHosts(tag.count));
+    });
+
+    // --- on Shodan (only when the live count ran) ---
+    var shodan = data.shodan || {};
+    if (data.shodan_enabled && shodan.org) {
+      var header = document.createElement('div');
+      header.className = 'small text-muted';
+      header.textContent = 'On Shodan — org "' + shodan.org.query + '": ' + shodan.org.total.toLocaleString() + ' hosts';
+      shodanEl.appendChild(header);
+
+      var facets = document.createElement('div');
+      facets.className = 'mt-1';
+      var orgQuery = 'org:"' + shodan.org.query + '" ';
+      (shodan.org.ports    || []).slice(0, 6).forEach(function (f) { nbhdChip(facets, 'port ' + f.value, f.count, orgQuery + 'port:' + f.value); });
+      (shodan.org.products || []).slice(0, 6).forEach(function (f) { nbhdChip(facets, f.value, f.count, orgQuery + 'product:"' + f.value + '"'); });
+      (shodan.org.vulns    || []).slice(0, 6).forEach(function (f) { nbhdChip(facets, f.value, f.count, orgQuery + 'vuln:' + f.value); });
+      shodanEl.appendChild(facets);
+    }
+    if (data.shodan_enabled) {
+      (shodan.fingerprints || []).forEach(function (fp) {
+        var line = document.createElement('div');
+        line.className = 'small';
+        line.appendChild(document.createTextNode(fp.label + ': '));
+        var link = document.createElement('a');
+        link.href = 'https://www.shodan.io/search?query=' + encodeURIComponent(fp.filter + ':' + fp.value);
+        link.target = '_blank'; link.rel = 'noopener';
+        link.textContent = fp.total.toLocaleString() + ' host' + (fp.total === 1 ? '' : 's');
+        line.appendChild(link);
+        line.appendChild(document.createTextNode(' share this'));
+        shodanEl.appendChild(line);
+      });
+      if (data.shodan_capped) {
+        var capped = document.createElement('div');
+        capped.className = 'small text-muted';
+        capped.textContent = data.shodan_capped + ' more fingerprint' + (data.shodan_capped === 1 ? '' : 's') + ' not counted';
+        shodanEl.appendChild(capped);
+      }
+    }
+
+    var hasLocal  = local.org || (local.tags || []).length;
+    var hasShodan = data.shodan_enabled && (shodan.org || (shodan.fingerprints || []).length);
+    block.style.display = (hasLocal || hasShodan || data.shodan_error) ? '' : 'none';
+  }
+
+  function loadShodanNeighborhood(ip) {
+    document.getElementById('ipinfo-shodan-neighborhood').style.display = 'none';
+    util.getJSON('/api/shodan/neighborhood/' + encodeURIComponent(ip))
+      .then(function (data) { fillShodanNeighborhood(data); })
+      .catch(function () { /* the neighborhood is a bonus; a failure just leaves it hidden */ });
   }
 
   document.addEventListener('DOMContentLoaded', function () {
@@ -309,6 +416,11 @@
 
         fillShodan(data);
 
+        // The neighborhood is its own lazy lookup, only worth making when Shodan
+        // had something on the address to build one from.
+        if (data.shodan && data.shodan.source) { loadShodanNeighborhood(ip); }
+        else { document.getElementById('ipinfo-shodan-neighborhood').style.display = 'none'; }
+
         setError(document.getElementById('ipinfo-error'), null);
         document.getElementById('ipinfo-whois').textContent = data.whois || '(none)';
       }, function (message) {
@@ -317,6 +429,7 @@
         document.getElementById('ipinfo-ptr-name').textContent = '';
         document.getElementById('ipinfo-geo-section').style.display = 'none';
         document.getElementById('ipinfo-shodan-section').style.display = 'none';
+        document.getElementById('ipinfo-shodan-neighborhood').style.display = 'none';
         document.getElementById('ipinfo-whois').textContent = '';
       });
     };

@@ -382,6 +382,39 @@ sub column_exists {
 	my ($left) = $dbh->selectrow_array(q{select count(*) from shodan_cache where ip = '192.0.2.11'});
 	is( $left, 0, 'writing prunes the entries that have expired' );
 
+	# shodan_neighbors -- how the neighborhood panel counts the local cache. A
+	# small cluster sharing an org and a tag, plus one outsider, cached so the
+	# counts have something to find.
+	for my $host (
+		[ '203.0.113.5', 'Neighbor Org', [ 'honeypot', 'cloud' ] ],
+		[ '203.0.113.6', 'Neighbor Org', ['honeypot'] ],
+		[ '203.0.113.7', 'Neighbor Org', ['cloud'] ],
+		[ '203.0.113.8', 'Other Org',    ['honeypot'] ],
+		)
+	{
+		$lilith->shodan_cache_put(
+			ip     => $host->[0],
+			source => 'api',
+			raw    => { org => $host->[1], tags => $host->[2] },
+			info   => { org => $host->[1], tags => $host->[2] },
+			ttl    => 3600
+		);
+	} ## end for my $host ( [ '203.0.113.5'...])
+
+	my $near = $lilith->shodan_neighbors( ip => '203.0.113.5', org => 'Neighbor Org', tags => [ 'honeypot', 'cloud' ] );
+	is( $near->{org}{value}, 'Neighbor Org', 'the org count names the org' );
+	is( $near->{org}{count}, 2, 'the org count is the other cached hosts in it, excluding the queried one' );
+	is_deeply(
+		[ map { [ $_->{value}, $_->{count} ] } @{ $near->{tags} } ],
+		[ [ 'honeypot', 2 ], [ 'cloud', 1 ] ],
+		'each tag is counted across the cache, most common first, the queried host excluded'
+	);
+
+	# An org and a tag no other cached host shares are not a neighborhood.
+	my $lonely = $lilith->shodan_neighbors( ip => '203.0.113.5', org => 'Lonely Org', tags => ['unique-tag'] );
+	is( $lonely->{org}, undef, 'an org no one else shares yields no org neighbor' );
+	is_deeply( $lonely->{tags}, [], 'a tag no one else shares yields no tag neighbor' );
+
 	# alert_ips -- what `lilith shodan_cache` reads. Distinct across both ends of
 	# every table, windowed on each table's own time column.
 	$dbh->do(

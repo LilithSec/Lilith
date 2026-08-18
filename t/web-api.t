@@ -588,4 +588,124 @@ SKIP: {
 	ok( !exists $vulns->[1]{kev}, 'and gains no flags it has no answer for' );
 }
 
+# ---------------------------------------------------------------------------
+# 13.  Shodan — the clock-relative "certificate expiring soon" callout
+# ---------------------------------------------------------------------------
+
+{
+	require Lilith::Web::Controller::Api;
+
+	# A Shodan certificate time (ASN.1 Zulu) a given number of seconds from now.
+	my $zulu_in = sub {
+		my @t = gmtime( time + shift );
+		return sprintf( '%04d%02d%02d%02d%02d%02dZ', $t[5] + 1900, $t[4] + 1, $t[3], $t[2], $t[1], $t[0] );
+	};
+
+	# _cert_epoch parses both the fourteen-digit GeneralizedTime and the older
+	# twelve-digit two-digit-year UTCTime, and rejects anything else.
+	is( Lilith::Web::Controller::Api::_cert_epoch('20260901000000Z'),
+		Time::Local::timegm( 0, 0, 0, 1, 8, 2026 ), '_cert_epoch parses a GeneralizedTime' );
+	is( Lilith::Web::Controller::Api::_cert_epoch('260901000000Z'),
+		Time::Local::timegm( 0, 0, 0, 1, 8, 2026 ), '_cert_epoch reads a two-digit year as 2000s' );
+	is( Lilith::Web::Controller::Api::_cert_epoch('not-a-time'), undef, '_cert_epoch rejects a malformed value' );
+	is( Lilith::Web::Controller::Api::_cert_epoch(undef),        undef, '_cert_epoch copes with an absent value' );
+
+	# A certificate within the three-week window earns the callout.
+	my $soon = { services => [ { ssl => { cert_expired => 0, cert_expires => $zulu_in->( 10 * 86400 ) } } ] };
+	Lilith::Web::Controller::Api::_shodan_expiry_callouts( undef, $soon );
+	is_deeply(
+		$soon->{callouts},
+		[ { text => 'certificate expiring soon', level => 'warning' } ],
+		'a certificate lapsing within three weeks is called out'
+	);
+
+	# One comfortably in the future does not.
+	my $later = { services => [ { ssl => { cert_expired => 0, cert_expires => $zulu_in->( 60 * 86400 ) } } ] };
+	Lilith::Web::Controller::Api::_shodan_expiry_callouts( undef, $later );
+	ok( !$later->{callouts}, 'a certificate two months out is not called out' );
+
+	# An already-expired certificate is the normalizer's to flag, not this.
+	my $expired = { services => [ { ssl => { cert_expired => 1, cert_expires => $zulu_in->( -86400 ) } } ] };
+	Lilith::Web::Controller::Api::_shodan_expiry_callouts( undef, $expired );
+	ok( !$expired->{callouts}, 'an already-expired certificate is left to the normalizer' );
+
+	# The callout appends to whatever the normalizer already found.
+	my $with = {
+		callouts => [ { text => 'exposed RDP', level => 'danger' } ],
+		services => [ { ssl => { cert_expired => 0, cert_expires => $zulu_in->( 5 * 86400 ) } } ],
+	};
+	Lilith::Web::Controller::Api::_shodan_expiry_callouts( undef, $with );
+	is( scalar @{ $with->{callouts} }, 2, 'the expiry finding appends to the existing callouts' );
+	is( $with->{callouts}[1]{text}, 'certificate expiring soon', 'and does so after them' );
+}
+
+# ---------------------------------------------------------------------------
+# 14.  Shodan — the fingerprint queries a host offers the neighborhood count
+# ---------------------------------------------------------------------------
+
+{
+	require Lilith::Web::Controller::Api;
+
+	my $shodan = {
+		services => [
+			{
+				hash => -100,
+				http => { html_hash => 12345678 },
+				ssl  => { cert_fingerprint => 'aabbcc' },
+			},
+
+			# a second service on the same panel and certificate: its shared
+			# fingerprints are one question each, not two, but its own banner
+			# hash is new.
+			{
+				hash => -200,
+				http => { html_hash => 12345678 },
+				ssl  => { cert_fingerprint => 'aabbcc' },
+			},
+
+			# a service whose values are empty or a bare zero, which are not
+			# fingerprints to count.
+			{ hash => 0, http => { html_hash => '' }, ssl => { cert_fingerprint => '' } },
+		],
+	};
+
+	my $fp = Lilith::Web::Controller::Api::_shodan_fingerprints($shodan);
+	is_deeply(
+		$fp,
+		[
+			{ label => 'HTML hash',   filter => 'http.html_hash',       value => 12345678 },
+			{ label => 'Certificate', filter => 'ssl.cert.fingerprint', value => 'aabbcc' },
+			{ label => 'Banner hash', filter => 'hash',                 value => -100 },
+			{ label => 'Banner hash', filter => 'hash',                 value => -200 },
+		],
+		'shared fingerprints are asked once, distinct banner hashes each, and blanks/zeros dropped'
+	);
+
+	is_deeply( Lilith::Web::Controller::Api::_shodan_fingerprints( {} ), [], 'a host with no services offers nothing' );
+}
+
+# ---------------------------------------------------------------------------
+# 15.  Shodan neighborhood endpoint -- gated off, and graceful with no cache
+# ---------------------------------------------------------------------------
+
+{
+	# The panel is the Shodan feature's; with the feature off the endpoint 404s
+	# the same way the /shodan page does.
+	_make_app()->get_ok('/api/shodan/neighborhood/8.8.8.8')
+		->status_is( 404, 'the neighborhood endpoint 404s with Shodan off' );
+
+	# On, but with no reachable database and so no cached record for the address:
+	# there is nothing to build a neighborhood from, which is an answer, not an
+	# error.
+	my $on = _make_app(qq{enable_shodan = true\nshodan_cache_ttl = 3600\n});
+	$on->app->log->level('fatal');    # the cache read failure is logged by design
+	$on->get_ok('/api/shodan/neighborhood/8.8.8.8')
+		->status_is( 200, 'the neighborhood endpoint renders 200 with Shodan on' )
+		->json_is( '/available', 0, 'an address with no cached record has no neighborhood' );
+
+	# A malformed address is refused before anything is looked up.
+	$on->get_ok('/api/shodan/neighborhood/not-an-ip')
+		->status_is( 400, 'the neighborhood endpoint rejects a malformed address' );
+}
+
 done_testing();

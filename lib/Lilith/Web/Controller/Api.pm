@@ -353,6 +353,10 @@ way out -- score, EPSS, the CISA KEV flag, known ransomware use -- which is
 also what gives the keyless tier's bare CVE ids their scores. Cache only:
 nothing here asks CVEDB, that being C<lilith cvedb_cache>'s job.
 
+The section's plain-language callouts are C<Lilith::Shodan>'s, with the one
+clock-relative finding -- a certificate close to expiry -- added here, where
+the clock is, rather than in the pure normalizer.
+
 =cut
 
 sub ipinfo {
@@ -391,6 +395,7 @@ sub ipinfo {
 			# not survive being shared -- the same reason the Shodan cache read
 			# happens out here.
 			$self->_cvedb_annotate( $result->{shodan} );
+			$self->_shodan_expiry_callouts( $result->{shodan} );
 
 			$self->render( json => $result );
 		},
@@ -533,6 +538,230 @@ sub _cvedb_annotate {
 
 	return;
 } ## end sub _cvedb_annotate
+
+# The Unix epoch for a Shodan certificate time, or undef when it will not parse.
+#
+# Shodan reports certificate validity as an ASN.1 time string in Zulu: fourteen
+# digits and a 'Z' for the GeneralizedTime most certificates now use
+# (YYYYMMDDHHMMSSZ), or twelve for the older two-digit-year UTCTime
+# (YYMMDDHHMMSSZ), where per RFC 5280 a year 00-49 is 2000-2049 and 50-99 is
+# 1950-1999.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $when :: the time string, e.g. '20260901000000Z'. Anything matching
+#     neither form gives undef, so a malformed value yields no expiry finding
+#     rather than a wrong one.
+#
+# Returns: the time as a Unix epoch (UTC), or undef.
+#
+#     _cert_epoch('20260901000000Z')   # the epoch for that instant
+sub _cert_epoch {
+	my $when = shift;
+	return undef unless defined $when;
+
+	my ( $year, $mon, $day, $hour, $min, $sec );
+	if ( $when =~ /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})Z$/ ) {
+		( $year, $mon, $day, $hour, $min, $sec ) = ( $1, $2, $3, $4, $5, $6 );
+	} elsif ( $when =~ /^(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})Z$/ ) {
+		( $year, $mon, $day, $hour, $min, $sec ) = ( $1, $2, $3, $4, $5, $6 );
+		$year += $year < 50 ? 2000 : 1900;
+	} else {
+		return undef;
+	}
+
+	return eval { Time::Local::timegm( $sec, $min, $hour, $day, $mon - 1, $year ) };
+} ## end sub _cert_epoch
+
+# Add a "certificate expiring soon" finding to a normalized Shodan result when
+# one of its services presents a certificate still valid but within three weeks
+# of expiry.
+#
+# The clock-relative companion to Lilith::Shodan::_callouts, kept here rather
+# than in the normalizer for the same reason the CVEDB annotation is: the
+# normalizer is pure and the clock is not, and a finding that turns on "now"
+# would make a cached row read differently at read time than when it was
+# normalized. Already-expired certificates are left to the normalizer, which
+# flags them from Shodan's own `expired` bit without a clock.
+#
+# Args:
+#
+#   - $shodan :: the normalized result, modified in place. Anything without a
+#     services array is left untouched.
+#
+# Returns: nothing. The effect is at most one appended callout.
+#
+#     $self->_shodan_expiry_callouts( $result->{shodan} );
+#     # a service whose cert lapses in ten days adds { text => 'certificate
+#     # expiring soon', level => 'warning' } to $result->{shodan}{callouts}
+sub _shodan_expiry_callouts {
+	my ( $self, $shodan ) = @_;
+
+	return unless ref $shodan eq 'HASH' && ref $shodan->{services} eq 'ARRAY';
+
+	my $now      = time;
+	my $window   = 21 * 24 * 60 * 60;
+	my $expiring = 0;
+	for my $service ( @{ $shodan->{services} } ) {
+		my $ssl = $service->{ssl};
+		next unless ref $ssl eq 'HASH' && !$ssl->{cert_expired};
+		my $epoch = _cert_epoch( $ssl->{cert_expires} );
+		next unless defined $epoch;
+		$expiring = 1 if $epoch > $now && ( $epoch - $now ) <= $window;
+	}
+	return unless $expiring;
+
+	$shodan->{callouts} ||= [];
+	push( @{ $shodan->{callouts} }, { text => 'certificate expiring soon', level => 'warning' } );
+
+	return;
+} ## end sub _shodan_expiry_callouts
+
+# The distinct fingerprint queries a normalized host offers the neighborhood
+# count: one per HTML hash, certificate, and banner hash its services carry,
+# each as the { label, filter, value } Lilith::Shodan::neighborhood_count takes.
+#
+# Deduplicated across services, since a host commonly presents the same panel or
+# certificate on several ports and each shared fingerprint is one question, not
+# one per port.
+#
+# Plain function, not a method.
+#
+# Args:
+#
+#   - $shodan :: the normalized result, as Lilith::Shodan::normalize returns it.
+#     Its services are read for their http.html_hash, ssl.cert_fingerprint, and
+#     banner hash.
+#
+# Returns: an array ref of { label, filter, value }, empty when the host carried
+# no fingerprints worth counting.
+#
+#     my $fp = _shodan_fingerprints( $shodan );
+#     # $fp->[0] is { label => 'HTML hash', filter => 'http.html_hash', value => 12345678 }
+sub _shodan_fingerprints {
+	my $shodan = shift;
+
+	return [] unless ref $shodan eq 'HASH' && ref $shodan->{services} eq 'ARRAY';
+
+	# filter => label for the three the modal already pivots on; ssl.cert.fingerprint
+	# and http.html_hash and hash are the Shodan search facets those links use.
+	my @wanted = (
+		[ 'html_hash',        'http.html_hash',       'HTML hash', sub { $_[0]->{http} } ],
+		[ 'cert_fingerprint', 'ssl.cert.fingerprint', 'Certificate', sub { $_[0]->{ssl} } ],
+		[ 'hash',             'hash',                 'Banner hash', sub { $_[0] } ],
+	);
+
+	my %seen;
+	my @out;
+	for my $service ( @{ $shodan->{services} } ) {
+		next unless ref $service eq 'HASH';
+		for my $spec (@wanted) {
+			my ( $key, $filter, $label, $where ) = @{$spec};
+			my $holder = $where->($service);
+			my $value  = ref $holder eq 'HASH' ? $holder->{$key} : $service->{$key};
+			next unless defined $value && !ref $value && $value ne '' && $value ne '0';
+			next if $seen{ $filter . "\0" . $value }++;
+			push( @out, { label => $label, filter => $filter, value => $value } );
+		}
+	} ## end for my $service ( @{ $shodan...})
+
+	return \@out;
+} ## end sub _shodan_fingerprints
+
+=head2 shodan_neighborhood
+
+The IP info modal's neighborhood panel, as JSON: how an address sits among the
+hosts Lilith has cached, and -- when C<shodan_context> is on and a key is set --
+among everything Shodan sees.
+
+The local half is a cache query and always runs; the Shodan half is a live,
+paced count against the API and runs only when turned on, in a subprocess so the
+web server's event loop is not blocked on it. The address's own cached response
+supplies both halves' inputs -- its org and tags for the local counts, its
+service fingerprints for the Shodan ones -- so an address not yet in the cache
+has no neighborhood to show.
+
+=cut
+
+sub shodan_neighborhood {
+	my $self = shift;
+	my $ip   = $self->param('ip');
+
+	unless ( defined $ip && $ip =~ /^[0-9a-fA-F:.]+$/ ) {
+		return $self->render( json => { error => 'Invalid IP' }, status => 400 );
+	}
+	return $self->reply->not_found unless $self->shodan_enable;
+
+	# The host's own cached response feeds both halves. Read and normalized in
+	# the parent: the cache is a DBI handle, which does not survive the fork, and
+	# the local counts are DBI too. With no fresh cached row there is nothing to
+	# build a neighborhood from -- which is an answer, not an error.
+	my $ttl = $self->shodan_cache_ttl;
+	my $raw = $ttl > 0 ? eval { $self->lilith->shodan_cache_get( $ip, $self->shodan_source, $ttl ) } : undef;
+	if ( ref $raw ne 'HASH' ) {
+		return $self->render(
+			json => { ip => $ip, available => 0, reason => 'no cached Shodan record for this address yet' } );
+	}
+
+	my $info = Lilith::Shodan::normalize( $raw, $self->shodan_source, $ip );
+
+	my $local = eval { $self->lilith->shodan_neighbors( ip => $ip, org => $info->{org}, tags => $info->{tags} ); };
+	if ($@) {
+		( my $why = $@ ) =~ s/\s+\z//;
+		$self->app->log->warn( 'shodan neighbors read failed: ' . $why );
+		$local = { org => undef, tags => [] };
+	}
+
+	# The Shodan half: only with the panel turned on, a key configured (the count
+	# endpoint is API tier), and something to ask about.
+	my $org          = defined $info->{org} ? $info->{org} : '';
+	my $fingerprints = _shodan_fingerprints($info);
+	my $ask_shodan   = $self->shodan_context && $self->shodan_source eq 'api' && ( $org ne '' || @{$fingerprints} );
+
+	unless ($ask_shodan) {
+		return $self->render(
+			json => { ip => $ip, available => 1, local => $local, shodan_enabled => 0 } );
+	}
+
+	my $api_key = $self->shodan_api_key;
+	$self->render_later;
+	Mojo::IOLoop->subprocess(
+		sub {
+			my ( $near, $error, $capped ) = Lilith::Shodan::neighborhood_count( $org, $fingerprints, $api_key );
+			return { near => $near, error => $error, capped => $capped };
+		},
+		sub {
+			my ( $subprocess, $err, $result ) = @_;
+			if ( $err || ref $result ne 'HASH' ) {
+				return $self->render(
+					json => {
+						ip           => $ip,
+						available    => 1,
+						local        => $local,
+						shodan_enabled => 1,
+						shodan_error => 'neighborhood count failed',
+					}
+				);
+			}
+
+			return $self->render(
+				json => {
+					ip             => $ip,
+					available      => 1,
+					local          => $local,
+					shodan_enabled => 1,
+					shodan         => $result->{near},
+					shodan_error   => ( defined $result->{error} ? $result->{error} : '' ),
+					shodan_capped  => ( defined $result->{capped} ? $result->{capped} + 0 : 0 ),
+				}
+			);
+		},
+	);
+
+	return;
+} ## end sub shodan_neighborhood
 
 # Everything the IP info modal shows, gathered in one go: reverse DNS, whois,
 # whatever the configured GeoIP databases know, and -- when enable_shodan is set
