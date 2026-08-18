@@ -7,6 +7,7 @@ use lib 't/lib';
 
 use Lilith                 ();
 use Lilith::Schema         ();
+use Lilith::Shodan         ();
 use DBIx::Class::Migration ();
 
 # End-to-end migration tests against a real PostgreSQL server: TestPG initdb's a
@@ -166,6 +167,15 @@ sub column_exists {
 		ok( column_exists( $dbh, 'shodan_cache', $host_column ),
 			"deploy created the shodan_cache $host_column column" );
 	}
+
+	# version 18: the callout and fingerprint projection
+	for my $v18_column (qw( callouts html_hashes cert_fingerprints banner_hashes )) {
+		ok( column_exists( $dbh, 'shodan_cache', $v18_column ),
+			"deploy created the shodan_cache $v18_column column" );
+	}
+
+	# version 19: the product names
+	ok( column_exists( $dbh, 'shodan_cache', 'products' ), 'deploy created the shodan_cache products column' );
 	$dbh->disconnect;
 
 	my ($sv_after) = run_cmd('Lilith::CLI::Command::SchemaVersion');
@@ -300,6 +310,14 @@ sub column_exists {
 		ok( column_exists( $dbh, 'shodan_cache', $host_column ), "the 16 -> 17 upgrade added the $host_column column" );
 	}
 
+	# and the 17 -> 18 step: the callout and fingerprint projection.
+	for my $v18_column (qw( callouts html_hashes cert_fingerprints banner_hashes )) {
+		ok( column_exists( $dbh, 'shodan_cache', $v18_column ), "the 17 -> 18 upgrade added the $v18_column column" );
+	}
+
+	# and the 18 -> 19 step: the product names.
+	ok( column_exists( $dbh, 'shodan_cache', 'products' ), 'the 18 -> 19 upgrade added the products column' );
+
 	# A live round trip through the methods the web UI uses.
 	my $lilith = Lilith->new( dsn => $sc_dsn, user => $pg->user, pass => $pg->pass );
 
@@ -360,6 +378,20 @@ sub column_exists {
 	my ($found) = $dbh->selectrow_array(q{select found from shodan_cache where ip = '192.0.2.11'});
 	is( $found, 0, 'an empty response is recorded as not found' );
 
+	# A Shodan banner can carry a NUL byte -- an out-of-band service's raw html --
+	# which jsonb cannot store; the put strips it rather than failing the insert.
+	my $nul_raw = { data => [ { port => 4444, data => "out of band\x00service", http => { html => "<html>\x00</html>" } } ] };
+	my $nul_info = eval { Lilith::Shodan::normalize( $nul_raw, 'api', '192.0.2.13' ); };
+	my $stored   = eval {
+		$lilith->shodan_cache_put( ip => '192.0.2.13', source => 'api', raw => $nul_raw, info => $nul_info, ttl => 3600 );
+		1;
+	};
+	is( $@,      '', 'a response carrying a NUL byte stores rather than failing the insert' );
+	is( $stored, 1,  'the NUL-bearing put reports success' );
+	my $back = $lilith->shodan_cache_get( '192.0.2.13', 'api', 3600 );
+	is( $back->{data}[0]{data}, 'out of bandservice', 'the NUL is stripped from the stored banner' );
+	unlike( $back->{data}[0]{http}{html}, qr/\x00/, 'and from nested strings too' );
+
 	# The upsert replaces rather than duplicating, and re-reads as the new value.
 	$lilith->shodan_cache_put(
 		ip     => '192.0.2.10',
@@ -383,37 +415,86 @@ sub column_exists {
 	is( $left, 0, 'writing prunes the entries that have expired' );
 
 	# shodan_neighbors -- how the neighborhood panel counts the local cache. A
-	# small cluster sharing an org and a tag, plus one outsider, cached so the
-	# counts have something to find.
+	# small cluster sharing an org, a tag, and some fingerprints, plus one
+	# outsider, cached so the counts have something to find. .6 shares .5's HTML
+	# hash; .7 shares .5's certificate and banner hash; .8 shares nothing but a
+	# tag.
+	# shodan_neighbors profiles the queried host's own attributes against the
+	# cache: for each of its ports, tags, CVEs, and fingerprints, how many OTHER
+	# cached hosts share it. .6 and .7 are in the org and share .5's port,
+	# fingerprints, and CVE; .8 is an outsider sharing only a tag.
 	for my $host (
-		[ '203.0.113.5', 'Neighbor Org', [ 'honeypot', 'cloud' ] ],
-		[ '203.0.113.6', 'Neighbor Org', ['honeypot'] ],
-		[ '203.0.113.7', 'Neighbor Org', ['cloud'] ],
-		[ '203.0.113.8', 'Other Org',    ['honeypot'] ],
+		[ '203.0.113.5', 'Neighbor Org', [ 'honeypot', 'cloud' ], [111], ['ff11'], [-500], [443],      ['CVE-2021-0001'], ['nginx'] ],
+		[ '203.0.113.6', 'Neighbor Org', ['honeypot'],            [111], ['zzzz'], [-600], [443],       ['CVE-2021-0001'], ['nginx'] ],
+		[ '203.0.113.7', 'Neighbor Org', ['cloud'],               [222], ['ff11'], [-500], [ 443, 22 ], ['CVE-2021-0001'], [ 'nginx', 'OpenSSH' ] ],
+		[ '203.0.113.8', 'Other Org',    ['honeypot'],            [999], ['no'],   [-999], [8080],      [], ['Apache httpd'] ],
 		)
 	{
-		$lilith->shodan_cache_put(
-			ip     => $host->[0],
-			source => 'api',
-			raw    => { org => $host->[1], tags => $host->[2] },
-			info   => { org => $host->[1], tags => $host->[2] },
-			ttl    => 3600
+		my %info = (
+			org               => $host->[1],
+			tags              => $host->[2],
+			html_hashes       => $host->[3],
+			cert_fingerprints => $host->[4],
+			banner_hashes     => $host->[5],
+			ports             => $host->[6],
+			vulns             => [ map { { cve => $_ } } @{ $host->[7] } ],
+			products          => $host->[8],
 		);
+		$lilith->shodan_cache_put( ip => $host->[0], source => 'api', raw => { org => $host->[1] }, info => \%info, ttl => 3600 );
 	} ## end for my $host ( [ '203.0.113.5'...])
 
-	my $near = $lilith->shodan_neighbors( ip => '203.0.113.5', org => 'Neighbor Org', tags => [ 'honeypot', 'cloud' ] );
-	is( $near->{org}{value}, 'Neighbor Org', 'the org count names the org' );
+	my $near = $lilith->shodan_neighbors(
+		ip                => '203.0.113.5',
+		org               => 'Neighbor Org',
+		ports             => [443],
+		tags              => [ 'honeypot', 'cloud' ],
+		cves              => ['CVE-2021-0001'],
+		products          => ['nginx'],
+		html_hashes       => [111],
+		cert_fingerprints => ['ff11'],
+		banner_hashes     => [-500],
+	);
+	is( $near->{org}{value}, 'Neighbor Org', 'the org names the org' );
 	is( $near->{org}{count}, 2, 'the org count is the other cached hosts in it, excluding the queried one' );
+	is_deeply(
+		[ map { [ $_->{value}, $_->{count} ] } @{ $near->{ports} } ],
+		[ [ 443, 2 ] ],
+		'a port is counted across the other cached hosts that share it'
+	);
 	is_deeply(
 		[ map { [ $_->{value}, $_->{count} ] } @{ $near->{tags} } ],
 		[ [ 'honeypot', 2 ], [ 'cloud', 1 ] ],
 		'each tag is counted across the cache, most common first, the queried host excluded'
 	);
+	is_deeply(
+		[ map { [ $_->{value}, $_->{count} ] } @{ $near->{cves} } ],
+		[ [ 'CVE-2021-0001', 2 ] ],
+		'a CVE is counted across the other cached hosts that share it'
+	);
+	is_deeply(
+		[ map { [ $_->{value}, $_->{count} ] } @{ $near->{products} } ],
+		[ [ 'nginx', 2 ] ],
+		'a product is counted across the other cached hosts that run it'
+	);
+	is_deeply(
+		[ map { [ $_->{filter}, $_->{value}, $_->{count} ] } @{ $near->{fingerprints} } ],
+		[ [ 'html_hash', 111, 1 ], [ 'cert', 'ff11', 1 ], [ 'banner_hash', -500, 1 ] ],
+		'each fingerprint is counted across the cache, the queried host excluded'
+	);
 
-	# An org and a tag no other cached host shares are not a neighborhood.
-	my $lonely = $lilith->shodan_neighbors( ip => '203.0.113.5', org => 'Lonely Org', tags => ['unique-tag'] );
-	is( $lonely->{org}, undef, 'an org no one else shares yields no org neighbor' );
-	is_deeply( $lonely->{tags}, [], 'a tag no one else shares yields no tag neighbor' );
+	# The org is returned even when no other cached host shares it, so the cache
+	# block still names it; everything else a lone value shares nothing is empty.
+	my $lonely = $lilith->shodan_neighbors(
+		ip => '203.0.113.5', org => 'Lonely Org', ports => [65000], tags => ['unique-tag'], html_hashes => [424242] );
+	is( $lonely->{org}{count}, 0, 'an org no one else shares is still returned, at zero' );
+	is_deeply( $lonely->{ports},        [], 'a port no one else shares yields nothing' );
+	is_deeply( $lonely->{tags},         [], 'a tag no one else shares yields nothing' );
+	is_deeply( $lonely->{fingerprints}, [], 'a fingerprint no one else shares yields nothing' );
+
+	# The neighbor cluster is its own scenario; clear it so its CVEs and ports do
+	# not leak into the whole-table reads (shodan_cache_cves, the window checks)
+	# that follow.
+	$dbh->do(q{delete from shodan_cache where host(ip) like '203.0.113.%'});
 
 	# alert_ips -- what `lilith shodan_cache` reads. Distinct across both ends of
 	# every table, windowed on each table's own time column.
@@ -489,6 +570,20 @@ sub column_exists {
 	$lilith->cvedb_cache_put( cve => 'CVE-2019-0217', raw => {}, info => {} );
 	is( $lilith->cvedb_cache_annotations( cves => ['CVE-2019-0217'] )->{'CVE-2019-0217'}{found},
 		0, 'a cached "nothing known" is a row, marked not found' );
+
+	# A NUL byte in a CVEDB response is stripped rather than failing the insert,
+	# the same as shodan_cache_put -- unlikely in CVE text, but the store must
+	# not be one stray byte from breaking.
+	my $nul_stored = eval {
+		$lilith->cvedb_cache_put(
+			cve  => 'CVE-2000-0001',
+			raw  => { summary => "buffer\x00overflow" },
+			info => {},
+		);
+		1;
+	};
+	is( $@,          '', 'a CVEDB response carrying a NUL byte stores rather than failing' );
+	is( $nul_stored, 1,  'the NUL-bearing cvedb put reports success' );
 
 	# Freshness: nothing fresh is due, and what is due comes never-seen first,
 	# then oldest first -- the order a --limit capped run truncates.
@@ -707,6 +802,40 @@ sub column_exists {
 	);
 
 	# DeploymentHandler downgrades toward the schema's own version; see phase 3.
+	# First the single 19 -> 18 step, to prove the products column drops while
+	# the table and the version-18 columns stand.
+	{
+		no warnings qw(redefine once);
+		local $Lilith::Schema::VERSION = 18;
+		my $down = DBIx::Class::Migration->new(
+			schema_class => 'Lilith::Schema',
+			schema_args  => [ $sc_dsn, $pg->user, $pg->pass ],
+		);
+		$down->dbic_dh->downgrade;    # 19 -> 18
+	}
+	ok( table_exists( $dbh, 'shodan_cache' ), 'shodan_cache still stands after the 19 -> 18 downgrade' );
+	ok( !column_exists( $dbh, 'shodan_cache', 'products' ), 'the 19 -> 18 downgrade dropped the products column' );
+	ok( column_exists( $dbh, 'shodan_cache', 'callouts' ), 'and kept the version 18 callouts column' );
+
+	# then the single 18 -> 17 step, to prove the version-18 columns drop while
+	# the table (and the version-17 columns) stand.
+	{
+		no warnings qw(redefine once);
+		local $Lilith::Schema::VERSION = 17;
+		my $down = DBIx::Class::Migration->new(
+			schema_class => 'Lilith::Schema',
+			schema_args  => [ $sc_dsn, $pg->user, $pg->pass ],
+		);
+		$down->dbic_dh->downgrade;    # 18 -> 17
+	}
+	ok( table_exists( $dbh, 'shodan_cache' ), 'shodan_cache still stands after the 18 -> 17 downgrade' );
+	for my $v18_column (qw( callouts html_hashes cert_fingerprints banner_hashes )) {
+		ok( !column_exists( $dbh, 'shodan_cache', $v18_column ),
+			"the 18 -> 17 downgrade dropped the $v18_column column" );
+	}
+	ok( column_exists( $dbh, 'shodan_cache', 'org' ), 'and kept the version 17 org column' );
+
+	# then the rest of the way down.
 	{
 		no warnings qw(redefine once);
 		local $Lilith::Schema::VERSION = 14;

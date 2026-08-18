@@ -47,6 +47,14 @@ $lilith->shodan_cache_put(
 		org         => 'Example Hosting LLC',
 		isp         => 'Example Carrier Inc',
 		asn         => 'AS64496',
+		callouts    => [
+			{ text => 'self-signed certificate', level => 'warning', key => 'self-signed' },
+			{ text => 'exposed RDP',              level => 'danger',  key => 'exposed-rdp' },
+		],
+		html_hashes       => [12345678],
+		cert_fingerprints => ['aabbcc'],
+		banner_hashes     => [-1524570663],
+		products          => ['nginx'],
 	},
 	ttl => 3600,
 );
@@ -72,7 +80,8 @@ $lilith->shodan_cache_put( ip => '45.0.0.3', source => 'api', raw => {}, info =>
 	my $dbh = DBI->connect( $pg->dsn, $pg->user, $pg->pass, { RaiseError => 1 } );
 	$dbh->do(
 		q{update shodan_cache set ports = NULL, tags = NULL, cpes = NULL, vulns = NULL,
-		hostnames = NULL where ip = '45.0.0.3'}
+		hostnames = NULL, callouts = NULL, html_hashes = NULL, cert_fingerprints = NULL,
+		banner_hashes = NULL, products = NULL where ip = '45.0.0.3'}
 	);
 	$dbh->disconnect;
 }
@@ -150,6 +159,24 @@ is_deeply(
 is_deeply( matched_ips( max_cvss => '>=9' ), ['45.0.0.1'], 'max_cvss comparison' );
 is_deeply( matched_ips( max_cvss => '9.8' ), ['45.0.0.1'], 'max_cvss equality' );
 
+# the version 18 columns: the callout keys, and the service fingerprints
+is_deeply( matched_ips( callout => 'self-signed' ), ['45.0.0.1'], 'callout membership by key' );
+is_deeply( matched_ips( callout => 'exposed-%' ),   ['45.0.0.1'], 'callout % pattern' );
+is_deeply(
+	matched_ips( callout => '!self-signed' ),
+	[ '45.0.0.2', '45.0.0.3' ],
+	'callout negation matches the empty and the NULL row alike'
+);
+is_deeply( matched_ips( html_hash   => '12345678' ),    ['45.0.0.1'], 'html_hash membership' );
+is_deeply( matched_ips( banner_hash => '-1524570663' ), ['45.0.0.1'], 'banner_hash membership, negative and all' );
+is_deeply( matched_ips( cert        => 'aabbcc' ),      ['45.0.0.1'], 'cert fingerprint membership' );
+is_deeply( matched_ips( html_hash => '!12345678' ), [ '45.0.0.2', '45.0.0.3' ], 'html_hash negation' );
+
+# the version 19 product column
+is_deeply( matched_ips( product => 'nginx' ),  ['45.0.0.1'],                  'product membership' );
+is_deeply( matched_ips( product => 'ngin%' ),  ['45.0.0.1'],                  'product % pattern' );
+is_deeply( matched_ips( product => '!nginx' ), [ '45.0.0.2', '45.0.0.3' ],    'product negation' );
+
 is_deeply( matched_ips( tag => 'honeypot', port => '80' ), ['45.0.0.1'], 'filters AND across each other' );
 is_deeply(
 	matched_ips( fetched_within_minutes => 60 ),
@@ -226,10 +253,62 @@ is_deeply(
 	'a fresh cache is inside the fetched window'
 );
 
+is_deeply(
+	$lilith->shodan_cache_values( column => 'callout' ),
+	[ { value => 'exposed-rdp', count => 1 }, { value => 'self-signed', count => 1 } ],
+	'callout values count once per key, ties ordered by value'
+);
+is_deeply(
+	$lilith->shodan_cache_values( column => 'html_hash' ),
+	[ { value => 12345678, count => 1 } ],
+	'html_hash values come from the integer column'
+);
+is_deeply(
+	$lilith->shodan_cache_values( column => 'banner_hash' ),
+	[ { value => -1524570663, count => 1 } ],
+	'banner_hash values keep their sign'
+);
+is_deeply(
+	$lilith->shodan_cache_values( column => 'cert' ),
+	[ { value => 'aabbcc', count => 1 } ],
+	'cert fingerprint values are offered'
+);
+is_deeply(
+	$lilith->shodan_cache_values( column => 'product' ),
+	[ { value => 'nginx', count => 1 } ],
+	'product values are offered'
+);
+
 eval { $lilith->shodan_cache_values( column => 'raw' ) };
 like( $@, qr/not a shodan_cache filter/, 'a column with no values to offer dies' );
 eval { $lilith->shodan_cache_values( column => 'tag', fetched_within_minutes => 'week' ) };
 like( $@, qr/fetched_within_minutes/, 'a non-numeric window dies' );
+
+# ----------------------------------------------------------------------------
+# shodan_cache_stats -- the summary the CLI command prints
+# ----------------------------------------------------------------------------
+
+{
+	my $stats = $lilith->shodan_cache_stats( ttl => 3600 );
+	is( $stats->{total},     3, 'the total is every cached address' );
+	is( $stats->{found},     2, 'found counts the addresses Shodan had something on' );
+	is( $stats->{not_found}, 1, 'not_found counts the cached "nothing known"' );
+	is_deeply( $stats->{by_source}, { api => 2, internetdb => 1 }, 'the source breakdown' );
+	is( $stats->{with_vulns}, 2, 'with_vulns counts the rows carrying a CVE' );
+	is( $stats->{high_cvss},  1, 'high_cvss counts the rows with a stored score >= 9' );
+	is( $stats->{fresh},      3, 'fresh counts the rows fetched within the ttl' );
+
+	# coverage counts rows written since the upgrade -- an empty array is still a
+	# write (it is not NULL); only the row NULLed to mimic a pre-upgrade one is
+	# uncovered.
+	is( $stats->{with_callouts}, 2, 'callout coverage excludes only the NULL (pre-upgrade) row' );
+	is( $stats->{with_products}, 2, 'product coverage excludes only the NULL (pre-upgrade) row' );
+
+	like( $stats->{newest}, qr/^\d{4}-\d{2}-\d{2} /, 'newest is a timestamp string' );
+
+	my $no_ttl = $lilith->shodan_cache_stats;
+	ok( !exists $no_ttl->{fresh}, 'without a ttl there is no freshness count' );
+}
 
 # ----------------------------------------------------------------------------
 # the deaths
@@ -242,6 +321,8 @@ for my $bad (
 	[ { ip                     => 'not an ip' }, qr/for ip/,         'a malformed ip dies naming the filter' ],
 	[ { port                   => 'ssh' },       qr/for port/,       'a non-numeric port dies' ],
 	[ { max_cvss               => 'high' },      qr/for max_cvss/,   'a non-numeric max_cvss dies' ],
+	[ { html_hash             => 'abc' },        qr/for html_hash/,   'a non-integer html_hash dies' ],
+	[ { banner_hash           => 'xyz' },        qr/for banner_hash/, 'a non-integer banner_hash dies' ],
 	[ { found                  => 'maybe' },     qr/for found/,      'a value outside the found vocabulary dies' ],
 	[ { source                 => 'psychic' },   qr/for source/,     'a value outside the source vocabulary dies' ],
 	[ { fetched_within_minutes => 'week' },      qr/fetched_within_minutes/, 'a non-numeric window dies' ],

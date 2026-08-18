@@ -193,6 +193,55 @@ sub add_alert {
 	is( $decoded->{results}[0]{status}, 'would look up', 'each row says what would happen to it' );
 }
 
+# ---------------------------------------------------------------------------
+# shodan_cache_stats -- summarize the table the other command fills
+# ---------------------------------------------------------------------------
+
+{
+	use_ok('Lilith::CLI::Command::ShodanCacheStats') or BAIL_OUT('ShodanCacheStats failed to load');
+
+	# one API hit carrying a callout and a product, one keyless miss
+	$lilith->shodan_cache_put(
+		ip     => '45.0.0.10',
+		source => 'api',
+		raw    => { ports => [443] },
+		info   => {
+			ports    => [443],
+			products => ['nginx'],
+			callouts => [ { key => 'self-signed', level => 'warning', text => 'self-signed certificate' } ],
+		},
+		ttl => 3600,
+	);
+	$lilith->shodan_cache_put( ip => '45.0.0.11', source => 'internetdb', raw => {}, info => {}, ttl => 3600 );
+
+	# Run the stats command with the config/lilith stubs the file already set.
+	my $run_stats = sub {
+		my (%opt) = @_;
+		my $cmd = bless {}, 'Lilith::CLI::Command::ShodanCacheStats';
+		my $out = '';
+		open( my $fh, '>', \$out ) or die $!;
+		my $old = select($fh);
+		eval { $cmd->execute( \%opt, [] ) };
+		my $err = $@;
+		select($old);
+		close($fh);
+		return ( $out, $err );
+	};
+
+	my ( $table, $terr ) = $run_stats->( ttl => 3600, top => 5, output => 'table' );
+	is( $terr, '', 'shodan_cache_stats runs without error' );
+	like( $table, qr/cached addresses/, 'the summary names the total' );
+	like( $table, qr/with products/,    'and reports product coverage' );
+	like( $table, qr/top products/,     'and lists the top products' );
+	like( $table, qr/nginx/,            'nginx among them' );
+
+	my ( $json, $jerr ) = $run_stats->( ttl => 3600, top => 5, output => 'json' );
+	is( $jerr, '', 'the json run lives too' );
+	my $decoded = eval { JSON::decode_json($json) };
+	ok( ref $decoded eq 'HASH' && $decoded->{summary}{total} >= 2, 'json output carries the summary total' );
+	is( $decoded->{summary}{by_source}{api}, 1, 'and the source breakdown' );
+}
+
 $dbh->disconnect;
 $pg->stop;
 

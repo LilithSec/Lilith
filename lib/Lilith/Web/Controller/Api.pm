@@ -619,21 +619,21 @@ sub _shodan_expiry_callouts {
 	return;
 } ## end sub _shodan_expiry_callouts
 
-# The distinct fingerprint queries a normalized host offers the neighborhood
-# count: one per HTML hash, certificate, and banner hash its services carry,
-# each as the { label, filter, value } Lilith::Shodan::neighborhood_count takes.
+# The fingerprint queries a normalized host offers Shodan's neighborhood count,
+# one per distinct HTML hash, certificate, and banner hash, each as the
+# { label, filter, value } Lilith::Shodan::neighborhood_count takes.
 #
-# Deduplicated across services, since a host commonly presents the same panel or
-# certificate on several ports and each shared fingerprint is one question, not
-# one per port.
+# Reads the deduplicated arrays normalize already built (html_hashes,
+# cert_fingerprints, banner_hashes) rather than re-walking services, so the
+# fingerprints counted, stored, and matched locally are one and the same set.
+# The filter on each is the Shodan search filter, which is also the facet the
+# modal's own pivot links use.
 #
 # Plain function, not a method.
 #
 # Args:
 #
 #   - $shodan :: the normalized result, as Lilith::Shodan::normalize returns it.
-#     Its services are read for their http.html_hash, ssl.cert_fingerprint, and
-#     banner hash.
 #
 # Returns: an array ref of { label, filter, value }, empty when the host carried
 # no fingerprints worth counting.
@@ -643,29 +643,24 @@ sub _shodan_expiry_callouts {
 sub _shodan_fingerprints {
 	my $shodan = shift;
 
-	return [] unless ref $shodan eq 'HASH' && ref $shodan->{services} eq 'ARRAY';
+	return [] unless ref $shodan eq 'HASH';
 
-	# filter => label for the three the modal already pivots on; ssl.cert.fingerprint
-	# and http.html_hash and hash are the Shodan search facets those links use.
-	my @wanted = (
-		[ 'html_hash',        'http.html_hash',       'HTML hash', sub { $_[0]->{http} } ],
-		[ 'cert_fingerprint', 'ssl.cert.fingerprint', 'Certificate', sub { $_[0]->{ssl} } ],
-		[ 'hash',             'hash',                 'Banner hash', sub { $_[0] } ],
+	# the normalize array => ( Shodan search filter, label ) for each kind
+	my @groups = (
+		[ 'html_hashes',       'http.html_hash',       'HTML hash' ],
+		[ 'cert_fingerprints', 'ssl.cert.fingerprint', 'Certificate' ],
+		[ 'banner_hashes',     'hash',                 'Banner hash' ],
 	);
 
-	my %seen;
 	my @out;
-	for my $service ( @{ $shodan->{services} } ) {
-		next unless ref $service eq 'HASH';
-		for my $spec (@wanted) {
-			my ( $key, $filter, $label, $where ) = @{$spec};
-			my $holder = $where->($service);
-			my $value  = ref $holder eq 'HASH' ? $holder->{$key} : $service->{$key};
+	for my $group (@groups) {
+		my ( $key, $filter, $label ) = @{$group};
+		next unless ref $shodan->{$key} eq 'ARRAY';
+		for my $value ( @{ $shodan->{$key} } ) {
 			next unless defined $value && !ref $value && $value ne '' && $value ne '0';
-			next if $seen{ $filter . "\0" . $value }++;
 			push( @out, { label => $label, filter => $filter, value => $value } );
 		}
-	} ## end for my $service ( @{ $shodan...})
+	}
 
 	return \@out;
 } ## end sub _shodan_fingerprints
@@ -707,11 +702,23 @@ sub shodan_neighborhood {
 
 	my $info = Lilith::Shodan::normalize( $raw, $self->shodan_source, $ip );
 
-	my $local = eval { $self->lilith->shodan_neighbors( ip => $ip, org => $info->{org}, tags => $info->{tags} ); };
+	my $local = eval {
+		$self->lilith->shodan_neighbors(
+			ip                => $ip,
+			org               => $info->{org},
+			ports             => $info->{ports},
+			tags              => $info->{tags},
+			cves              => $info->{vulns},
+			products          => $info->{products},
+			html_hashes       => $info->{html_hashes},
+			cert_fingerprints => $info->{cert_fingerprints},
+			banner_hashes     => $info->{banner_hashes},
+		);
+	};
 	if ($@) {
 		( my $why = $@ ) =~ s/\s+\z//;
 		$self->app->log->warn( 'shodan neighbors read failed: ' . $why );
-		$local = { org => undef, tags => [] };
+		$local = { org => undef, ports => [], tags => [], cves => [], products => [], fingerprints => [] };
 	}
 
 	# The Shodan half: only with the panel turned on, a key configured (the count

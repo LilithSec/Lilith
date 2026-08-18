@@ -561,7 +561,11 @@ sub _service {
 #         cpes        => [ 'cpe:2.3:a:nginx:nginx:...' ],
 #         vulns       => [ { cve => 'CVE-2021-23017', cvss => 9.8, ... } ],
 #         services    => [ { port => 443, ... } ],       # see _service
-#         callouts    => [ { text => 'exposed RDP', level => 'danger' } ],  # see _callouts
+#         callouts    => [ { text => 'exposed RDP', level => 'danger', key => 'exposed-rdp' } ],  # see _callouts
+#         html_hashes       => [ 12345678 ],             # the fingerprint projection
+#         cert_fingerprints => [ 'aabbcc...' ],          # deduped across services,
+#         banner_hashes     => [ -1524570663 ],          # stored and matched locally
+#         products          => [ 'nginx' ],              # distinct product names, no versions
 #       },
 #       '',                                              # the error string
 #       { ... },                                         # Shodan's own response
@@ -702,19 +706,25 @@ my %EXPOSED_PORT = (
 #     produced (self_signed, cert_expired, versions); its tags are Shodan's own.
 #
 # Returns: an array ref of findings, each { text => 'exposed RDP', level =>
-# 'danger' | 'warning' }, danger first so the exposed services lead. Empty when
-# nothing stood out.
+# 'danger' | 'warning', key => 'exposed-rdp' }, danger first so the exposed
+# services lead. Empty when nothing stood out. text is what the modal shows;
+# key is the stable token the /shodan browser filters on and shodan_cache_put
+# stores, so the display wording can change without stranding a filter.
 #
 #     my $callouts = _callouts( \%info );
-#     # $callouts->[0] is { text => 'exposed MongoDB', level => 'danger' }
+#     # $callouts->[0] is { text => 'exposed MongoDB', level => 'danger', key => 'exposed-mongodb' }
 sub _callouts {
 	my $info = shift;
 
 	my @danger;
 	for my $port ( @{ $info->{ports} } ) {
 		next unless $EXPOSED_PORT{$port};
-		push( @danger, { text => 'exposed ' . $EXPOSED_PORT{$port}, level => 'danger' } );
-	}
+
+		# a stable filter token for the /shodan browser: 'Docker API' -> 'exposed-docker-api'
+		( my $slug = lc $EXPOSED_PORT{$port} ) =~ s/[^a-z0-9]+/-/g;
+		$slug =~ s/^-+|-+$//g;
+		push( @danger, { text => 'exposed ' . $EXPOSED_PORT{$port}, level => 'danger', key => 'exposed-' . $slug } );
+	} ## end for my $port ( @{ $info...})
 
 	# The certificate and TLS weaknesses are gathered across every service and
 	# each reported once, rather than once per port that shares the fault.
@@ -734,17 +744,17 @@ sub _callouts {
 	} ## end for my $service ( @{ $info...})
 
 	my @warning;
-	push( @warning, { text => 'weak TLS (' . join( ', ', sort keys %weak_tls ) . ')', level => 'warning' } )
+	push( @warning, { text => 'weak TLS (' . join( ', ', sort keys %weak_tls ) . ')', level => 'warning', key => 'weak-tls' } )
 		if %weak_tls;
-	push( @warning, { text => 'self-signed certificate', level => 'warning' } ) if $self_signed;
-	push( @warning, { text => 'expired certificate',     level => 'warning' } ) if $expired;
+	push( @warning, { text => 'self-signed certificate', level => 'warning', key => 'self-signed' } )  if $self_signed;
+	push( @warning, { text => 'expired certificate',     level => 'warning', key => 'expired-cert' } ) if $expired;
 
 	# End-of-life software, from the tags Shodan already sets -- promoted out of
 	# the grey tag row into a finding, since "runs software past its support" is
 	# exactly what the callouts are for.
 	my %tag = map { $_ => 1 } @{ $info->{tags} };
-	push( @warning, { text => 'end-of-life OS',      level => 'warning' } ) if $tag{'eol-os'};
-	push( @warning, { text => 'end-of-life product', level => 'warning' } ) if $tag{'eol-product'};
+	push( @warning, { text => 'end-of-life OS',      level => 'warning', key => 'eol-os' } )      if $tag{'eol-os'};
+	push( @warning, { text => 'end-of-life product', level => 'warning', key => 'eol-product' } ) if $tag{'eol-product'};
 
 	return [ @danger, @warning ];
 } ## end sub _callouts
@@ -865,6 +875,29 @@ sub normalize {
 				|| $a->{cve} cmp $b->{cve}
 		} values %vulns
 	];
+
+	# The service fingerprints, deduplicated across services, as the queryable
+	# projection shodan_cache_put stores and the neighborhood panel matches on:
+	# a host commonly presents one panel or certificate on several ports, and
+	# that is one fingerprint, not one per port.
+	my ( %html_hash, %cert_fp, %banner_hash, %product );
+	for my $service ( @{ $info{services} } ) {
+		my $html = $service->{http}{html_hash};
+		$html_hash{$html} = 1 if defined $html && $html ne '' && $html ne '0';
+		my $cert = $service->{ssl}{cert_fingerprint};
+		$cert_fp{$cert} = 1 if defined $cert && $cert ne '';
+		my $banner = $service->{hash};
+		$banner_hash{$banner} = 1 if defined $banner && $banner ne '' && $banner ne '0';
+
+		# the product name only; the version rides along per-service and is not
+		# what a "which hosts run nginx" facet groups by.
+		my $name = $service->{product};
+		$product{$name} = 1 if defined $name && $name ne '';
+	} ## end for my $service ( @{ $info...})
+	$info{html_hashes}       = [ sort { $a <=> $b } keys %html_hash ];
+	$info{cert_fingerprints} = [ sort keys %cert_fp ];
+	$info{banner_hashes}     = [ sort { $a <=> $b } keys %banner_hash ];
+	$info{products}          = [ sort keys %product ];
 
 	# The plain-language findings, drawn from everything just built. Last, so it
 	# reads ports, services, and tags in their final form.

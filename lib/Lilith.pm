@@ -15,7 +15,7 @@ use Time::Piece::Guess   ();
 use Lilith::Schema       ();
 use Lilith::Escalate     ();
 use Lilith::AutoEscalate ();
-use Lilith::DBUtil       qw( column_exists local_networks_frag );
+use Lilith::DBUtil       qw( local_networks_frag );
 
 =head1 NAME
 
@@ -1580,8 +1580,8 @@ config's; with none given, the unroutable ranges stand in):
 
 Below are the Shodan enrichment filters, for the suricata, sagan, and baphomet
 tables (cape is skipped -- its addresses describe the submitter). Each filters
-on what the C<shodan_cache> table (schema version 15) holds for that end of the
-alert, the same data the results badges and the dashboard's enrichment
+on what the C<shodan_cache> table holds for that end of the alert, the same data
+the results badges and the dashboard's enrichment
 dimensions read, and like the dimensions they match whatever the cache
 currently holds -- running C<lilith shodan_cache> on a timer is what keeps
 that current. An end with no cached entry never matches a positive filter.
@@ -1611,7 +1611,7 @@ Last are the rule CVE filters, for suricata only (elsewhere they are skipped
 like any other filter naming a column the table lacks):
 
     - cve :: the CVE ids the rule that fired names, from the cves generated
-      column (schema version 16). Values are normalized before matching, so
+      column. Values are normalized before matching, so
       'cve_2021_44228' finds what 'CVE-2021-44228' does; anything that does
       not normalize to an id dies. '!' negates, and a rule naming no ids
       counts as not naming any given one.
@@ -1628,8 +1628,7 @@ like any other filter naming a column the table lacks):
       that end is cached as vulnerable to), 'unmatched' (the rule names CVEs,
       the cached entry carries none of them), 'no-cve' (the rule names none),
       and 'unchecked' (the rule names CVEs, that end was never looked up).
-      '!' negates; anything else dies. Needs both the shodan_cache table and
-      the cves column (schema version 16).
+      '!' negates; anything else dies.
 
     # the exploit-against-a-vulnerable-host alerts, whichever end it sits on
     shodan_src_cve_match  => 'matched',
@@ -2273,23 +2272,6 @@ sub search {
 	# Shodan enrichment filters
 	#
 
-	# The schema facts the enrichment filters gate on, probed lazily and at
-	# most once per call however many filters ask -- a clear death beats what
-	# the driver would say about a missing table or column when the database is
-	# still on an older schema.
-	my ( $has_shodan_cache, $has_cves_column );
-	my $shodan_cache_present = sub {
-		$has_shodan_cache
-			= ( $schema->storage->dbh->selectrow_array(q{select to_regclass('shodan_cache')}) ? 1 : 0 )
-			if !defined $has_shodan_cache;
-		return $has_shodan_cache;
-	};
-	my $cves_column_present = sub {
-		$has_cves_column = column_exists( $schema->storage->dbh, 'suricata_alerts', 'cves' )
-			if !defined $has_cves_column;
-		return $has_cves_column;
-	};
-
 	# These filter on what the shodan_cache table says about an alert's ends
 	# rather than on the alert itself, each as an EXISTS against the end's
 	# address -- the search-filter form of the dashboard's enrichment
@@ -2360,7 +2342,7 @@ sub search {
 			# never matches.
 			my @cvss_values = _filter_values( $opts{ 'shodan_' . $side . '_cvss' } );
 			if (@cvss_values) {
-				$shodan_max_cvss = $self->_shodan_max_cvss_expr( $schema->storage->dbh )
+				$shodan_max_cvss = $self->_shodan_max_cvss_expr
 					if !defined($shodan_max_cvss);
 
 				my ( @cvss_terms, @cvss_binds );
@@ -2405,9 +2387,6 @@ sub search {
 		} ## end for my $side (qw(src dest))
 
 		if (@shodan_clauses) {
-			die("the shodan_* search filters need the shodan_cache table (schema version 15)\n")
-				unless $shodan_cache_present->();
-
 			$search->{'-and'} = [] if !defined( $search->{'-and'} );
 			push( @{ $search->{'-and'} }, @shodan_clauses );
 		}
@@ -2436,9 +2415,6 @@ sub search {
 		}
 
 		if ( @cve_positive || @cve_negative ) {
-			die("the cve search filter needs the suricata_alerts cves column (schema version 16)\n")
-				unless $cves_column_present->();
-
 			$search->{'-and'} = [] if !defined( $search->{'-and'} );
 			push( @{ $search->{'-and'} }, \[ 'me.cves && ?::text[]', $self->_pg_text_array( \@cve_positive ) ] )
 				if @cve_positive;
@@ -2483,11 +2459,6 @@ sub search {
 		my @match_clauses
 			= _vocab_clauses( $match_filter, \@match_values, \%match_sql, 'matched, unmatched, no-cve, or unchecked' );
 		next unless @match_clauses;
-
-		die( 'the ' . $match_filter . " search filter needs the suricata_alerts cves column (schema version 16)\n" )
-			unless $cves_column_present->();
-		die( 'the ' . $match_filter . " search filter needs the shodan_cache table (schema version 15)\n" )
-			unless $shodan_cache_present->();
 
 		$search->{'-and'} = [] if !defined( $search->{'-and'} );
 		push( @{ $search->{'-and'} }, @match_clauses );
@@ -4000,6 +3971,45 @@ Returns 1. Dies if the database cannot be reached or the statement fails.
 
 =cut
 
+# Remove NUL bytes from every string in a decoded JSON structure, in place, and
+# return it. PostgreSQL jsonb cannot store a NUL byte in a string -- encode_json
+# writes it as a \u0000 escape, which the jsonb input rejects ("unsupported
+# Unicode escape sequence ... \u0000 cannot be converted to text") -- and Shodan
+# banners carry them, an out-of-band service's raw html or a binary protocol's
+# data. The byte is meaningless as text, so it is dropped rather than replaced
+# and the rest of the response still stores.
+#
+# Plain function, not a method. Recurses through hash and array refs, editing
+# their string leaves; hash keys are left alone, being Shodan's own field names.
+#
+# Args:
+#
+#   - $data :: any decoded JSON value -- a hash ref, array ref, scalar, or
+#     undef. Refs are walked; a plain scalar is returned unchanged, since a
+#     scalar cannot be edited in the caller through a copy.
+#
+# Returns: $data, for chaining into encode_json.
+#
+#     encode_json( _strip_nul($raw) );
+sub _strip_nul {
+	my $data = shift;
+	my $ref  = ref $data;
+
+	if ( $ref eq 'HASH' ) {
+		for my $key ( keys %{$data} ) {
+			if   ( ref $data->{$key} )       { _strip_nul( $data->{$key} ); }
+			elsif ( defined $data->{$key} )   { $data->{$key} =~ s/\x00//g; }
+		}
+	} elsif ( $ref eq 'ARRAY' ) {
+		for my $element ( @{$data} ) {
+			if   ( ref $element )     { _strip_nul($element); }
+			elsif ( defined $element ) { $element =~ s/\x00//g; }
+		}
+	}
+
+	return $data;
+} ## end sub _strip_nul
+
 sub shodan_cache_put {
 	my ( $self, %opts ) = @_;
 
@@ -4026,37 +4036,37 @@ sub shodan_cache_put {
 
 	my $dbh = $self->_escalation_dbh;
 
-	# The version-17 columns are probed for rather than assumed, and one probe
-	# answers for all four, since they shipped together -- remembered for the
-	# life of the object, since a shodan_cache run calls this once per address
-	# and the answer changes only when the schema is migrated. The keyless
-	# tier's empty strings are stored as NULL, so "the tier sent nothing" and
-	# "never refreshed since the upgrade" read the same way.
-	my $has_host_columns = $self->{_shodan_cache_host_columns};
-	$has_host_columns = $self->{_shodan_cache_host_columns} = column_exists( $dbh, 'shodan_cache', 'os' )
-		if !defined $has_host_columns;
-	my @host_columns = qw( os org isp asn );
+	# The ownership columns (os/org/isp/asn) hold the empty strings the keyless
+	# tier sends as NULL, so "the tier sent nothing" reads as absent.
 	my @host_values
-		= $has_host_columns
-		? map { defined $info->{$_} && !ref $info->{$_} && $info->{$_} ne '' ? $info->{$_} : undef } @host_columns
-		: ();
+		= map { defined $info->{$_} && !ref $info->{$_} && $info->{$_} ne '' ? $info->{$_} : undef } qw( os org isp asn );
 
-	my $sth
-		= $dbh->prepare( 'insert into shodan_cache'
-			. ' ( ip, source, found, fetched, last_update, ports, tags, cpes, vulns, max_cvss, hostnames'
-			. ( $has_host_columns ? ', ' . join( ', ', @host_columns ) : '' )
-			. ', raw )'
+	# The callout keys are stored, not the display text, so the wording can change
+	# without stranding a stored value.
+	my $callout_keys = $self->_pg_text_array(
+		[
+			map  { $_->{key} }
+			grep { ref eq 'HASH' && defined $_->{key} && $_->{key} ne '' }
+				@{ ref $info->{callouts} eq 'ARRAY' ? $info->{callouts} : [] }
+		]
+	);
+
+	my $sth = $dbh->prepare(
+		    'insert into shodan_cache'
+			. ' ( ip, source, found, fetched, last_update, ports, tags, cpes, vulns, max_cvss, hostnames,'
+			. ' os, org, isp, asn, callouts, html_hashes, cert_fingerprints, banner_hashes, products, raw )'
 			. ' values ( ?::inet, ?, ?, now(), (?::timestamp at time zone \'UTC\'), ?::integer[], ?::varchar[],'
-			. ' ?::varchar[], ?::varchar[], ?, ?::varchar[]'
-			. ( $has_host_columns ? ', ?, ?, ?, ?' : '' )
-			. ', ?::jsonb )'
+			. ' ?::varchar[], ?::varchar[], ?, ?::varchar[],'
+			. ' ?, ?, ?, ?, ?::varchar[], ?::bigint[], ?::varchar[], ?::bigint[], ?::varchar[], ?::jsonb )'
 			. ' on conflict (ip) do update set'
 			. ' source = excluded.source, found = excluded.found, fetched = excluded.fetched,'
 			. ' last_update = excluded.last_update, ports = excluded.ports, tags = excluded.tags,'
 			. ' cpes = excluded.cpes, vulns = excluded.vulns, max_cvss = excluded.max_cvss,'
-			. ' hostnames = excluded.hostnames'
-			. ( $has_host_columns ? join( '', map { ", $_ = excluded.$_" } @host_columns ) : '' )
-			. ', raw = excluded.raw;' );
+			. ' hostnames = excluded.hostnames, os = excluded.os, org = excluded.org, isp = excluded.isp,'
+			. ' asn = excluded.asn, callouts = excluded.callouts, html_hashes = excluded.html_hashes,'
+			. ' cert_fingerprints = excluded.cert_fingerprints, banner_hashes = excluded.banner_hashes,'
+			. ' products = excluded.products, raw = excluded.raw;'
+	);
 	$sth->execute(
 		$ip,
 		( defined $opts{source} ? $opts{source} : '' ),
@@ -4074,7 +4084,16 @@ sub shodan_cache_put {
 		$max_cvss,
 		$self->_pg_text_array( ref $info->{hostnames} eq 'ARRAY' ? $info->{hostnames} : [] ),
 		@host_values,
-		encode_json($raw),
+		$callout_keys,
+		$self->_pg_text_array( ref $info->{html_hashes}       eq 'ARRAY' ? $info->{html_hashes}       : [] ),
+		$self->_pg_text_array( ref $info->{cert_fingerprints} eq 'ARRAY' ? $info->{cert_fingerprints} : [] ),
+		$self->_pg_text_array( ref $info->{banner_hashes}     eq 'ARRAY' ? $info->{banner_hashes}     : [] ),
+		$self->_pg_text_array( ref $info->{products}          eq 'ARRAY' ? $info->{products}          : [] ),
+
+		# NUL bytes are stripped first: PostgreSQL jsonb cannot hold a NUL in a
+		# string, and Shodan banners carry them -- an out-of-band service's raw
+		# html, a binary protocol's data -- which would otherwise fail the insert.
+		encode_json( _strip_nul($raw) ),
 	);
 
 	# A row past the TTL is refetched on its next read, so keeping it buys
@@ -4206,7 +4225,7 @@ sub shodan_cache_badges {
 
 	my $sth
 		= $dbh->prepare( 'select host(ip) as ip, ports, tags, '
-			. $self->_shodan_max_cvss_expr($dbh)
+			. $self->_shodan_max_cvss_expr
 			. ' as max_cvss'
 			. ', vulns, coalesce(array_length(vulns, 1), 0) as vuln_count from shodan_cache'
 			. ' where ip = any(?::inet[]) and source = ? and fetched > now() - (? || \' seconds\')::interval;' );
@@ -4228,31 +4247,19 @@ sub shodan_cache_badges {
 
 # The SQL expression for the worst CVSS of a shodan_cache row's CVEs. The
 # keyless tier stores no scores, so its rows hold a null max_cvss however bad
-# their CVEs are; when the cvedb_cache table is present (schema version 16)
-# the worst score it holds for the row's CVEs stands in. Checked with
-# to_regclass rather than assumed so a database still on an older schema keeps
-# working with the bare column.
+# their CVEs are; the worst score the cvedb_cache table holds for the row's CVEs
+# stands in.
 #
 # One definition shared by the badges read and the shodan_*_cvss search
 # filters, so a filter matches what the badge it filters on shows.
 #
-# Args:
-#
-#   - $dbh :: the handle to probe for cvedb_cache with, from whichever
-#     connection the caller is already on.
-#
 # Returns: the expression as a string, referencing max_cvss and vulns
 # unqualified -- so it is only usable where those resolve to shodan_cache.
 #
-#     my $expr = $self->_shodan_max_cvss_expr($dbh);
+#     my $expr = $self->_shodan_max_cvss_expr;
 sub _shodan_max_cvss_expr {
-	my ( $self, $dbh ) = @_;
-
-	my ($has_cvedb) = $dbh->selectrow_array(q{select to_regclass('cvedb_cache')});
-	return $has_cvedb
-		? 'coalesce(max_cvss, (select max(cvedb.cvss) from unnest(vulns) as vuln_id'
-		. ' join cvedb_cache as cvedb on cvedb.cve = vuln_id))'
-		: 'max_cvss';
+	return 'coalesce(max_cvss, (select max(cvedb.cvss) from unnest(vulns) as vuln_id'
+		. ' join cvedb_cache as cvedb on cvedb.cve = vuln_id))';
 }
 
 =head2 shodan_cache_info
@@ -4438,13 +4445,7 @@ sub shodan_cache_search {
 	# The same worst-CVSS definition the badges and the shodan_*_cvss alert
 	# filters use, so a row filtered or ordered by it here matches the badge
 	# the results table puts on it.
-	my $max_cvss_expr = $self->_shodan_max_cvss_expr($dbh);
-
-	# Reuses the probe shodan_cache_put keeps; see there for why one probe
-	# answers for all four and lives on the object.
-	my $has_host_columns = $self->{_shodan_cache_host_columns};
-	$has_host_columns = $self->{_shodan_cache_host_columns} = column_exists( $dbh, 'shodan_cache', 'os' )
-		if !defined $has_host_columns;
+	my $max_cvss_expr = $self->_shodan_max_cvss_expr;
 
 	# order_by is concatenated into the statement, so it resolves through this
 	# rather than being passed through.
@@ -4455,7 +4456,7 @@ sub shodan_cache_search {
 		found       => 'found',
 		last_update => 'last_update',
 		max_cvss    => $max_cvss_expr,
-		map { $_ => $_ } ( $has_host_columns ? qw( os org isp asn ) : () ),
+		map { $_ => $_ } qw( os org isp asn ),
 	);
 	my $order_by = defined $opts{order_by} ? $opts{order_by} : 'fetched';
 	die( '"' . $order_by . '" for order_by is not a sortable shodan_cache column' )
@@ -4572,16 +4573,34 @@ sub shodan_cache_search {
 		}
 	);
 
+	# NULL reads as '' so a negation matches the rows the tier sent nothing for,
+	# which is most of the keyless ones.
 	for my $column (qw( os org isp asn )) {
-		my @values = _filter_values( $opts{$column} );
-		next unless @values;
-		die( 'filtering on ' . $column . ' needs the schema version 17 shodan_cache columns' )
-			unless $has_host_columns;
-
-		# NULL reads as '' so a negation matches the rows the tier sent
-		# nothing for, which is most of the keyless ones.
 		$apply->( $column, sub { return ( 'coalesce(' . $column . ', \'\') like ?', $_[0] ) } );
-	} ## end for my $column (qw( os org isp asn ))
+	}
+
+	# The text array columns -- callout keys, certificate fingerprints, product
+	# names -- match like tags and cpes above: any element like the value.
+	my %text_array_column = ( callout => 'callouts', cert => 'cert_fingerprints', product => 'products' );
+	for my $filter_name ( sort keys %text_array_column ) {
+		my $column = $text_array_column{$filter_name};
+		$apply->( $filter_name,
+			sub { return ( 'exists (select 1 from unnest(' . $column . ') as element where element like ?)', $_[0] ) } );
+	}
+
+	# The fingerprint hash columns are numeric, so they match on equality.
+	my %hash_array_column = ( html_hash => 'html_hashes', banner_hash => 'banner_hashes' );
+	for my $filter_name ( sort keys %hash_array_column ) {
+		my $column = $hash_array_column{$filter_name};
+		$apply->(
+			$filter_name,
+			sub {
+				my $value = shift;
+				die( '"' . $value . '" for ' . $filter_name . ' is not an integer' ) unless $value =~ /\A-?[0-9]+\z/;
+				return ( 'exists (select 1 from unnest(' . $column . ') as element where element = ?::bigint)', $value );
+			}
+		);
+	} ## end for my $filter_name ( sort keys %hash_array_column)
 
 	if ( $minutes > 0 ) {
 		push( @where, 'fetched >= now() - (? || \' minutes\')::interval' );
@@ -4596,8 +4615,7 @@ sub shodan_cache_search {
 		. ' date_trunc(\'second\', last_update)::text as last_update,'
 		. ' ports, tags, cpes, vulns, hostnames, '
 		. $max_cvss_expr
-		. ' as max_cvss'
-		. ( $has_host_columns ? ', os, org, isp, asn' : '' )
+		. ' as max_cvss, os, org, isp, asn, callouts'
 		. ' from shodan_cache'
 		. ( @where ? ' where ' . join( ' and ', @where ) : '' )
 		. ' order by '
@@ -4622,9 +4640,12 @@ Takes:
 
 - C<column> :: which filter's values are wanted, by the name
   C<shodan_cache_search> takes the filter under: C<tag>, C<port>, C<cve>,
-  C<cpe>, or C<hostname> for the array columns (one count per element), or
-  C<source>, C<os>, C<org>, C<isp>, or C<asn> for the scalar ones. The last
-  four are schema version 17 columns and die naming that on an older schema.
+  C<cpe>, C<hostname>, C<callout>, C<cert>, C<html_hash>, C<banner_hash>, or
+  C<product> for the array columns (one count per element), or C<source>,
+  C<os>, C<org>, C<isp>, or C<asn> for the scalar ones. C<os>/C<org>/C<isp>/C<asn>
+  are schema version 17 columns, C<callout>/C<cert>/C<html_hash>/C<banner_hash>
+  version 18 ones, and C<product> version 19, each dying naming the schema it
+  needs on an older one.
 - C<fetched_within_minutes> :: count only rows fetched this recently. C<0> or
   unset means the whole table, matching the search's own default, so what is
   offered describes the rows the page is showing.
@@ -4643,7 +4664,18 @@ non-numeric window or limit, or if the database cannot be reached.
 sub shodan_cache_values {
 	my ( $self, %opts ) = @_;
 
-	my %array_column  = ( tag => 'tags', port => 'ports', cve => 'vulns', cpe => 'cpes', hostname => 'hostnames' );
+	my %array_column = (
+		tag         => 'tags',
+		port        => 'ports',
+		cve         => 'vulns',
+		cpe         => 'cpes',
+		hostname    => 'hostnames',
+		callout     => 'callouts',
+		cert        => 'cert_fingerprints',
+		html_hash   => 'html_hashes',
+		banner_hash => 'banner_hashes',
+		product     => 'products',
+	);
 	my %scalar_column = map { $_ => 1 } qw( source os org isp asn );
 
 	my $column = defined $opts{column} ? $opts{column} : '';
@@ -4658,24 +4690,15 @@ sub shodan_cache_values {
 
 	my $dbh = $self->_escalation_dbh;
 
-	# Reuses the probe shodan_cache_put keeps; see there for why one probe
-	# answers for all four and lives on the object.
-	if ( $column =~ /^(?:os|org|isp|asn)$/ ) {
-		my $has_host_columns = $self->{_shodan_cache_host_columns};
-		$has_host_columns = $self->{_shodan_cache_host_columns} = column_exists( $dbh, 'shodan_cache', 'os' )
-			if !defined $has_host_columns;
-		die( 'offering ' . $column . ' values needs the schema version 17 shodan_cache columns' )
-			unless $has_host_columns;
-	}
-
 	# An array column counts once per element, a scalar once per row; the
 	# subquery gives both the same one-value-per-row shape to aggregate.
 	my $value_expr = $array_column{$column} ? 'unnest(' . $array_column{$column} . ')' : $column;
 
-	# port is the one integer column, which an empty-string comparison would
-	# fail to even parse against; NULL elements cannot come out of unnest, so
-	# it needs no filter at all.
-	my $value_filter = $column eq 'port' ? '' : ' where value is not null and value <> \'\'';
+	# The integer columns would fail an empty-string comparison they cannot even
+	# parse, and NULL elements cannot come out of unnest, so they need no filter
+	# at all.
+	my $value_filter
+		= $column =~ /^(?:port|html_hash|banner_hash)$/ ? '' : ' where value is not null and value <> \'\'';
 
 	my $statement
 		= 'select value, count(*) as count from'
@@ -4691,45 +4714,152 @@ sub shodan_cache_values {
 	return $dbh->selectall_arrayref( $statement, { Slice => {} }, ( $minutes > 0 ? ($minutes) : () ) );
 } ## end sub shodan_cache_values
 
+=head2 shodan_cache_stats
+
+A one-shot summary of the C<shodan_cache> table: how much it holds, how it
+breaks down, how fresh it is, and how far the enrichment columns have been
+filled -- the last being what says whether a C<lilith shodan_cache> backfill
+still has rows to reach after a schema upgrade.
+
+Reads only. Every count comes from one aggregate pass over the table.
+
+Takes:
+
+- C<ttl> :: the freshness window in seconds. When above zero, the result
+  carries how many rows were fetched within it (the rest being due a refetch on
+  their next read). C<0> or unset omits the freshness count.
+
+Returns a hash ref:
+
+    {
+      total      => 1240,
+      found      => 1100,                    # Shodan had something on the address
+      not_found  => 140,                     # cached "nothing known"
+      by_source  => { api => 900, internetdb => 340 },
+      with_vulns => 210,                      # at least one CVE
+      high_cvss  => 44,                       # a scored CVE >= 9.0
+      oldest     => '2026-05-01 00:00:00',    # undef on an empty table
+      newest     => '2026-08-18 09:15:00',
+      fresh      => 1180,                     # only when ttl > 0
+      with_callouts => 1240,                  # schema 18; backfill coverage
+      with_products => 1180,                  # schema 19; backfill coverage
+    }
+
+Dies only if the database cannot be reached.
+
+    my $stats = $lilith->shodan_cache_stats( ttl => 2592000 );
+    # $stats->{with_products} vs $stats->{total} is how far the backfill has run
+
+=cut
+
+sub shodan_cache_stats {
+	my ( $self, %opts ) = @_;
+
+	my $ttl = defined $opts{ttl} && $opts{ttl} =~ /^[0-9]+$/ ? $opts{ttl} + 0 : 0;
+
+	my $dbh = $self->_escalation_dbh;
+
+	# The coverage counts (with_callouts, with_products) count rows whose column
+	# is not NULL: a row written before that column was added carries NULL, so
+	# the count is how far a `lilith shodan_cache` backfill has reached.
+	my @select = (
+		'count(*) as total',
+		'count(*) filter (where found) as found',
+		'count(*) filter (where not found) as not_found',
+		'count(*) filter (where source = \'api\') as source_api',
+		'count(*) filter (where source = \'internetdb\') as source_internetdb',
+		'count(*) filter (where array_length(vulns, 1) is not null) as with_vulns',
+		'count(*) filter (where max_cvss >= 9) as high_cvss',
+		'count(*) filter (where callouts is not null) as with_callouts',
+		'count(*) filter (where products is not null) as with_products',
+		'date_trunc(\'second\', min(fetched))::text as oldest',
+		'date_trunc(\'second\', max(fetched))::text as newest',
+	);
+
+	# The freshness count carries the only bind, so it goes last where its
+	# placeholder is unambiguous.
+	my @binds;
+	if ( $ttl > 0 ) {
+		push( @select, 'count(*) filter (where fetched > now() - (? || \' seconds\')::interval) as fresh' );
+		push( @binds,  $ttl );
+	}
+
+	my $row = $dbh->selectrow_hashref( 'select ' . join( ', ', @select ) . ' from shodan_cache', undef, @binds );
+
+	my %stats = (
+		total         => $row->{total} + 0,
+		found         => $row->{found} + 0,
+		not_found     => $row->{not_found} + 0,
+		by_source     => { api => $row->{source_api} + 0, internetdb => $row->{source_internetdb} + 0 },
+		with_vulns    => $row->{with_vulns} + 0,
+		high_cvss     => $row->{high_cvss} + 0,
+		with_callouts => $row->{with_callouts} + 0,
+		with_products => $row->{with_products} + 0,
+		oldest        => $row->{oldest},
+		newest        => $row->{newest},
+	);
+	$stats{fresh} = $row->{fresh} + 0 if $ttl > 0;
+
+	return \%stats;
+} ## end sub shodan_cache_stats
+
 =head2 shodan_neighbors
 
-How many other cached addresses share an address's neighborhood: its org, and
-each of its tags. The local counterpart to C<Lilith::Shodan::neighborhood_count>
--- where that asks Shodan about the whole internet, this asks the cache about
-the hosts Lilith has actually seen, which is both free and grounded in the
+The cache's own profile of an address, in the same shape the Shodan
+neighborhood count gives from the internet, so the modal can show the two side
+by side: for each of the address's ports, tags, CVEs, products, and service
+fingerprints, how many OTHER cached hosts share it -- how common each is among
+the hosts Lilith has actually seen -- plus the count of other cached hosts in
+its org.
+
+Where the Shodan half characterizes the org from the whole internet (and cannot
+facet by tag, the key being plan-gated), this characterizes the address's own
+attributes from the cache, which is free, tag-aware, and grounded in the
 sensors' own traffic.
 
-It also answers what the API tier will not: the C<tag> facet the Shodan key is
-plan-gated out of is here just another column, because the tags were gathered a
-free per-address lookup at a time.
-
-The queried address is excluded from its own counts, so a host is never counted
-as its own neighbor.
+The queried address is excluded from every count, so a host is never counted as
+its own neighbor. A value no other cached host shares is left out -- it is not a
+neighborhood -- except the org, which is returned even at zero so the cache
+block still names the org the Shodan block does.
 
 Takes:
 
 - C<ip> :: the address whose neighborhood is wanted, excluded from the counts.
   Required.
 - C<org> :: the address's org string, or '' / unset to skip the org count.
-  Needs the schema version 17 C<org> column; without it the org count is
-  quietly skipped rather than dying, since the tag counts still stand.
-- C<tags> :: an array ref of the address's tags, each counted on its own.
+- C<ports> :: an array ref of the address's ports.
+- C<tags> :: an array ref of the address's tags.
+- C<cves> :: an array ref of the address's CVEs, as either bare ids or the
+  C<< { cve => ... } >> hashes normalize produces; only the ids are matched.
+- C<products> :: an array ref of the address's product names.
+- C<html_hashes>, C<cert_fingerprints>, C<banner_hashes> :: array refs of the
+  address's service fingerprints.
+
+Each dimension's list is the shared values most common first, capped at
+C<$NEIGHBOR_LIMIT>.
 
 Returns a hash ref:
 
     {
-      org  => { value => 'Example Hosting LLC', count => 12 },   # or undef
-      tags => [ { value => 'honeypot', count => 4 }, ... ],      # most common first
+      org          => { value => 'Example Hosting LLC', count => 12 },   # or undef; count may be 0
+      ports        => [ { value => 443, count => 30 }, ... ],
+      tags         => [ { value => 'self-signed', count => 350 }, ... ],
+      cves         => [ { value => 'CVE-2021-44228', count => 3 }, ... ],
+      products     => [ { value => 'nginx', count => 18 }, ... ],
+      fingerprints => [ { label => 'HTML hash', filter => 'html_hash',
+                          value => 12345678, count => 6 }, ... ],
     }
 
-A count that comes to zero is left out -- an org or tag no other cached host
-shares is not a neighborhood. Dies only if the database cannot be reached.
+The C<filter> on each fingerprint is the C</shodan> browser filter that lists
+the matches. Dies only if the database cannot be reached.
 
     my $near = $lilith->shodan_neighbors( ip => '192.0.2.10', org => 'Example Hosting LLC',
-        tags => [ 'honeypot', 'cloud' ] );
-    # $near->{org}{count} is how many other cached hosts share that org
+        ports => [ 22, 443 ], tags => [ 'honeypot' ], html_hashes => [ 12345678 ] );
+    # $near->{tags}[0]{count} is how many other cached hosts also carry that tag
 
 =cut
+
+our $NEIGHBOR_LIMIT = 8;
 
 sub shodan_neighbors {
 	my ( $self, %opts ) = @_;
@@ -4737,35 +4867,66 @@ sub shodan_neighbors {
 	my $ip = defined $opts{ip} ? $opts{ip} : '';
 	die('shodan neighbors: an ip is required') if $ip eq '';
 
-	my $org  = defined $opts{org} ? $opts{org} : '';
-	my $tags = ref $opts{tags} eq 'ARRAY' ? $opts{tags} : [];
+	my $org = defined $opts{org} ? $opts{org} : '';
 
 	my $dbh = $self->_escalation_dbh;
-	my %out = ( org => undef, tags => [] );
+	my %out = ( org => undef, ports => [], tags => [], cves => [], products => [], fingerprints => [] );
 
-	# org is a schema version 17 column; on an older schema its count is skipped
-	# rather than fatal, using the same one-shot probe shodan_cache_values keeps.
+	# For a set of the queried host's own values in one array column, how many
+	# OTHER cached hosts share each -- the cache's answer to "how common is this
+	# among the hosts we have seen". One grouped query per dimension: only the
+	# values some other host also carries come back, most common first, capped.
+	#
+	# Args: the column to unnest, its element's SQL type for the bound array, and
+	# the host's values. Returns an array ref of { value, count }.
+	my $shares = sub {
+		my ( $column, $type, $values ) = @_;
+		return [] unless ref $values eq 'ARRAY' && @{$values};
+
+		my $rows = $dbh->selectall_arrayref(
+			'select value, count(*) as count from shodan_cache, unnest(' . $column . ') as value'
+				. ' where value = any(?::' . $type . '[]) and ip <> ?::inet'
+				. ' group by value order by count desc, value limit ' . $NEIGHBOR_LIMIT,
+			{ Slice => {} }, $self->_pg_text_array($values), $ip
+		);
+		return [ map { { value => $_->{value}, count => $_->{count} + 0 } } @{$rows} ];
+	};
+
+	# The org is returned even at zero -- unlike the others -- so the cache block
+	# still names the org the Shodan block does.
 	if ( $org ne '' ) {
-		my $has_host_columns = $self->{_shodan_cache_host_columns};
-		$has_host_columns = $self->{_shodan_cache_host_columns} = column_exists( $dbh, 'shodan_cache', 'os' )
-			if !defined $has_host_columns;
-
-		if ($has_host_columns) {
-			my ($count) = $dbh->selectrow_array(
-				'select count(*) from shodan_cache where org = ? and ip <> ?::inet',
-				undef, $org, $ip );
-			$out{org} = { value => $org, count => $count + 0 } if $count;
-		}
-	} ## end if ( $org ne '' )
-
-	for my $tag ( @{$tags} ) {
-		next unless defined $tag && $tag ne '';
 		my ($count) = $dbh->selectrow_array(
-			'select count(*) from shodan_cache where ?::varchar = any(tags) and ip <> ?::inet',
-			undef, $tag, $ip );
-		push( @{ $out{tags} }, { value => $tag, count => $count + 0 } ) if $count;
+			'select count(*) from shodan_cache where org = ? and ip <> ?::inet',
+			undef, $org, $ip );
+		$out{org} = { value => $org, count => $count + 0 };
 	}
-	@{ $out{tags} } = sort { $b->{count} <=> $a->{count} || $a->{value} cmp $b->{value} } @{ $out{tags} };
+
+	# The CVE list arrives as normalize's vuln hashes; only the ids are matched.
+	$out{ports}    = $shares->( 'ports',    'integer', $opts{ports} );
+	$out{tags}     = $shares->( 'tags',     'varchar', $opts{tags} );
+	$out{products} = $shares->( 'products', 'varchar', $opts{products} );
+	$out{cves}     = $shares->(
+		'vulns', 'varchar',
+		[
+			map  { ref $_ eq 'HASH' ? $_->{cve} : $_ }
+			grep { defined } @{ ref $opts{cves} eq 'ARRAY' ? $opts{cves} : [] }
+		]
+	);
+
+	# Each fingerprint group carries the /shodan filter that lists its matches,
+	# so the modal can link a count there.
+	my @groups = (
+		[ 'HTML hash',   'html_hash',   'html_hashes',       'bigint',  $opts{html_hashes} ],
+		[ 'Certificate', 'cert',        'cert_fingerprints', 'varchar', $opts{cert_fingerprints} ],
+		[ 'Banner hash', 'banner_hash', 'banner_hashes',     'bigint',  $opts{banner_hashes} ],
+	);
+	for my $group (@groups) {
+		my ( $label, $filter, $column, $type, $values ) = @{$group};
+		for my $share ( @{ $shares->( $column, $type, $values ) } ) {
+			push( @{ $out{fingerprints} },
+				{ label => $label, filter => $filter, value => $share->{value}, count => $share->{count} } );
+		}
+	} ## end for my $group (@groups)
 
 	return \%out;
 } ## end sub shodan_neighbors
@@ -4822,7 +4983,11 @@ sub cvedb_cache_put {
 		$cvss, $epss,
 		( $info->{kev}        ? 1 : 0 ),
 		( $info->{ransomware} ? 1 : 0 ),
-		encode_json($raw),
+
+		# NUL bytes stripped for the same reason shodan_cache_put strips them:
+		# jsonb cannot hold a NUL. CVE text is unlikely to carry one, but the
+		# insert must not be one stray byte away from failing.
+		encode_json( _strip_nul($raw) ),
 	);
 
 	return 1;

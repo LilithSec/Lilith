@@ -46,7 +46,7 @@ why these sit outside the web-only settings below. All optional.
 | `shodan_api_key`   | A Shodan API key. With one, `/shodan/host/{ip}` is used, which adds the per-service detail: product and version per port, TLS certificates with their JARM/JA3S fingerprints, HTTP titles and detected components, and CVEs attributed to the service they were found on. The lookup costs no query credits. Without one the free keyless InternetDB summary is used instead. Needs `WWW::Shodan::API` installed. |
 | `shodan_cache_ttl` | Seconds an answer stays fresh in the `shodan_cache` table. Default `2592000` (30 days), since what Shodan knows about a host changes on the order of its own crawl interval; `0` disables caching, and with it off the `shodan_cache` command refuses to run. Unlike the domain info cache this lives in the database, so one lookup serves every worker and survives a restart; entries past the TTL are cleared as new ones are written. |
 | `shodan_history`   | Boolean. Host lookups ask for every banner Shodan has ever crawled for the address rather than only the current ones, which puts a **First seen** date on the modal's service blocks — when a port first appeared, which is what dates a compromise. Off by default: it needs a Shodan membership plan on top of the API key, and history responses are much larger (they are cached whole, like everything else). The keyless tier ignores it. |
-| `shodan_context`   | Boolean. Adds a **Neighborhood** panel to the IP info modal's Shodan section, asking Shodan's `count` endpoint how the address sits among the wider internet: the whole footprint of the org it belongs to (total hosts, and the ports, products, and CVEs most common across them), and how many other hosts share each of its service fingerprints (HTML hash, certificate, banner hash). Off by default: it is the one part of the panel that makes a live, rate-paced API call, so it is a deliberate choice like `enable_shodan`. Needs the API key (`count` is API-tier); the call costs no query credits. The panel's other half — how the address compares to the hosts already in the `shodan_cache` table, by shared org and tags — reads only the cache and shows whenever `enable_shodan` is on, with or without this. |
+| `shodan_context`   | Boolean. Adds a **Neighborhood** panel to the IP info modal's Shodan section, asking Shodan's `count` endpoint how the address sits among the wider internet: the whole footprint of the org it belongs to (total hosts, and the ports, products, and CVEs most common across them), and how many other hosts share each of its service fingerprints (HTML hash, certificate, banner hash). Off by default: it is the one part of the panel that makes a live, rate-paced API call, so it is a deliberate choice like `enable_shodan`. Needs the API key (`count` is API-tier); the call costs no query credits. The panel's other half — the address's profile against the hosts already in the `shodan_cache` table — reads only the cache and shows whenever `enable_shodan` is on, with or without this: for each of the address's ports, products, tags, CVEs, and service fingerprints, how many other cached hosts share it (how common each is among the hosts Lilith has seen), plus the count of other cached hosts in its org. It is laid out to mirror the Shodan half, and every row links into the `/shodan` browser, which lists the hosts behind the count. |
 
 The badges on the results tables read this cache and never trigger a
 lookup, so on their own they only appear for addresses someone has already
@@ -55,8 +55,12 @@ Shodan knows about the hosts at either end of them — read it the same way,
 and describe only the addresses it holds; see
 [dashboard](dashboard.md#shodan-enrichment). `enable_shodan` also adds a
 **Shodan** page (`/shodan`) for browsing the cache itself — which cached
-hosts carry a given tag, port, CVE, or org. Run `lilith shodan_cache` on a
-timer to fill it ahead of time; see [usage](usage.md).
+hosts carry a given tag, port, CVE, org, product (nginx, Apache httpd, …),
+callout (self-signed, weak-tls, exposed-rdp, …), or service fingerprint (HTML
+hash, certificate, banner hash). The neighborhood panel's "in our data" half links straight into it, so
+a click on a shared fingerprint lists the other cached hosts that carry it.
+Run `lilith shodan_cache` on a timer to fill it ahead of time; see
+[usage](usage.md).
 
 ### CVEDB
 

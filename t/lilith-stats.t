@@ -72,13 +72,12 @@ use_ok('Lilith::Stats') or BAIL_OUT('Lilith::Stats failed to load');
 	ok( !$bc{raw}, 'columns(baphomet) omits non-dimension columns' );
 
 	# Shodan enrichment. cape is not enriched, so shodan_src_tag is simply not one of
-	# its columns and is refused before anything reaches the database. On the
-	# tables that are enriched, whether the columns are offered depends on the
-	# shodan_cache table being there, which cannot be checked with the database
-	# down -- so they are left out rather than offered and then failing.
+	# its columns and is refused before anything reaches the database. The enriched
+	# tables offer the columns unconditionally -- the schema is assumed current, so
+	# nothing is probed.
 	eval { $s->top( table => 'cape', column => 'shodan_src_tag' ) };
 	like( $@, qr/not an aggregatable column/, 'an enrichment column is refused for cape' );
-	ok( !$sc{shodan_src_tag}, 'enrichment columns are omitted when the database cannot be asked about shodan_cache' );
+	ok( $sc{shodan_src_tag}, 'enrichment columns are offered for the enriched tables' );
 	eval { $s->shodan_coverage( table => 'cape' ) };
 	like( $@, qr/no Shodan enrichment/, 'shodan_coverage is refused for cape' );
 

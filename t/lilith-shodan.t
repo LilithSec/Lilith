@@ -267,6 +267,7 @@ use_ok('Lilith::Shodan') or BAIL_OUT('Lilith::Shodan failed to load');
 	is_deeply( $second,         $first,      'normalizing the same response twice gives the same result' );
 	is_deeply( $first->{ports}, [ 22, 443 ], 'ports are sorted whichever way they arrived' );
 	is( $first->{services}[0]{product}, 'nginx', 'services are rebuilt from the stored response' );
+	is_deeply( $first->{products}, ['nginx'], 'the product names are projected out, deduped and name-only' );
 
 	# who the address belongs to rides along, for the modal and the columns
 	# the dashboard groups by

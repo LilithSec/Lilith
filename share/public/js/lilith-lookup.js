@@ -281,76 +281,150 @@
   // shodan_context is on (a live count, hence loaded on its own rather than made
   // to hold up the rest of the modal).
 
-  function pluralHosts(n) { return n + ' other cached host' + (n === 1 ? '' : 's'); }
+  // A long fingerprint value shortened for a chip; short values (ports, most
+  // hashes) are left whole.
+  function nbhdShort(value) {
+    var text = String(value);
+    return text.length > 16 ? text.slice(0, 13) + '…' : text;
+  }
 
-  // One shodan.io search chip: its text a facet value and count, its link the
-  // query that lists them. Running the search needs a Shodan login; the chip
-  // costs nothing.
-  function nbhdChip(container, text, count, query) {
+  // One count chip: "text (n)", linking where the count can be listed. external
+  // opens the link in a new tab (the Shodan block links out to shodan.io; the
+  // cache block links into /shodan).
+  function nbhdChip(container, text, count, href, external) {
     var link = document.createElement('a');
-    link.href = 'https://www.shodan.io/search?query=' + encodeURIComponent(query);
-    link.target = '_blank'; link.rel = 'noopener';
+    link.href = href;
+    if (external) { link.target = '_blank'; link.rel = 'noopener'; }
     link.className = 'badge me-1 mb-1 bg-secondary text-decoration-none';
     link.textContent = text + ' (' + count.toLocaleString() + ')';
     container.appendChild(link);
   }
 
+  // One labelled row of chips: "label: [chip] [chip] ...". Each item becomes a
+  // chip via hrefFor(value) -> its link. Nothing is added for an empty list.
+  function nbhdChipRow(parent, label, items, hrefFor, external) {
+    if (!items || !items.length) { return; }
+    var row = document.createElement('div');
+    row.className = 'small mb-1';
+    var tag = document.createElement('span');
+    tag.className = 'text-muted me-1'; tag.textContent = label + ':';
+    row.appendChild(tag);
+    items.forEach(function (item) {
+      nbhdChip(row, nbhdShort(item.value), item.count, hrefFor(item.value), external);
+    });
+    parent.appendChild(row);
+  }
+
+  // Build one neighborhood block -- the cache half or the Shodan half -- to the
+  // same shape: a title, an org line, a profile of ports / tags-or-products /
+  // CVEs, and the fingerprint matches. spec supplies each part already reduced
+  // to { value, count } lists and the functions that link them; anything empty
+  // is omitted. Returns the block element, or null when there was nothing in it.
+  function buildNbhdBlock(spec) {
+    var block = document.createElement('div');
+    var title = document.createElement('div');
+    title.className = 'small fw-semibold'; title.textContent = spec.title;
+    block.appendChild(title);
+
+    var any = false;
+
+    if (spec.org) {
+      any = true;
+      var orgRow = document.createElement('div');
+      orgRow.className = 'small mb-1';
+      orgRow.appendChild(document.createTextNode('Org: ' + spec.org.value + ' — '));
+      var orgLink = document.createElement('a');
+      orgLink.href = spec.orgHref(spec.org.value);
+      if (spec.external) { orgLink.target = '_blank'; orgLink.rel = 'noopener'; }
+      orgLink.textContent = spec.org.count.toLocaleString() + (spec.external ? ' hosts' : ' cached hosts');
+      orgRow.appendChild(orgLink);
+      block.appendChild(orgRow);
+    }
+
+    spec.groups.forEach(function (group) {
+      if (group.items && group.items.length) { any = true; }
+      nbhdChipRow(block, group.label, group.items, group.hrefFor, spec.external);
+    });
+
+    (spec.fingerprints || []).forEach(function (fp) {
+      any = true;
+      var line = document.createElement('div');
+      line.className = 'small';
+      line.appendChild(document.createTextNode(fp.label + ' ' + nbhdShort(fp.value) + ' — '));
+      var link = document.createElement('a');
+      link.href = fp.href;
+      if (spec.external) { link.target = '_blank'; link.rel = 'noopener'; }
+      link.textContent = fp.count.toLocaleString() + ' host' + (fp.count === 1 ? '' : 's');
+      line.appendChild(link);
+      block.appendChild(line);
+    });
+
+    if (spec.note) {
+      var note = document.createElement('div');
+      note.className = 'small text-muted'; note.textContent = spec.note;
+      block.appendChild(note);
+    }
+
+    return any ? block : null;
+  }
+
   function fillShodanNeighborhood(data) {
     var block    = document.getElementById('ipinfo-shodan-neighborhood');
-    var localEl  = document.getElementById('ipinfo-shodan-nbhd-local');
+    var cacheEl  = document.getElementById('ipinfo-shodan-nbhd-cache');
     var shodanEl = document.getElementById('ipinfo-shodan-nbhd-shodan');
-    localEl.innerHTML = ''; shodanEl.innerHTML = '';
+    cacheEl.innerHTML = ''; shodanEl.innerHTML = '';
     setError(document.getElementById('ipinfo-shodan-nbhd-error'), (data && data.shodan_error) || null);
 
     if (!data || !data.available) { block.style.display = 'none'; return; }
 
-    // --- in our own cache ---
+    // --- in our cache: the address's own attributes, and how common each is
+    // among the hosts Lilith has seen. Every link drills into /shodan. ---
     var local = data.local || {};
-    if (local.org) { util.kvRow(localEl, 'Same org', pluralHosts(local.org.count)); }
-    (local.tags || []).forEach(function (tag) {
-      util.kvRow(localEl, 'Tag: ' + tag.value, pluralHosts(tag.count));
+    var cacheBlock = buildNbhdBlock({
+      title:   'In our cache',
+      external: false,
+      org:      local.org,
+      orgHref:  function (v) { return '/shodan?org=' + encodeURIComponent(v); },
+      groups: [
+        { label: 'ports',    items: local.ports,    hrefFor: function (v) { return '/shodan?port='    + encodeURIComponent(v); } },
+        { label: 'products', items: local.products, hrefFor: function (v) { return '/shodan?product=' + encodeURIComponent(v); } },
+        { label: 'tags',     items: local.tags,     hrefFor: function (v) { return '/shodan?tag='     + encodeURIComponent(v); } },
+        { label: 'CVEs',     items: local.cves,     hrefFor: function (v) { return '/shodan?cve='     + encodeURIComponent(v); } }
+      ],
+      fingerprints: (local.fingerprints || []).map(function (fp) {
+        return { label: fp.label, value: fp.value, count: fp.count,
+                 href: '/shodan?' + encodeURIComponent(fp.filter) + '=' + encodeURIComponent(fp.value) };
+      })
     });
+    if (cacheBlock) { cacheEl.appendChild(cacheBlock); }
 
-    // --- on Shodan (only when the live count ran) ---
+    // --- on Shodan: the same shape from the whole internet, when the live count
+    // ran. Its fingerprint counts of zero are dropped as noise. ---
     var shodan = data.shodan || {};
-    if (data.shodan_enabled && shodan.org) {
-      var header = document.createElement('div');
-      header.className = 'small text-muted';
-      header.textContent = 'On Shodan — org "' + shodan.org.query + '": ' + shodan.org.total.toLocaleString() + ' hosts';
-      shodanEl.appendChild(header);
-
-      var facets = document.createElement('div');
-      facets.className = 'mt-1';
-      var orgQuery = 'org:"' + shodan.org.query + '" ';
-      (shodan.org.ports    || []).slice(0, 6).forEach(function (f) { nbhdChip(facets, 'port ' + f.value, f.count, orgQuery + 'port:' + f.value); });
-      (shodan.org.products || []).slice(0, 6).forEach(function (f) { nbhdChip(facets, f.value, f.count, orgQuery + 'product:"' + f.value + '"'); });
-      (shodan.org.vulns    || []).slice(0, 6).forEach(function (f) { nbhdChip(facets, f.value, f.count, orgQuery + 'vuln:' + f.value); });
-      shodanEl.appendChild(facets);
-    }
+    var shodanBlock = null;
     if (data.shodan_enabled) {
-      (shodan.fingerprints || []).forEach(function (fp) {
-        var line = document.createElement('div');
-        line.className = 'small';
-        line.appendChild(document.createTextNode(fp.label + ': '));
-        var link = document.createElement('a');
-        link.href = 'https://www.shodan.io/search?query=' + encodeURIComponent(fp.filter + ':' + fp.value);
-        link.target = '_blank'; link.rel = 'noopener';
-        link.textContent = fp.total.toLocaleString() + ' host' + (fp.total === 1 ? '' : 's');
-        line.appendChild(link);
-        line.appendChild(document.createTextNode(' share this'));
-        shodanEl.appendChild(line);
+      var org = shodan.org;
+      var orgQuery = org ? 'org:"' + org.query + '" ' : '';
+      shodanBlock = buildNbhdBlock({
+        title:   'On Shodan',
+        external: true,
+        org:      org ? { value: org.query, count: org.total } : null,
+        orgHref:  function () { return 'https://www.shodan.io/search?query=' + encodeURIComponent('org:"' + org.query + '"'); },
+        groups: org ? [
+          { label: 'ports',    items: org.ports,    hrefFor: function (v) { return 'https://www.shodan.io/search?query=' + encodeURIComponent(orgQuery + 'port:' + v); } },
+          { label: 'products', items: org.products, hrefFor: function (v) { return 'https://www.shodan.io/search?query=' + encodeURIComponent(orgQuery + 'product:"' + v + '"'); } },
+          { label: 'CVEs',     items: org.vulns,    hrefFor: function (v) { return 'https://www.shodan.io/search?query=' + encodeURIComponent(orgQuery + 'vuln:' + v); } }
+        ] : [],
+        fingerprints: (shodan.fingerprints || []).filter(function (fp) { return fp.total > 0; }).map(function (fp) {
+          return { label: fp.label, value: fp.value, count: fp.total,
+                   href: 'https://www.shodan.io/search?query=' + encodeURIComponent(fp.filter + ':' + fp.value) };
+        }),
+        note: data.shodan_capped ? (data.shodan_capped + ' more fingerprint' + (data.shodan_capped === 1 ? '' : 's') + ' not counted') : null
       });
-      if (data.shodan_capped) {
-        var capped = document.createElement('div');
-        capped.className = 'small text-muted';
-        capped.textContent = data.shodan_capped + ' more fingerprint' + (data.shodan_capped === 1 ? '' : 's') + ' not counted';
-        shodanEl.appendChild(capped);
-      }
     }
+    if (shodanBlock) { shodanEl.appendChild(shodanBlock); }
 
-    var hasLocal  = local.org || (local.tags || []).length;
-    var hasShodan = data.shodan_enabled && (shodan.org || (shodan.fingerprints || []).length);
-    block.style.display = (hasLocal || hasShodan || data.shodan_error) ? '' : 'none';
+    block.style.display = (cacheBlock || shodanBlock || data.shodan_error) ? '' : 'none';
   }
 
   function loadShodanNeighborhood(ip) {

@@ -27,7 +27,8 @@ cache is that feature's; it never looks anything up.
 # and the template renders its form fields and filter chips from the same
 # names, so a new filter is an edit to the search method and the template's
 # field list rather than here.
-my @FILTERS = qw( ip hostname tag port cve cpe os org isp asn found source max_cvss );
+my @FILTERS
+	= qw( ip hostname tag port cve cpe os org isp asn found source max_cvss callout cert html_hash banner_hash product );
 
 # GET /shodan -- the filter form and its results. Reads every filter off the
 # query string, sanitizes the two that are spliced rather than bound (the

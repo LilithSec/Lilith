@@ -14,14 +14,13 @@ use_ok('Lilith::Schema') or BAIL_OUT('Lilith::Schema failed to load');
 # database in pg-migrate.t.
 
 # ---------------------------------------------------------------------------
-# Mock out Lilith::Schema->connect. Unlike the other search mocks this one
-# also answers storage->dbh->selectrow_array, since these filters probe the
-# catalog for shodan_cache, cvedb_cache, and the cves column; the three
-# package flags below are what a test flips to play an older schema.
+# Mock out Lilith::Schema->connect so a search builds its clauses without a
+# database; MockRS->search captures the clause tree the assertions read. The
+# filters reference the current schema's columns and tables directly, so
+# nothing here has to answer the catalog.
 # ---------------------------------------------------------------------------
 
 my $captured_search;
-our ( $shodan_present, $cvedb_present, $cves_present ) = ( 1, 1, 1 );
 
 {
 
@@ -36,22 +35,6 @@ our ( $shodan_present, $cvedb_present, $cves_present ) = ( 1, 1, 1 );
 	sub all {
 		return ();
 	}
-
-	package Lilith::Test::MockDbh;
-
-	sub selectrow_array {
-		my ( $self, $sql ) = @_;
-		if ( $sql =~ /to_regclass\('shodan_cache'\)/ ) {
-			return $main::shodan_present ? ('shodan_cache') : (undef);
-		}
-		if ( $sql =~ /to_regclass\('cvedb_cache'\)/ ) {
-			return $main::cvedb_present ? ('cvedb_cache') : (undef);
-		}
-		if ( $sql =~ /pg_attribute/ ) {
-			return $main::cves_present ? (1) : ();
-		}
-		return ();
-	} ## end sub selectrow_array
 
 	package Lilith::Test::MockStorage;
 
@@ -189,17 +172,6 @@ is_deeply(
 	'several terms AND inside one row test'
 );
 
-{
-	# on a schema before 16 the coalesce has nothing to reach for and the
-	# bare column is used, the same as the badges read
-	local $cvedb_present = 0;
-	is_deeply(
-		filter_clauses( shodan_src_cvss => ['>=9'] ),
-		[ \[ 'exists (select 1 from shodan_cache where shodan_cache.ip = me.src_ip and (max_cvss) >= ?)', '9' ] ],
-		'without cvedb_cache the bare max_cvss is compared'
-	);
-}
-
 my $bad_cvss = '';
 eval { filter_clauses( shodan_src_cvss => ['seven'] ) };
 $bad_cvss = $@ if $@;
@@ -298,30 +270,6 @@ like(
 	'an unknown state dies rather than matching nothing, naming the filter'
 );
 
-{
-	local $cves_present = 0;
-	my $died = '';
-	eval { filter_clauses( shodan_src_cve_match => 'matched' ) };
-	$died = $@ if $@;
-	like(
-		$died,
-		qr/the shodan_src_cve_match search filter needs the suricata_alerts cves column \(schema version 16\)/,
-		'a schema without the cves column dies plainly'
-	);
-}
-
-{
-	local $shodan_present = 0;
-	my $died = '';
-	eval { filter_clauses( shodan_dest_cve_match => 'matched' ) };
-	$died = $@ if $@;
-	like(
-		$died,
-		qr/the shodan_dest_cve_match search filter needs the shodan_cache table \(schema version 15\)/,
-		'a schema without shodan_cache dies plainly'
-	);
-}
-
 # ---------------------------------------------------------------------------
 # the locality pair: the alert's own ends against the local_networks list
 # ---------------------------------------------------------------------------
@@ -389,30 +337,6 @@ like( $bad_network, qr/is not an address or CIDR/, 'a network outside the addres
 	$captured_search = undef;
 	$lilith->search( table => 'baphomet', shodan_src_tag => 'tor' );
 	ok( defined $captured_search->{'-and'}, 'baphomet gets the shodan filters' );
-}
-
-{
-	local $shodan_present = 0;
-	my $died = '';
-	eval { filter_clauses( shodan_src_tag => 'tor' ) };
-	$died = $@ if $@;
-	like(
-		$died,
-		qr/the shodan_\* search filters need the shodan_cache table \(schema version 15\)/,
-		'a schema without shodan_cache dies plainly'
-	);
-}
-
-{
-	local $cves_present = 0;
-	my $died = '';
-	eval { filter_clauses( cve => 'CVE-2021-44228' ) };
-	$died = $@ if $@;
-	like(
-		$died,
-		qr/the cve search filter needs the suricata_alerts cves column \(schema version 16\)/,
-		'a schema without the cves column dies plainly'
-	);
 }
 
 # a blank filter adds nothing, the same as every other filter

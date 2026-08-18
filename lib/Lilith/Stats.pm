@@ -3,7 +3,7 @@ package Lilith::Stats;
 use strict;
 use warnings;
 use Lilith::DBUtil
-	qw( column_exists connect_cached_dbh distinct_by_skip_scan host_or_text_expr local_networks_frag measure_expr skip_scan_viable time_window_clause validate_bucket );
+	qw( connect_cached_dbh distinct_by_skip_scan host_or_text_expr local_networks_frag measure_expr skip_scan_viable time_window_clause validate_bucket );
 
 =head1 NAME
 
@@ -45,9 +45,7 @@ Beyond the columns an alert carries, the tables that name an outside host also
 offer B<Shodan enrichment> dimensions: what C<shodan_cache> holds about the
 alert's C<src_ip> or C<dest_ip>, joined on. Those are the C<shodan_src_*> and
 C<shodan_dest_*> columns, and L</shodan_coverage> says, per end, how much of a
-window they actually describe. They are offered only when the database has the
-C<shodan_cache> table (schema version 15), which is detected rather than
-assumed.
+window they actually describe.
 
 Two dimension families take their meaning from the request rather than from
 the alert alone. The C<shodan_src_freshness> / C<shodan_dest_freshness> pair
@@ -127,14 +125,12 @@ my %DIMENSION = (
 );
 
 # Dimensions that are not plain columns: fields of the raw EVE record a widget
-# can still group by. Each entry carries
+# can still group by, each held in a generated column so the grouping reads the
+# value directly rather than digging it out of raw. Each entry carries
 #
-#   - column :: the generated column holding the value from schema 13, which is
-#     preferred when the database has it. See _virtual_base for why, and for
-#     what happens on an older database.
-#   - expr :: the expression digging the value out of raw, used before 13.
-#   - label :: optional code ref taking whichever of those is in play and
-#     returning the display expression.
+#   - column :: the generated column holding the value.
+#   - label :: optional code ref taking the column and returning the display
+#     expression.
 #   - order :: optional code ref, likewise, giving a natural rank to sort series
 #     by instead of the label.
 #
@@ -148,7 +144,6 @@ my %VIRTUAL = (
 	suricata => {
 		severity => {
 			column => 'severity',
-			expr   => "raw->'alert'->>'severity'",
 			label  => sub {
 				return
 					  "case $_[0] when '1' then 'High' when '2' then 'Medium'"
@@ -162,12 +157,10 @@ my %VIRTUAL = (
 		},
 		mitre_tactic => {
 			column => 'mitre_tactic',
-			expr   => "raw->'alert'->'metadata'->'mitre_tactic_name'->>0",
 			label  => sub { return "replace($_[0], '_', ' ')" },
 		},
 		mitre_technique => {
 			column => 'mitre_technique',
-			expr   => "raw->'alert'->'metadata'->'mitre_technique_name'->>0",
 			label  => sub { return "replace($_[0], '_', ' ')" },
 		},
 	},
@@ -277,19 +270,17 @@ my %ENRICH_SHAPE = (
 	# The correlation the two halves above only imply: whether the rule that
 	# fired names a CVE that end's cache entry lists it as vulnerable to --
 	# "an exploit thrown at a host actually vulnerable to it". The rule's
-	# ids come from the cves generated column (schema 16, suricata only, which
-	# is what tables/needs_cves say), so the comparison is one array overlap
-	# per row and never opens raw. Built for both ends like everything else
-	# here: src and dest are the triggering packet's direction, not attacker
-	# and victim, so which end the vulnerable host lands on is up to the rule
-	# that fired.
+	# ids come from the cves generated column (suricata only, which is what
+	# tables says), so the comparison is one array overlap per row and never
+	# opens raw. Built for both ends like everything else here: src and dest are
+	# the triggering packet's direction, not attacker and victim, so which end
+	# the vulnerable host lands on is up to the rule that fired.
 	#
 	# 'No CVE in rule' leads the tests because with no ids to compare the
 	# lookup state of the host is beside the point.
 	cve_match => {
-		tables     => { suricata => 1 },
-		needs_cves => 1,
-		columns    => [ 'found', 'vulns' ],
+		tables  => { suricata => 1 },
+		columns => [ 'found', 'vulns' ],
 		expr       => sub {
 			my ( $alias, $ip ) = @_;
 			# the cast because cves is text[] while vulns is varchar[], and &&
@@ -324,8 +315,8 @@ my %ENRICH_SHAPE = (
 	# the list is weaker evidence than presence on it. A row cached as "not on
 	# Shodan" lands there too -- nothing is known open on it.
 	#
-	# No needs_cves and no table scoping: the port columns are real columns on
-	# every enriched table, and both tiers send ports.
+	# No table scoping: the port columns are real columns on every enriched
+	# table, and both tiers send ports.
 	# Whether the cache's answer for that end would still be used: 'Enriched'
 	# (a fresh row from the configured tier), 'Stale' (held, but past the ttl
 	# or written by the other tier), or 'Not looked up'. The dimension form of
@@ -382,9 +373,8 @@ my %ENRICH_SHAPE = (
 # the four, so on an InternetDB-only install the panels stay empty.
 for my $host_column (qw( os org isp asn )) {
 	$ENRICH_SHAPE{$host_column} = {
-		columns            => [$host_column],
-		needs_host_columns => 1,
-		expr               => sub {
+		columns => [$host_column],
+		expr    => sub {
 			my ($alias) = @_;
 			return $alias . '.' . $alias . '_' . $host_column;
 		},
@@ -741,8 +731,7 @@ Both halves come from one pass: the widgets asking for them are two views of
 the same question.
 
 Dies for a table that carries no enrichment (C<cape>, whose C<src_ip> is the
-submitter), for an unknown side, and when the database has no C<shodan_cache>
-table.
+submitter) and for an unknown side.
 
 =cut
 
@@ -750,8 +739,7 @@ sub shodan_coverage {
 	my ( $self, %opts ) = @_;
 
 	my $type = $self->_table( $opts{table} );
-	die( $type . " alerts carry no Shodan enrichment\n" )                    unless $ENRICH_TABLE{$type};
-	die("the shodan_cache table is not present (needs schema version 15)\n") unless $self->_shodan_available;
+	die( $type . " alerts carry no Shodan enrichment\n" ) unless $ENRICH_TABLE{$type};
 
 	my $side = defined $opts{side} && $opts{side} ne '' ? $opts{side} : 'src';
 	die( '"' . $side . '" is not a known side (src, dest)' . "\n" ) unless $ENRICH_SIDE{$side};
@@ -813,7 +801,6 @@ sub columns {
 			grep {
 				my $enrich = $ENRICH{$_};
 				( !$enrich->{tables} || $enrich->{tables}{$type} )
-					&& !defined( $self->_enrich_unavailable_reason($enrich) )
 			} keys %ENRICH
 		);
 	} ## end if ( $ENRICH_TABLE{$type} )
@@ -1063,18 +1050,14 @@ sub _table {
 #
 # Returns: the checked column name as a string, unchanged. Dies with 'a column
 # is required' when undef or empty, and '"$col" is not an aggregatable column
-# for $type' when that table does not accept it. An enrichment column on a
-# database with no shodan_cache table dies naming that instead, since the
-# column is right and only the database is behind.
+# for $type' when that table does not accept it.
 #
 #     my $col = $self->_dimension( 'suricata', 'src_ip' );
 sub _dimension {
 	my ( $self, $type, $col ) = @_;
 	die("a column is required\n") unless defined $col && $col ne '';
 
-	if ( my $enrich = $self->_enrich_for( $type, $col ) ) {
-		my $unavailable = $self->_enrich_unavailable_reason($enrich);
-		die($unavailable) if defined $unavailable;
+	if ( $self->_enrich_for( $type, $col ) ) {
 		return $col;
 	}
 
@@ -1086,33 +1069,6 @@ sub _dimension {
 		unless $DIMENSION{$type}{$col} || ( $VIRTUAL{$type} && $VIRTUAL{$type}{$col} );
 	return $col;
 } ## end sub _dimension
-
-# Why an enrichment dimension cannot be served right now, or undef when it
-# can: the shodan_cache table itself, then the schema-version-gated columns
-# the entry needs. The one list of these checks -- _dimension dies with the
-# reason and columns() drops the dimension on any reason, so the picker and
-# the validator cannot drift when a new needs_* flag arrives.
-#
-# Args:
-#
-#   - $enrich :: the dimension's %ENRICH entry, already table-scoped by the
-#     caller (via _enrich_for or columns()'s own tables check).
-#
-# Returns: undef when the dimension can be served, else the reason as a
-# newline-terminated string ready to die with.
-#
-#     my $unavailable = $self->_enrich_unavailable_reason( $ENRICH{shodan_src_tag} );
-sub _enrich_unavailable_reason {
-	my ( $self, $enrich ) = @_;
-
-	return "the shodan_cache table is not present (needs schema version 15)\n" unless $self->_shodan_available;
-	return "the suricata_alerts cves column is not present (needs schema version 16)\n"
-		if $enrich->{needs_cves} && !$self->_column_available( 'suricata_alerts', 'cves' );
-	return "the shodan_cache os/org/isp/asn columns are not present (needs schema version 17)\n"
-		if $enrich->{needs_host_columns} && !$self->_column_available( 'shodan_cache', 'os' );
-
-	return undef;
-} ## end sub _enrich_unavailable_reason
 
 # The %ENRICH entry for a dimension, when that dimension applies to the table
 # in play: the table must be one whose addresses are enriched at all, and the
@@ -1138,71 +1094,6 @@ sub _enrich_for {
 	return undef if $enrich->{tables} && !$enrich->{tables}{$type};
 	return $enrich;
 }
-
-# Whether the database has a column a dimension is gated on: the cves generated
-# column (schema version 16) behind cve_match, or shodan_cache's os column
-# standing in for the version-17 os/org/isp/asn four, which shipped together so
-# one probe answers for all of them.
-#
-# Detected the same way _virtual_base detects its generated columns, and cached
-# the same way _shodan_available caches its answer: per table-and-column pair,
-# and only when the question was actually answered, so an unreachable database
-# does not hide the dimension for good once it comes back.
-#
-# Args:
-#
-#   - $table :: the table the column would be on, e.g. 'suricata_alerts'.
-#   - $column :: the column probed for, e.g. 'cves'.
-#
-# Returns: 1 when the column is there, 0 when it is not or when the catalog
-# could not be read.
-#
-#     $self->_column_available( 'suricata_alerts', 'cves' );    # 1
-sub _column_available {
-	my ( $self, $table, $column ) = @_;
-
-	my $cached = $self->{_column_available_cache}{$table}{$column};
-	return $cached if defined $cached;
-
-	my $present = eval { column_exists( $self->_dbh, $table, $column ) };
-	return 0 unless defined $present;
-
-	$self->{_column_available_cache}{$table}{$column} = $present;
-	return $present;
-} ## end sub _column_available
-
-# Whether the database has the shodan_cache table, and so whether the %ENRICH
-# dimensions can be offered and joined.
-#
-# Detected rather than assumed for the same reason _virtual_base detects its
-# generated columns: nothing stops Lilith running against a database still on a
-# schema before 15, and an enrichment column is better absent from a picker
-# than present and erroring.
-#
-# The answer is cached for the life of the object, but only when the question
-# was actually answered -- a database that could not be reached is not an
-# answer, and caching it would hide the columns for good once it came back.
-#
-# Args: none.
-#
-# Returns: 1 when the table is there, 0 when it is not or when the catalog
-# could not be read.
-#
-#     $self->_shodan_available;    # 1
-sub _shodan_available {
-	my ($self) = @_;
-
-	return $self->{_shodan_cache_present} if defined $self->{_shodan_cache_present};
-
-	my $present = eval {
-		my ($reg) = $self->_dbh->selectrow_array("select to_regclass('shodan_cache')");
-		return defined $reg ? 1 : 0;
-	};
-	return 0 unless defined $present;
-
-	$self->{_shodan_cache_present} = $present;
-	return $present;
-} ## end sub _shodan_available
 
 # What a query reads from: the table on its own, or the table with shodan_cache
 # joined on when the dimension in play is an enrichment one.
@@ -1333,42 +1224,20 @@ sub _measure_expr {
 # column, and an index on the expression does not help: Postgres will use one to
 # filter by a value but will not hand the value back to satisfy a grouping.
 #
-# Detected rather than assumed, because nothing stops Lilith running against a
-# database still on 12 -- schema_version reports the mismatch but does not
-# refuse. On an older database this keeps the previous behaviour.
-#
-# The answer is cached for the life of the object, since it changes only when
-# the schema is migrated.
-#
 # Args:
 #
 #   - $type :: the short table type, already through _table.
 #   - $col :: the virtual dimension name, already through _dimension. The
 #     caller has established it is in %VIRTUAL.
 #
-# Returns: the SQL to read the value, as a string -- a bare column name on
-# schema 13 and later, the raw-digging expression before that. Also the
-# expression when the catalog cannot be read, so a database that will not answer
-# keeps working rather than failing on what is only a speed-up.
+# Returns: the generated column's name, as a string.
 #
-#     $self->_virtual_base( 'suricata', 'severity' );
-#     # 'severity' on schema 13, "raw->'alert'->>'severity'" on 12
+#     $self->_virtual_base( 'suricata', 'severity' );    # 'severity'
 sub _virtual_base {
 	my ( $self, $type, $col ) = @_;
 
-	my $virtual = $VIRTUAL{$type}{$col};
-	my $column  = $virtual->{column};
-	return $virtual->{expr} unless defined $column;
-
-	my $cached = $self->{_generated_column_cache}{$type}{$col};
-	return ( $cached ? $column : $virtual->{expr} ) if defined $cached;
-
-	my $present = eval { column_exists( $self->_dbh, $TABLE{$type}, $column ) };
-	$present = 0 unless defined $present;
-
-	$self->{_generated_column_cache}{$type}{$col} = $present;
-	return $present ? $column : $virtual->{expr};
-} ## end sub _virtual_base
+	return $VIRTUAL{$type}{$col}{column};
+}
 
 # The raw SQL reference for an already-validated column: a virtual column's grouping
 # expression, an enrichment or locality column's, or the bare column name. This

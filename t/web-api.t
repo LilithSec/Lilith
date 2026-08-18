@@ -646,27 +646,12 @@ SKIP: {
 {
 	require Lilith::Web::Controller::Api;
 
+	# Reads normalize's deduped arrays, grouped by kind; blanks and bare zeros
+	# are not fingerprints to count.
 	my $shodan = {
-		services => [
-			{
-				hash => -100,
-				http => { html_hash => 12345678 },
-				ssl  => { cert_fingerprint => 'aabbcc' },
-			},
-
-			# a second service on the same panel and certificate: its shared
-			# fingerprints are one question each, not two, but its own banner
-			# hash is new.
-			{
-				hash => -200,
-				http => { html_hash => 12345678 },
-				ssl  => { cert_fingerprint => 'aabbcc' },
-			},
-
-			# a service whose values are empty or a bare zero, which are not
-			# fingerprints to count.
-			{ hash => 0, http => { html_hash => '' }, ssl => { cert_fingerprint => '' } },
-		],
+		html_hashes       => [ 12345678 ],
+		cert_fingerprints => ['aabbcc'],
+		banner_hashes     => [ -100, -200, 0 ],
 	};
 
 	my $fp = Lilith::Web::Controller::Api::_shodan_fingerprints($shodan);
@@ -678,10 +663,10 @@ SKIP: {
 			{ label => 'Banner hash', filter => 'hash',                 value => -100 },
 			{ label => 'Banner hash', filter => 'hash',                 value => -200 },
 		],
-		'shared fingerprints are asked once, distinct banner hashes each, and blanks/zeros dropped'
+		'each kind is offered in turn, and a bare zero is dropped'
 	);
 
-	is_deeply( Lilith::Web::Controller::Api::_shodan_fingerprints( {} ), [], 'a host with no services offers nothing' );
+	is_deeply( Lilith::Web::Controller::Api::_shodan_fingerprints( {} ), [], 'a host with no fingerprints offers nothing' );
 }
 
 # ---------------------------------------------------------------------------
