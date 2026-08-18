@@ -109,7 +109,7 @@
   <div class="collapse <%= $show_filters ? 'show' : '' %>" id="logs-filter-panel">
     <div class="card mb-2 border-secondary">
       <div class="card-header py-1 small text-muted">
-        Filters — every field takes more than one value (type and press enter or comma), several values match any of them. <code>%</code> for LIKE on host/program; message is a substring match.
+        Filters — every field takes more than one value (type and press enter or comma), several values match any of them. <code>%</code> for LIKE on host/program; message is a substring match, its Terms control picking whether they AND (all must appear in the line, the default) or OR.
       </div>
       <div class="card-body py-2">
         <div class="row g-2">
@@ -133,6 +133,16 @@
             </select>
           </div>
           % }
+          % # How the message terms combine, next to the message field and shown
+          % # with it: AND (each term narrows) or OR (any term matches, as the
+          % # other filters do).
+          <div class="col-auto log-filter-field" data-sources="syslog http_all">
+            <label class="form-label" for="message-match-sel">Terms</label>
+            <select name="message_match" id="message-match-sel" class="form-select form-select-sm" style="width:80px">
+              <option value="AND" <%= stash('message_match') eq 'AND' ? 'selected' : '' %>>AND</option>
+              <option value="OR" <%= stash('message_match') eq 'OR' ? 'selected' : '' %>>OR</option>
+            </select>
+          </div>
         </div>
       </div>
     </div>
@@ -158,6 +168,7 @@
 
 <script src="/js/time-range.js"></script>
 <script src="/js/auto-refresh.js"></script>
+<script src="/js/lilith-table.js"></script>
 <script src="/vendor/tom-select-2.6.2/js/tom-select.complete.min.js"></script>
 <script src="/js/token-fields.js"></script>
 <script src="/js/logs.js"></script>

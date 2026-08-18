@@ -13,8 +13,8 @@
  * value; they are bound by delegation, so an auto-refresh swapping the results
  * needs no rebinding.
  *
- * Requires token-fields.js and auto-refresh.js. Self-guards on the source
- * selector being present.
+ * Requires token-fields.js, auto-refresh.js, and lilith-table.js. Self-guards
+ * on the source selector being present.
  */
 (function() {
 // Show only the filter fields that apply to the selected source.
@@ -43,11 +43,19 @@ function valueSuggestionQuery(selectEl) {
   return params.toString();
 }
 
+// Client-side sorting on the results table's headers (shared module). Bound
+// to the table element itself, so unlike the delegated filter cells it has to
+// be rebound after an auto-refresh swaps fresh results in.
+function initResultsSort() {
+  LilithTable.initSort(document.querySelector('#log-results table.table'));
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   var sourceEl = document.getElementById('source-sel');
   if (!sourceEl) { return; }
   sourceEl.addEventListener('change', syncFilters);
   syncFilters();
+  initResultsSort();
 
   LilithTokenFields.init({
     valuesUrl:   '/api/logs/values',
@@ -75,7 +83,8 @@ document.addEventListener('DOMContentLoaded', function() {
     secondsInputId: 'logs-auto-refresh-secs',
     statusId:       'logs-ar-status',
     containerId:    'log-results',
-    storagePrefix:  'logsAutoRefresh'
+    storagePrefix:  'logsAutoRefresh',
+    afterSwap:      initResultsSort
   });
 });
 })();

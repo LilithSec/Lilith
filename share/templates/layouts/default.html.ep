@@ -23,6 +23,9 @@
       % if ($self->allani_enabled) {
       <a class="btn btn-sm btn-outline-secondary" href="/logs" id="nav-logs">Logs</a>
       % }
+      % if ($self->shodan_enable) {
+      <a class="btn btn-sm btn-outline-secondary" href="/shodan" id="nav-shodan">Shodan</a>
+      % }
 
       <!-- IP Info -->
       <div class="dropdown">

@@ -93,6 +93,7 @@ t/lilith-search-bucket.t
 t/lilith-search-class.t
 t/lilith-search-shodan.t
 t/lilith-search-strings.t
+t/lilith-shodan-cache-search.t
 t/lilith-shodan-cli.t
 t/lilith-shodan.t
 t/lilith-stats.t
@@ -120,6 +121,7 @@ lib/Lilith/Web/Controller/Search.pm
 lib/Lilith/Web/Controller/Event.pm
 lib/Lilith/Web/Controller/Logs.pm
 lib/Lilith/Web/Controller/CapeSubmit.pm
+lib/Lilith/Web/Controller/Shodan.pm
 share/templates/layouts/default.html.ep
 share/templates/search/index.html.ep
 share/templates/partials/_time_range.html.ep
@@ -143,6 +145,7 @@ share/templates/event/view.html.ep
 share/templates/logs/index.html.ep
 share/templates/logs/_results.html.ep
 share/templates/logs/view.html.ep
+share/templates/shodan/index.html.ep
 share/templates/escalation/index.html.ep
 share/templates/auto_escalation/index.html.ep
 share/templates/cape_submit/index.html.ep

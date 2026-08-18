@@ -52,7 +52,9 @@ lookup, so on their own they only appear for addresses someone has already
 opened the modal for. The dashboard's Shodan panels — alerts cut by what
 Shodan knows about the hosts at either end of them — read it the same way,
 and describe only the addresses it holds; see
-[dashboard](dashboard.md#shodan-enrichment). Run `lilith shodan_cache` on a
+[dashboard](dashboard.md#shodan-enrichment). `enable_shodan` also adds a
+**Shodan** page (`/shodan`) for browsing the cache itself — which cached
+hosts carry a given tag, port, CVE, or org. Run `lilith shodan_cache` on a
 timer to fill it ahead of time; see [usage](usage.md).
 
 ### CVEDB

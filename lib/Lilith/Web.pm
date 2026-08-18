@@ -1063,6 +1063,8 @@ sub startup {
 	$r->get('/event/:table/:id/pcap')->to('event#pcap');
 	$r->get('/event/cape/:id/cape_results')->to('event#cape_results');
 	$r->get('/event/cape/:id/cape_result/*subpath')->to('event#cape_result');
+	$r->get('/shodan')->to('shodan#index');
+	$r->get('/api/shodan/values')->to('shodan#filter_values');
 	$r->get('/logs')->to('logs#index');
 	$r->get('/api/logs/stat')->to('logs#stat');
 	$r->get('/api/logs/top')->to('logs#top');

@@ -1,0 +1,300 @@
+% layout 'default';
+% title 'Shodan Cache';
+
+% # Tom Select styles the token filter fields, the same as the search page.
+% content_for head => begin
+  <link href="/vendor/tom-select-2.6.2/css/tom-select.bootstrap5.min.css" rel="stylesheet">
+% end
+
+% # Every filter this page offers, grouped the way the filter panel lays them
+% # out -- the same table-drives-everything shape as the search page, minus the
+% # per-alert-table gating this single-table page has no use for. The panel
+% # renders from it and the chips above the results take their labels from it.
+% #
+% # suggest marks a field whose dropdown offers the values that actually occur
+% # in the cache, fetched from /api/shodan/values when it is focused -- not the
+% # near-unique columns (ip, hostname), where a list of the top values says
+% # nothing, and not max_cvss, whose values are comparisons rather than picks.
+% #
+% # The found and source filters take fixed vocabularies, so they offer them
+% # rather than leaving what the filter accepts to be guessed at.
+% my @_found_options = (
+%   { value => 'known',   desc => 'on Shodan' },
+%   { value => 'unknown', desc => 'crawled, nothing there' },
+% );
+% my @_source_options = (
+%   { value => 'api',        desc => 'keyed host API' },
+%   { value => 'internetdb', desc => 'keyless summary' },
+% );
+% my @_filter_groups = (
+%   {   heading => 'Host',
+%       fields  => [
+%           { name => 'ip',       label => 'IP',       form_label => 'IP / CIDR' },
+%           { name => 'hostname', label => 'Hostname', width => 3 },
+%           { name => 'port',     label => 'Port',     form_label => 'Port(s)', suggest => 1 },
+%           { name => 'os',       label => 'OS',       suggest => 1 },
+%       ],
+%   },
+%   {   heading => 'Ownership',
+%       fields  => [
+%           { name => 'org', label => 'Org', width => 3, suggest => 1 },
+%           { name => 'isp', label => 'ISP', width => 3, suggest => 1 },
+%           { name => 'asn', label => 'ASN', suggest => 1 },
+%       ],
+%   },
+%   {   heading => 'Enrichment',
+%       fields  => [
+%           { name => 'tag',      label => 'Tag', suggest => 1 },
+%           { name => 'cve',      label => 'CVE', suggest => 1 },
+%           { name => 'cpe',      label => 'CPE', width => 3, suggest => 1 },
+%           { name => 'max_cvss', label => 'Max CVSS' },
+%       ],
+%   },
+%   {   heading => 'Cache',
+%       fields  => [
+%           { name => 'found',  label => 'Found',  options => \@_found_options },
+%           { name => 'source', label => 'Source', options => \@_source_options },
+%       ],
+%   },
+% );
+% my @_filter_fields = map { @{ $_->{fields} } } @_filter_groups;
+% my $show_filters = grep { my $value = param( $_->{name} ); defined($value) && $value ne '' } @_filter_fields;
+%
+% # The URL that narrows this page to one value of one filter, for the
+% # click-to-filter cells below. Replacement rather than addition -- clicking a
+% # second value should narrow to it, not widen to both -- and offset is
+% # dropped since the narrowed set will not line up with the old page.
+% my $filter_url = sub {
+%   my ( $name, $value ) = @_;
+%   return url_with->query( { $name => $value, offset => undef } );
+% };
+
+<form method="GET" action="/shodan" id="shodan-form">
+
+  <div class="card mb-2 border-secondary">
+    <div class="card-body py-2">
+      <div class="row g-2 align-items-end">
+
+        <div class="col-auto">
+          <label class="form-label">Fetched within</label>
+          % my @_windows = (
+          %   [ 0     => 'any time' ],
+          %   [ 60    => 'last hour' ],
+          %   [ 1440  => 'last 24h' ],
+          %   [ 10080 => 'last 7d' ],
+          %   [ 43200 => 'last 30d' ],
+          % );
+          <select name="fetched_within_minutes" class="form-select form-select-sm" style="width:120px">
+            % for my $window (@_windows) {
+            <option value="<%= $window->[0] %>" <%= $fetched_within_minutes == $window->[0] ? 'selected' : '' %>><%= $window->[1] %></option>
+            % }
+          </select>
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label">Limit</label>
+          <input type="number" name="limit" class="form-control form-control-sm"
+                 value="<%= $limit %>" style="width:80px" min="1" max="10000">
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label">Offset</label>
+          <input type="number" name="offset" class="form-control form-control-sm"
+                 value="<%= $offset %>" style="width:80px" min="0">
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label">Order by</label>
+          <select name="order_by" class="form-select form-select-sm" style="width:145px">
+            % for my $column (qw( fetched ip source found last_update max_cvss os org isp asn )) {
+            <option value="<%= $column %>" <%= $order_by eq $column ? 'selected' : '' %>><%= $column %></option>
+            % }
+          </select>
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label">Dir</label>
+          <select name="order_dir" class="form-select form-select-sm" style="width:88px">
+            <option value="DESC" <%= $order_dir eq 'DESC' ? 'selected' : '' %>>DESC</option>
+            <option value="ASC"  <%= $order_dir eq 'ASC'  ? 'selected' : '' %>>ASC</option>
+          </select>
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label d-block">&nbsp;</label>
+          <button type="button" class="btn btn-outline-secondary btn-sm"
+                  data-bs-toggle="collapse" data-bs-target="#filter-panel">
+            Filters
+          </button>
+        </div>
+
+        <div class="col-auto">
+          <label class="form-label d-block">&nbsp;</label>
+          <button type="submit" class="btn btn-danger btn-sm px-4">Search</button>
+        </div>
+
+      </div><!-- /row -->
+    </div><!-- /card-body -->
+  </div><!-- /card -->
+
+  <div class="collapse <%= $show_filters ? 'show' : '' %>" id="filter-panel">
+    <div class="card mb-2 border-secondary">
+      <div class="card-header py-1 small text-muted">
+        Filters — prefix <code>!</code> to negate, <code>%</code> for LIKE. Every field takes more than one value: type and press enter or comma. IP also takes a CIDR e.g. <code>192.0.2.0/24</code>; Port and Max CVSS also take <code>&lt;</code> and <code>&gt;</code> e.g. <code>&lt;1024</code>, <code>&gt;=9</code>
+      </div>
+      <div class="card-body py-2">
+
+        % my $last_group = scalar(@_filter_groups) - 1;
+        % for my $group_index ( 0 .. $last_group ) {
+        %   my $group = $_filter_groups[$group_index];
+        <div class="row g-2 <%= $group_index < $last_group ? 'mb-1' : '' %>">
+          <div class="col-12"><span class="text-muted small fw-semibold"><%= $group->{heading} %></span></div>
+
+          % # Each field is a <select multiple> holding one option per value in
+          % # force, which the shared /js/token-fields.js turns into a
+          % # type-to-add token field -- one query parameter per value, so the
+          % # chips above the results can drop a single value.
+          % for my $field ( @{ $group->{fields} } ) {
+          %   ( my $field_id = $field->{name} ) =~ s/_/-/g;
+          %   $field_id .= '-input';
+          %   my @in_force = grep { defined($_) && $_ ne '' } @{ $self->every_param( $field->{name} ) };
+          %   my %in_force = map { $_ => 1 } @in_force;
+          %   my %is_fixed = map { $_->{value} => 1 } @{ $field->{options} // [] };
+          <div class="col-md-<%= $field->{width} // 2 %>">
+            <label class="form-label" for="<%= $field_id %>"><%= $field->{form_label} // $field->{label} %></label>
+            <select name="<%= $field->{name} %>" id="<%= $field_id %>" class="form-select form-select-sm token-filter-field" multiple
+                    <%== $field->{suggest} ? 'data-column="' . $field->{name} . '"' : '' %><%== $field->{options} ? ' data-fixed="1"' : '' %>>
+              % for my $option ( @{ $field->{options} // [] } ) {
+              <option value="<%= $option->{value} %>" data-data='<%= Mojo::JSON::to_json( { desc => $option->{desc} } ) %>'<%== $in_force{ $option->{value} } ? ' selected' : '' %>><%= $option->{value} %></option>
+              % }
+              % # Values in force beyond a fixed set (a negation written into
+              % # the URL by hand) still round-trip rather than being silently
+              % # dropped. On an open field this is every value there is.
+              % for my $value ( grep { !$is_fixed{$_} } @in_force ) {
+              <option value="<%= $value %>" selected><%= $value %></option>
+              % }
+            </select>
+          </div>
+          % }
+        </div><!-- /<%= lc $group->{heading} %> row -->
+        % }
+
+      </div><!-- /card-body -->
+    </div><!-- /card -->
+  </div><!-- /collapse -->
+
+</form>
+
+%= include 'partials/_filter_chips', active => $self->filter_chips( \@_filter_fields )
+
+%= include 'partials/_error_alert', message => $error
+
+% if (defined $results) {
+% my $count = scalar @$results;
+<div id="shodan-results">
+  %= include 'partials/_results_pager', count => $count, noun => 'entry', offset => $offset, limit => $limit
+
+  % if ($count > 0) {
+  <div class="table-responsive">
+    <table class="table table-dark table-sm table-hover table-bordered mb-0">
+      <thead class="table-secondary">
+        <tr>
+          <th>IP</th><th>Src</th><th>Found</th><th>Fetched</th><th>OS</th><th>Org</th><th>ASN</th>
+          <th>Hostnames</th><th>Ports</th><th>Tags</th><th>CVEs</th>
+        </tr>
+      </thead>
+      <tbody>
+        % for my $row (@$results) {
+        <tr>
+          <td class="ip-cell">
+            <a href="<%= $filter_url->( 'ip', $row->{ip} ) %>" title="narrow to this address"><%= $row->{ip} %></a>
+            %= include 'partials/_info_btn', kind => 'ip', value => $row->{ip}
+            % if (my $country = $self->ip_country($row->{ip})) {
+            <span class="text-muted small" title="<%= $country %>"><%= $self->country_flag($country) %> <%= $country %></span>
+            % }
+            <a class="small" href="<%= url_for('/search')->query( search => 1, ip => $row->{ip} ) %>" title="alerts naming this address">alerts</a>
+            % # message is a substring match, so this finds the address wherever
+            % # it appears in a line rather than only as a column of its own
+            % if ($self->allani_enabled) {
+            <a class="small" href="<%= url_for('/logs')->query( message => $row->{ip} ) %>" title="log lines mentioning this address">logs</a>
+            % }
+          </td>
+          <td><a href="<%= $filter_url->( 'source', $row->{source} ) %>" class="text-muted"><%= $row->{source} %></a></td>
+          <td><%== $row->{found} ? 'yes' : '<span class="text-muted">no</span>' %></td>
+          <td><%= $row->{fetched} // '' %></td>
+          <td class="cell-wrap"><% if (my $os = $row->{os}) { %><a href="<%= $filter_url->( 'os', $os ) %>"><%= $os %></a><% } %></td>
+          <td class="cell-wrap"><% if (my $org = $row->{org}) { %><a href="<%= $filter_url->( 'org', $org ) %>"><%= $org %></a><% } %></td>
+          <td><% if (my $asn = $row->{asn}) { %><a href="<%= $filter_url->( 'asn', $asn ) %>"><%= $asn %></a><% } %></td>
+          <td class="small cell-wrap">
+            % for my $hostname (@{ $row->{hostnames} || [] }) {
+            <a href="<%= $filter_url->( 'hostname', $hostname ) %>"><%= $hostname %></a>
+            % }
+          </td>
+          <td class="small cell-wrap">
+            % for my $port (@{ $row->{ports} || [] }) {
+            <a href="<%= $filter_url->( 'port', $port ) %>"><%= $port %></a>
+            % }
+          </td>
+          <td class="cell-wrap">
+            % for my $tag (@{ $row->{tags} || [] }) {
+            <a class="badge <%= $self->shodan_tag_class($tag) %> text-decoration-none" href="<%= $filter_url->( 'tag', $tag ) %>"><%= $tag %></a>
+            % }
+          </td>
+          % my @vulns = @{ $row->{vulns} || [] };
+          <td>
+            % if (@vulns) {
+            %   # Colored by the worst score rather than by how many, the same
+            %   # reading as the search results' CVE badge; grey means nothing
+            %   # anywhere has scored these.
+            %   my $max_cvss = $row->{max_cvss};
+            %   my $cvss_class = !defined($max_cvss) ? 'bg-secondary'
+            %     : $max_cvss >= 9 ? 'bg-danger'
+            %     : $max_cvss >= 7 ? 'bg-warning text-dark' : 'bg-secondary';
+            %   my $shown = @vulns > 25 ? join( ', ', @vulns[ 0 .. 24 ] ) . ', …' : join( ', ', @vulns );
+            <span class="badge <%= $cvss_class %>" title="<%= $shown %><%= defined($max_cvss) ? ' — worst CVSS ' . $max_cvss : '' %>"><%= scalar @vulns %> CVE</span>
+            % }
+          </td>
+        </tr>
+        % }
+      </tbody>
+    </table>
+  </div><!-- /table-responsive -->
+
+  % } else {
+  %= include 'partials/_empty_alert', message => "No cached entries found."
+  % }
+</div><!-- /shodan-results -->
+% }
+
+<script src="/js/lilith-table.js"></script>
+<script src="/vendor/tom-select-2.6.2/js/tom-select.complete.min.js"></script>
+<script src="/js/token-fields.js"></script>
+<script>
+// The values endpoint's query for a field: its column plus the fetched
+// window, so what is offered describes the rows the page is showing. The
+// string doubles as token-fields' cache key, so changing the window refetches.
+function valueSuggestionQuery(selectEl) {
+  var params = new URLSearchParams({ column: selectEl.dataset.column });
+  var windowEl = document.querySelector('select[name=fetched_within_minutes]');
+  if (windowEl && windowEl.value !== '0') {
+    params.set('fetched_within_minutes', windowEl.value);
+  }
+  return params.toString();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  LilithTokenFields.init({
+    valuesUrl:   '/api/shodan/values',
+    valuesQuery: valueSuggestionQuery
+  });
+
+  // The IP info modal + lookup lives in the layout; just wire the buttons.
+  document.querySelectorAll('#shodan-results .ip-info-btn').forEach(function(el) {
+    el.addEventListener('click', function() { window.showIpInfo(this.dataset.ip); });
+  });
+
+  // Client-side sorting on the results table's headers (shared module) --
+  // a view convenience over the page, on top of the server's own order by.
+  LilithTable.initSort(document.querySelector('#shodan-results table.table'));
+});
+</script>

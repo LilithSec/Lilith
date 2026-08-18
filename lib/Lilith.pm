@@ -4358,6 +4358,339 @@ sub shodan_cache_cves {
 	return [ grep { defined($_) && $_ ne '' } map { $_->{cve} } @{$rows} ];
 } ## end sub shodan_cache_cves
 
+=head2 shodan_cache_search
+
+Search the C<shodan_cache> table itself: which cached hosts match a set of
+filters, as rows for a results table. What the web UI's C</shodan> cache
+browser renders -- every other read of the cache starts from an address and
+asks what is held for it, while this one starts from what is held and asks
+which addresses. C<raw> is left out; the IP info modal is where the full
+entry lives.
+
+Every filter takes a value or an array ref of values; positives within a
+filter OR together, and a leading C<!> negates a value, which ANDs in.
+Filters:
+
+- C<ip> :: an address (equality), a CIDR (containment), or a C<%> pattern
+  matched against the address as text.
+- C<hostname> / C<tag> / C<cpe> / C<cve> :: matched against the elements of
+  the row's array column, C<%> as LIKE. A row whose column is empty or NULL
+  simply has no matching element, so a negation matches it.
+- C<port> :: a port on the row's open-port list. Takes C<E<lt>>, C<E<lt>=>,
+  C<E<gt>>, and C<E<gt>=> as well, matching a row with any port in that range.
+- C<os> / C<org> / C<isp> / C<asn> :: LIKE against the column, NULL reading
+  as ''. Schema version 17 columns; filtering on them against an older
+  schema dies naming that.
+- C<found> :: C<known> (Shodan has the host) or C<unknown> (crawled the
+  address, nothing there).
+- C<source> :: which tier wrote the row, C<api> or C<internetdb>.
+- C<max_cvss> :: the row's worst CVSS, the same expression the badges use
+  (the CVEDB cache standing in where the tier sent no scores). A number,
+  optionally led by a comparison, e.g. C<E<gt>=9>. A row with no score
+  anywhere fails every comparison.
+
+And the rest:
+
+- C<fetched_within_minutes> :: only rows fetched this recently. C<0> or
+  unset means the whole table, which is the browsing default -- the cache
+  prunes itself on write, so what the table holds is what there is.
+- C<order_by> :: C<fetched> (default), C<ip>, C<source>, C<found>,
+  C<last_update>, C<max_cvss>, C<os>, C<org>, C<isp>, or C<asn>.
+- C<order_dir> :: C<ASC> or C<DESC> (default). NULLs sort last either way,
+  so rows missing the ordered-by value never lead the page.
+- C<limit> :: default 100.
+- C<offset> :: default 0.
+
+Returns an array ref of hash refs, one per row: C<ip> (netmask stripped),
+C<source>, C<found>, C<fetched> and C<last_update> as second-precision
+strings, C<ports>, C<tags>, C<cpes>, C<vulns>, and C<hostnames> as array
+refs, C<max_cvss>, and -- where the schema has them -- C<os>, C<org>,
+C<isp>, and C<asn>. Dies on a filter value it cannot use, naming the filter,
+or if the database cannot be reached.
+
+    my $rows = $lilith->shodan_cache_search(
+        tag      => ['honeypot'],
+        port     => ['22'],
+        max_cvss => ['>=7'],
+        order_by => 'max_cvss',
+    );
+
+=cut
+
+sub shodan_cache_search {
+	my ( $self, %opts ) = @_;
+
+	my $order_dir = defined $opts{order_dir} ? $opts{order_dir} : 'DESC';
+	die( '"' . $order_dir . '" for order_dir must be either ASC or DESC' )
+		unless $order_dir eq 'ASC' || $order_dir eq 'DESC';
+
+	my $limit = defined $opts{limit} ? $opts{limit} : 100;
+	die( '"' . $limit . '" for limit is not numeric' ) if $limit !~ /^[0-9]+$/;
+
+	my $offset = defined $opts{offset} ? $opts{offset} : 0;
+	die( '"' . $offset . '" for offset is not numeric' ) if $offset !~ /^[0-9]+$/;
+
+	my $minutes = defined $opts{fetched_within_minutes} ? $opts{fetched_within_minutes} : 0;
+	die( '"' . $minutes . '" for fetched_within_minutes is not numeric' ) if $minutes !~ /^[0-9]+$/;
+
+	my $dbh = $self->_escalation_dbh;
+
+	# The same worst-CVSS definition the badges and the shodan_*_cvss alert
+	# filters use, so a row filtered or ordered by it here matches the badge
+	# the results table puts on it.
+	my $max_cvss_expr = $self->_shodan_max_cvss_expr($dbh);
+
+	# Reuses the probe shodan_cache_put keeps; see there for why one probe
+	# answers for all four and lives on the object.
+	my $has_host_columns = $self->{_shodan_cache_host_columns};
+	$has_host_columns = $self->{_shodan_cache_host_columns} = column_exists( $dbh, 'shodan_cache', 'os' )
+		if !defined $has_host_columns;
+
+	# order_by is concatenated into the statement, so it resolves through this
+	# rather than being passed through.
+	my %order_column = (
+		fetched     => 'fetched',
+		ip          => 'ip',
+		source      => 'source',
+		found       => 'found',
+		last_update => 'last_update',
+		max_cvss    => $max_cvss_expr,
+		map { $_ => $_ } ( $has_host_columns ? qw( os org isp asn ) : () ),
+	);
+	my $order_by = defined $opts{order_by} ? $opts{order_by} : 'fetched';
+	die( '"' . $order_by . '" for order_by is not a sortable shodan_cache column' )
+		unless $order_column{$order_by};
+
+	my ( @where, @binds );
+
+	# One filter into WHERE clauses: a leading '!' on a value negates it, the
+	# positives OR together as one clause, and each negation ANDs in -- the
+	# same composition every other multi-valued filter here has. The passed
+	# code turns one value into ( $sql, @binds ) or dies naming what is wrong
+	# with it.
+	my $apply = sub {
+		my ( $filter_name, $clause_for ) = @_;
+
+		my ( @positive, @positive_binds, @negative, @negative_binds );
+		for my $value ( _filter_values( $opts{$filter_name} ) ) {
+			my $negated = $value =~ s/^\!//;
+			my ( $sql, @clause_binds ) = $clause_for->($value);
+			if ($negated) {
+				push( @negative,       'not ( ' . $sql . ' )' );
+				push( @negative_binds, @clause_binds );
+			} else {
+				push( @positive,       $sql );
+				push( @positive_binds, @clause_binds );
+			}
+		} ## end for my $value ( _filter_values( $opts{$filter_name...}))
+
+		if (@positive) {
+			push( @where, '( ' . join( ' or ', @positive ) . ' )' );
+			push( @binds, @positive_binds );
+		}
+		push( @where, @negative );
+		push( @binds, @negative_binds );
+	}; ## end $apply = sub
+
+	# The charset check is not a security measure -- everything is bound -- it
+	# is so a stray value dies naming the filter rather than as whatever the
+	# inet cast makes of it.
+	$apply->(
+		'ip',
+		sub {
+			my $value = shift;
+			die( '"' . $value . '" for ip is not an address, CIDR, or % pattern' )
+				unless $value =~ m{\A[0-9a-fA-F:./%]+\z};
+			return ( 'host(ip) like ?', $value ) if index( $value, '%' ) >= 0;
+			return ( 'ip <<= ?::inet',  $value ) if index( $value, '/' ) >= 0;
+			return ( 'ip = ?::inet',    $value );
+		}
+	);
+
+	# The array columns all match the same way: does any element match. Written
+	# as exists-over-unnest rather than = any() so a NULL column reads as "no
+	# matching element" instead of poisoning a negation with SQL NULL.
+	my %array_column = ( hostname => 'hostnames', tag => 'tags', cpe => 'cpes', cve => 'vulns' );
+	for my $filter_name ( sort keys %array_column ) {
+		$apply->(
+			$filter_name,
+			sub {
+				return (
+					'exists (select 1 from unnest('
+						. $array_column{$filter_name}
+						. ') as element where element like ?)',
+					$_[0]
+				);
+			}
+		);
+	} ## end for my $filter_name ( sort keys %array_column)
+
+	$apply->(
+		'port',
+		sub {
+			my $value = shift;
+			$value =~ s/[\ \t]//g;
+			my ( $comparison, $number ) = $value =~ /\A(<=|>=|<|>|)([0-9]+)\z/
+				or die( '"' . $value . '" for port is not a port number, optionally led by <, <=, >, or >=' );
+			$comparison = '=' if $comparison eq '';
+			return ( 'exists (select 1 from unnest(ports) as port where port ' . $comparison . ' ?)', $number );
+		}
+	);
+
+	$apply->(
+		'max_cvss',
+		sub {
+			my $value = shift;
+			$value =~ s/[\ \t]//g;
+			my ( $comparison, $number ) = $value =~ /\A(<=|>=|<|>|)([0-9]+(?:\.[0-9]+)?)\z/
+				or die( '"' . $value . '" for max_cvss is not a score, optionally led by <, <=, >, or >=' );
+			$comparison = '=' if $comparison eq '';
+
+			# a row with no score anywhere compares as SQL NULL, which must
+			# read as "does not match" rather than poison the clause
+			return ( 'coalesce(' . $max_cvss_expr . ' ' . $comparison . ' ?, false)', $number );
+		}
+	);
+
+	my %found_sql = ( known => 'found', unknown => 'not found' );
+	$apply->(
+		'found',
+		sub {
+			my $value = shift;
+			die( '"' . $value . '" for found is not known or unknown' ) unless $found_sql{$value};
+			return ( $found_sql{$value} );
+		}
+	);
+
+	$apply->(
+		'source',
+		sub {
+			my $value = shift;
+			die( '"' . $value . '" for source is not api or internetdb' )
+				unless $value eq 'api' || $value eq 'internetdb';
+			return ( 'source = ?', $value );
+		}
+	);
+
+	for my $column (qw( os org isp asn )) {
+		my @values = _filter_values( $opts{$column} );
+		next unless @values;
+		die( 'filtering on ' . $column . ' needs the schema version 17 shodan_cache columns' )
+			unless $has_host_columns;
+
+		# NULL reads as '' so a negation matches the rows the tier sent
+		# nothing for, which is most of the keyless ones.
+		$apply->( $column, sub { return ( 'coalesce(' . $column . ', \'\') like ?', $_[0] ) } );
+	} ## end for my $column (qw( os org isp asn ))
+
+	if ( $minutes > 0 ) {
+		push( @where, 'fetched >= now() - (? || \' minutes\')::interval' );
+		push( @binds, $minutes );
+	}
+
+	# NULLs last either way: a page ordered by a column most rows lack should
+	# lead with the rows that have it.
+	my $statement
+		= 'select host(ip) as ip, source, found,'
+		. ' date_trunc(\'second\', fetched)::text as fetched,'
+		. ' date_trunc(\'second\', last_update)::text as last_update,'
+		. ' ports, tags, cpes, vulns, hostnames, '
+		. $max_cvss_expr
+		. ' as max_cvss'
+		. ( $has_host_columns ? ', os, org, isp, asn' : '' )
+		. ' from shodan_cache'
+		. ( @where ? ' where ' . join( ' and ', @where ) : '' )
+		. ' order by '
+		. $order_column{$order_by} . ' '
+		. $order_dir
+		. ' nulls last, ip'
+		. ' limit '
+		. $limit
+		. ' offset '
+		. $offset . ';';
+
+	return $dbh->selectall_arrayref( $statement, { Slice => {} }, @binds );
+} ## end sub shodan_cache_search
+
+=head2 shodan_cache_values
+
+The most common values of one C<shodan_cache> column, most common first. What
+the C</shodan> cache browser's filter fields offer as their dropdowns, the
+way the alert search page's fields offer theirs.
+
+Takes:
+
+- C<column> :: which filter's values are wanted, by the name
+  C<shodan_cache_search> takes the filter under: C<tag>, C<port>, C<cve>,
+  C<cpe>, or C<hostname> for the array columns (one count per element), or
+  C<source>, C<os>, C<org>, C<isp>, or C<asn> for the scalar ones. The last
+  four are schema version 17 columns and die naming that on an older schema.
+- C<fetched_within_minutes> :: count only rows fetched this recently. C<0> or
+  unset means the whole table, matching the search's own default, so what is
+  offered describes the rows the page is showing.
+- C<limit> :: default 200.
+
+Returns an array ref of C<< { value => ..., count => ... } >> hash refs,
+ordered most common first with ties by value. NULLs and empty strings are
+left out; they are not values to offer. Dies on an unknown column, a
+non-numeric window or limit, or if the database cannot be reached.
+
+    my $rows = $lilith->shodan_cache_values( column => 'tag' );
+    # [ { value => 'cloud', count => 41 }, { value => 'honeypot', count => 3 }, ... ]
+
+=cut
+
+sub shodan_cache_values {
+	my ( $self, %opts ) = @_;
+
+	my %array_column  = ( tag => 'tags', port => 'ports', cve => 'vulns', cpe => 'cpes', hostname => 'hostnames' );
+	my %scalar_column = map { $_ => 1 } qw( source os org isp asn );
+
+	my $column = defined $opts{column} ? $opts{column} : '';
+	die( '"' . $column . '" for column is not a shodan_cache filter with values to offer' )
+		unless $array_column{$column} || $scalar_column{$column};
+
+	my $limit = defined $opts{limit} ? $opts{limit} : 200;
+	die( '"' . $limit . '" for limit is not numeric' ) if $limit !~ /^[0-9]+$/;
+
+	my $minutes = defined $opts{fetched_within_minutes} ? $opts{fetched_within_minutes} : 0;
+	die( '"' . $minutes . '" for fetched_within_minutes is not numeric' ) if $minutes !~ /^[0-9]+$/;
+
+	my $dbh = $self->_escalation_dbh;
+
+	# Reuses the probe shodan_cache_put keeps; see there for why one probe
+	# answers for all four and lives on the object.
+	if ( $column =~ /^(?:os|org|isp|asn)$/ ) {
+		my $has_host_columns = $self->{_shodan_cache_host_columns};
+		$has_host_columns = $self->{_shodan_cache_host_columns} = column_exists( $dbh, 'shodan_cache', 'os' )
+			if !defined $has_host_columns;
+		die( 'offering ' . $column . ' values needs the schema version 17 shodan_cache columns' )
+			unless $has_host_columns;
+	}
+
+	# An array column counts once per element, a scalar once per row; the
+	# subquery gives both the same one-value-per-row shape to aggregate.
+	my $value_expr = $array_column{$column} ? 'unnest(' . $array_column{$column} . ')' : $column;
+
+	# port is the one integer column, which an empty-string comparison would
+	# fail to even parse against; NULL elements cannot come out of unnest, so
+	# it needs no filter at all.
+	my $value_filter = $column eq 'port' ? '' : ' where value is not null and value <> \'\'';
+
+	my $statement
+		= 'select value, count(*) as count from'
+		. ' ( select '
+		. $value_expr
+		. ' as value from shodan_cache'
+		. ( $minutes > 0 ? ' where fetched >= now() - (? || \' minutes\')::interval' : '' )
+		. ' ) as vals'
+		. $value_filter
+		. ' group by value order by count desc, value limit '
+		. $limit . ';';
+
+	return $dbh->selectall_arrayref( $statement, { Slice => {} }, ( $minutes > 0 ? ($minutes) : () ) );
+} ## end sub shodan_cache_values
+
 =head2 cvedb_cache_put
 
 Store CVEDB's answer for a CVE, replacing whatever was held for it.

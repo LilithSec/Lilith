@@ -26,8 +26,9 @@ entry hidden) unless C<allani_enabled>.
 C<GET /logs> -- the log search form and results. Mirrors the alert Search page:
 a sanitized C<source>, a C<go_back_minutes> window, C<limit>/C<offset>, an
 C<order_dir>, and per-source filters, each submitted as one query parameter per
-value and matched as any of them. With C<partial=1> only the results fragment
-is rendered (for auto-refresh).
+value and matched as any of them -- except C<message>, whose values must by
+default all appear in the line; C<message_match=OR> makes it any-of too.
+With C<partial=1> only the results fragment is rendered (for auto-refresh).
 
 =cut
 
@@ -72,7 +73,11 @@ sub index {
 	# set of accepted filters from Allani::Sources), so a param meant for another
 	# source cannot reach the query. The fields are multi valued -- one query
 	# parameter per value -- so each filter goes over as an array ref, matched as
-	# any of its values.
+	# any of its values (message excepted: the reader ANDs its terms unless
+	# message_match is 'OR'). The reader treats anything but 'OR' as 'AND';
+	# normalized here too so the template's select reflects what actually ran.
+	my $message_match = uc( $self->param('message_match') // 'AND' );
+	$message_match = 'AND' unless $message_match eq 'OR';
 	my %filters;
 	my %source_filters;
 	if ($reader) {
@@ -93,6 +98,7 @@ sub index {
 				limit           => $limit,
 				offset          => $offset,
 				filters         => \%filters,
+				message_match   => $message_match,
 				( defined $around ? ( around => $around, window_minutes => $window ) : () ),
 				( defined $start  ? ( start  => $start )                             : () ),
 				( defined $end    ? ( end    => $end )                               : () ),
@@ -112,6 +118,7 @@ sub index {
 
 		result          => $result,
 		error           => $error,
+		message_match   => $message_match,
 		go_back_minutes => $go_back_minutes,
 		order_dir       => $order_dir,
 		limit           => $limit,

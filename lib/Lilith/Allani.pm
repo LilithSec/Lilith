@@ -167,7 +167,10 @@ Each filter takes a single value or an array ref of several, matched as any of
 them. For C<host> and C<program> a value carrying a C<%> wildcard is matched
 with LIKE (a plain value with C<=>); the other columns match with C<=>, C<%>
 taken literally. C<message> is a substring (ILIKE) match, only accepted where
-the source has message text to match it against (C<syslog> and C<http_all>).
+the source has message text to match it against (C<syslog> and C<http_all>);
+C<message_match> picks how its several values combine -- C<AND> (the default)
+so each added term narrows the match like a chained grep, or C<OR> to match
+any of them as the other filters do.
 
 The time window is, in precedence: an explicit absolute range (C<start> and/or
 C<end> timestamps); an event-anchored window (C<around> a timestamp, within
@@ -189,7 +192,12 @@ sub search {
 	my $off   = clamped_int( $opts{offset}, 0,   0 );
 	my $filt  = ( ref $opts{filters} eq 'HASH' ) ? $opts{filters} : {};
 
-	return $self->_search_http_all( \%opts, $dir, $limit, $off, $filt )
+	# message_match reduced to one of two authored strings -- anything but 'OR'
+	# (unset included) is the 'AND' default -- so what reaches _ilike_clause is
+	# never the raw parameter.
+	my $message_join = ( defined $opts{message_match} && uc( $opts{message_match} ) eq 'OR' ) ? 'OR' : 'AND';
+
+	return $self->_search_http_all( \%opts, $dir, $limit, $off, $filt, $message_join )
 		if $key eq 'http_all';
 
 	my $entry = $SOURCE{$key};
@@ -198,16 +206,17 @@ sub search {
 	my $tscol = $self->_ts_col($meta);
 
 	# One clause per filter, each an any-of group over its values. 'message' is
-	# the substring match on the raw MESSAGE field (which only syslog populates);
-	# everything else must be one of the source's exact-match columns. The time
-	# window (now-relative, or anchored around an event) appends its binds last,
-	# so clause order and bind order stay aligned.
+	# the substring match on the raw MESSAGE field (which only syslog populates),
+	# and by default the one all-of group -- every term must appear in the line
+	# unless message_match is 'OR'; everything else must be one of the source's
+	# exact-match columns. The time window (now-relative, or anchored around an
+	# event) appends its binds last, so clause order and bind order stay aligned.
 	my ( @where, @binds );
 	for my $col ( sort keys %$filt ) {
 		my ( $frag, @vbinds );
 		if ( $col eq 'message' ) {
 			die( "\"message\" is not a valid filter for " . $key . "\n" ) unless $key eq 'syslog';
-			( $frag, @vbinds ) = $self->_ilike_clause( "raw->>'MESSAGE'", $filt->{$col} );
+			( $frag, @vbinds ) = $self->_ilike_clause( "raw->>'MESSAGE'", $filt->{$col}, $message_join );
 		} else {
 			die( '"' . $col . '" is not a valid filter for ' . $key . "\n" ) unless $meta->{eq}{$col};
 			( $frag, @vbinds ) = $self->_multi_clause( $col, $filt->{$col} );
@@ -252,6 +261,8 @@ sub search {
 #   - $filt :: hash ref of filter column to value, restricted to
 #     %HTTP_ALL_FILTER (host, vhost, client_ip, message). Each value may be a
 #     single value or an array ref of several, matched as any of them.
+#   - $message_join :: 'AND' or 'OR', how several message terms combine.
+#     Already normalized from message_match by the caller.
 #
 # Returns: a hash ref of the same shape search() gives for a real source:
 # { source => 'http_all', headers => \@HTTP_ALL_HEADERS, rows => [ ... ] }.
@@ -260,7 +271,7 @@ sub search {
 #
 #     my $out = $self->_search_http_all( $opts, 'DESC', 100, 0, { host => 'www1' } );
 sub _search_http_all {
-	my ( $self, $opts, $dir, $limit, $off, $filt ) = @_;
+	my ( $self, $opts, $dir, $limit, $off, $filt, $message_join ) = @_;
 
 	my @binds;
 	# $key is the selector key emitted as the 'source' discriminator, so a row's
@@ -278,7 +289,7 @@ sub _search_http_all {
 			push( @where,  $frag );
 			push( @hbinds, @vbinds );
 		}
-		my ( $msg_frag, @msg_binds ) = $self->_ilike_clause( $msg_col, $filt->{message} );
+		my ( $msg_frag, @msg_binds ) = $self->_ilike_clause( $msg_col, $filt->{message}, $message_join );
 		if ( defined $msg_frag ) {
 			push( @where,  $msg_frag );
 			push( @hbinds, @msg_binds );
@@ -406,6 +417,12 @@ sub total {
 	return ( $n // 0 ) + 0;
 }
 
+# How many distinct values a skip scan walks before giving up and letting
+# distinct() count rows instead. Each value costs one index descent, so a few
+# thousand is still quick, while a column with far more than this is one where
+# reading the rows outright wins.
+my $SKIP_SCAN_CAP = 5000;
+
 =head2 distinct
 
     my $n = $reader->distinct( source => 'syslog', column => 'host' );
@@ -434,13 +451,42 @@ sub distinct {
 	my ( $meta, $tscol ) = $self->_agg_meta( $opts{source} );
 	my $col = $self->_dim( $meta, $opts{column} );
 
-	if ( $self->_skip_scan_ok( $meta->{table}, $col, $tscol ) ) {
-		my $count = $self->_distinct_by_skip_scan( $meta->{table}, $tscol, \%opts, $col );
-		return $count if defined $count;
-	}
-
 	my @binds;
 	my $tc = $self->_time_clause( $tscol, \%opts, \@binds );
+
+	# The viability check -- an index leading with the column and the timestamp
+	# as its second key, and few enough distinct values to be worth walking --
+	# lives in Lilith::DBUtil, since Lilith::Stats asks the same question of the
+	# alert tables. The cache belongs to this object because the two readers are
+	# pointed at different databases.
+	if (
+		skip_scan_viable(
+			dbh          => $self->_dbh,
+			table        => $meta->{table},
+			column       => $col,
+			time_column  => $tscol,
+			max_distinct => $SKIP_SCAN_CAP,
+			cache        => ( $self->{_skip_scan_cache} ||= {} ),
+		)
+		)
+	{
+		# The cap earns its keep even behind the index check, because pg_stats
+		# estimates cardinality from a sample and can be badly wrong -- on the
+		# store this was written against it put pid at 6731 distinct values
+		# where the real figure was 227442. undef means over the cap or the
+		# query failed -- an optimization must not turn a working page into an
+		# error -- so fall through to counting rows.
+		my $count = distinct_by_skip_scan(
+			dbh    => $self->_dbh,
+			table  => $meta->{table},
+			column => $col,
+			where  => $tc,
+			binds  => \@binds,
+			cap    => $SKIP_SCAN_CAP,
+		);
+		return $count if defined $count;
+	} ## end if ( skip_scan_viable(...))
+
 	my ($n)
 		= $self->_dbh->selectrow_array( "SELECT count(distinct $col) FROM $meta->{table} WHERE $tc", undef, @binds );
 	return ( $n // 0 ) + 0;
@@ -708,88 +754,6 @@ sub _top_values {
 	);
 } ## end sub _top_values
 
-# How many distinct values a skip scan walks before giving up and letting the
-# caller count rows instead. Each value costs one index descent, so a few
-# thousand is still quick, while a column with far more than this is one where
-# reading the rows outright wins.
-my $SKIP_SCAN_CAP = 5000;
-
-# Whether a skip scan is worth attempting for $column on $table. The decision
-# itself -- an index leading with the column and the timestamp as its second
-# key, and few enough distinct values to be worth walking -- lives in
-# Lilith::DBUtil, since Lilith::Stats asks the same question of the alert
-# tables. The cache belongs to this object because the two readers are pointed
-# at different databases.
-#
-# Args:
-#
-#   - $table :: the table to look at, from the source metadata.
-#   - $column :: the column being counted, already validated by _dim.
-#   - $tscol :: the timestamp column the window is on, from _ts_col.
-#
-# Returns: 1 when a skip scan should be tried, 0 otherwise.
-#
-#     $self->_skip_scan_ok( 'syslog', 'host', 'r_isodate' );      # 1
-#     $self->_skip_scan_ok( 'syslog', 'facility', 'r_isodate' );  # 0, no index
-sub _skip_scan_ok {
-	my ( $self, $table, $column, $tscol ) = @_;
-
-	return skip_scan_viable(
-		dbh          => $self->_dbh,
-		table        => $table,
-		column       => $column,
-		time_column  => $tscol,
-		max_distinct => $SKIP_SCAN_CAP,
-		cache        => ( $self->{_skip_scan_cache} ||= {} ),
-	);
-} ## end sub _skip_scan_ok
-
-# Count the distinct values of a column in the window by walking the index
-# rather than reading the rows. The walk itself lives in
-# Lilith::DBUtil::distinct_by_skip_scan, shared with Lilith::Stats; this
-# wrapper renders the window clause with binds and passes both through.
-#
-# The cap earns its keep even behind the index check, because pg_stats
-# estimates cardinality from a sample and can be badly wrong -- on the store
-# this was written against it put pid at 6731 distinct values where the real
-# figure was 227442.
-#
-# Args:
-#
-#   - $table :: the table to read, from the source metadata.
-#   - $tscol :: the timestamp column to window on, from _ts_col.
-#   - $opts :: the caller's option hash ref, passed to _time_clause.
-#   - $column :: the column to count. Must be the first key of a btree index
-#     whose second key is $tscol -- see _skip_scan_ok, which the caller
-#     checks first.
-#
-# Returns: the number of distinct non-null values with at least one row in the
-# window, as an integer. undef when the column has more than $SKIP_SCAN_CAP
-# distinct values, meaning the caller should count rows instead, or when the
-# query failed -- an optimization must not turn a working page into an error.
-#
-#     $self->_distinct_by_skip_scan( 'syslog', 'r_isodate', \%opts, 'host' );
-#     # 9
-#
-#     # more values than the cap
-#     $self->_distinct_by_skip_scan( 'syslog', 'r_isodate', \%opts, 'pid' );
-#     # undef
-sub _distinct_by_skip_scan {
-	my ( $self, $table, $tscol, $opts, $column ) = @_;
-
-	my @binds;
-	my $tc = $self->_time_clause( $tscol, $opts, \@binds );
-
-	return distinct_by_skip_scan(
-		dbh    => $self->_dbh,
-		table  => $table,
-		column => $column,
-		where  => $tc,
-		binds  => \@binds,
-		cap    => $SKIP_SCAN_CAP,
-	);
-} ## end sub _distinct_by_skip_scan
-
 # Resolve an aggregate source to ( $meta, $timestamp_column, $source_name ).
 # Aggregation is over a single real table, so http_all (a view) and unknown
 # sources die.
@@ -902,7 +866,9 @@ sub _multi_clause {
 } ## end sub _multi_clause
 
 # A WHERE fragment substring-matching $expr against one or more values, each
-# bound as %value% for ILIKE and ORed in one parenthesized group. Backs the
+# bound as %value% for ILIKE and joined in one parenthesized group -- ANDed by
+# default so every term must appear and each added term narrows the match the
+# way a chained grep would, or ORed when the caller passes 'OR'. Backs the
 # message filter, whose text lives in an expression rather than a plain column.
 #
 # Args:
@@ -911,20 +877,23 @@ sub _multi_clause {
 #     message column name. Always authored here, never request data.
 #   - $values :: a single value or an array ref of several, as _multi_clause
 #     takes. undef and empty values are dropped.
+#   - $join :: 'AND' or 'OR', how several values combine. Already normalized
+#     by search(), never request data. Defaults to 'AND'.
 #
 # Returns: ( $fragment, @binds ) as _multi_clause does, or the empty list when
 # there is nothing to match.
 #
 #     my ( $frag, @binds ) = $self->_ilike_clause( 'message', [ 'boom', 'oops' ] );
-#     # $frag is '(message ILIKE ? OR message ILIKE ?)', @binds ( '%boom%', '%oops%' )
+#     # $frag is '(message ILIKE ? AND message ILIKE ?)', @binds ( '%boom%', '%oops%' )
 sub _ilike_clause {
-	my ( $self, $expr, $values ) = @_;
+	my ( $self, $expr, $values, $join ) = @_;
 
 	my @vals = grep { defined($_) && $_ ne '' } ( ref $values eq 'ARRAY' ? @$values : ($values) );
 	return unless @vals;
 
+	$join = 'AND' unless defined $join && $join eq 'OR';
 	my @binds = map { '%' . $_ . '%' } @vals;
-	my $frag  = join( ' OR ', ( $expr . ' ILIKE ?' ) x scalar(@vals) );
+	my $frag  = join( " $join ", ( $expr . ' ILIKE ?' ) x scalar(@vals) );
 	$frag = '(' . $frag . ')' if @vals > 1;
 	return ( $frag, @binds );
 } ## end sub _ilike_clause

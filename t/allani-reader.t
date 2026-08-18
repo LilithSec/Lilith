@@ -158,13 +158,33 @@ my $reader = Lilith::Allani->new( dsn => 'dbi:Pg:dbname=bogus' );
 	$reader->search( source => 'syslog', filters => { host => 'db1 db2' } );
 	unlike( $MockDbh::SQL[0], qr/host = \? OR/, 'whitespace inside a value does not split it' );
 
-	# multi-value message: one ILIKE per value, ORed, on the raw MESSAGE field
+	# multi-value message: one ILIKE per value on the raw MESSAGE field, ANDed by
+	# default -- each added term narrows the match -- and ORed with
+	# message_match => 'OR'
 	@MockDbh::SQL = ();
 	$reader->search( source => 'syslog', filters => { message => [ 'boom', 'oops' ] } );
 	like(
 		$MockDbh::SQL[0],
+		qr/\(raw->>'MESSAGE' ILIKE \? AND raw->>'MESSAGE' ILIKE \?\)/,
+		'multi-value message ANDs per-value substring matches by default'
+	);
+
+	@MockDbh::SQL = ();
+	$reader->search( source => 'syslog', filters => { message => [ 'boom', 'oops' ] }, message_match => 'OR' );
+	like(
+		$MockDbh::SQL[0],
 		qr/\(raw->>'MESSAGE' ILIKE \? OR raw->>'MESSAGE' ILIKE \?\)/,
-		'multi-value message ORs per-value substring matches'
+		q{message_match 'OR' ORs the message terms instead}
+	);
+
+	# an unrecognized message_match falls back to the AND default rather than
+	# reaching the SQL
+	@MockDbh::SQL = ();
+	$reader->search( source => 'syslog', filters => { message => [ 'boom', 'oops' ] }, message_match => 'bogus' );
+	like(
+		$MockDbh::SQL[0],
+		qr/\(raw->>'MESSAGE' ILIKE \? AND raw->>'MESSAGE' ILIKE \?\)/,
+		'an unrecognized message_match falls back to AND'
 	);
 
 	# a filter the source does not accept dies rather than being ignored

@@ -1313,4 +1313,132 @@ SKIP: {
 		->content_unlike( qr/CVE match/, 'no banner when the rule names no CVE' );
 }
 
+# ---------------------------------------------------------------------------
+# Shodan cache browser — off by default (no nav button, route 404); on when
+# enable_shodan is set.
+# ---------------------------------------------------------------------------
+{
+	my $t = _make_app('');
+	$t->get_ok('/search')
+		->status_is( 200, 'search renders with shodan off' )
+		->element_exists_not( '#nav-shodan', 'no Shodan nav button when disabled' );
+	$t->get_ok('/shodan')->status_is( 404, 'GET /shodan is 404 when disabled' );
+	$t->get_ok('/api/shodan/values?column=tag')->status_is( 404, 'the values endpoint is 404 when disabled' );
+}
+
+{
+	my $t = _make_app("enable_shodan = true\n");
+
+	$t->get_ok('/search')
+		->status_is( 200, 'search renders with shodan on' )
+		->element_exists( '#nav-shodan', 'the Shodan nav button appears when enabled' );
+
+	# What reaches the search method, and what its rows render as.
+	my $captured;
+	no warnings qw(redefine once);
+	local *Lilith::shodan_cache_search = sub {
+		my ( $self, %opts ) = @_;
+		$captured = \%opts;
+		return [
+			{
+				ip          => '45.0.0.1',
+				source      => 'api',
+				found       => 1,
+				fetched     => '2026-08-01 00:00:00+00',
+				last_update => undef,
+				ports       => [ 22, 80 ],
+				tags        => ['honeypot'],
+				cpes        => [],
+				vulns       => ['CVE-2021-44228'],
+				hostnames   => ['gate1.example.org'],
+				max_cvss    => 9.8,
+				os          => 'Linux 3.x',
+				org         => 'Example Hosting LLC',
+				isp         => undef,
+				asn         => 'AS64496',
+			}
+		];
+	}; ## end *Lilith::shodan_cache_search = sub
+	use warnings qw(redefine once);
+
+	$t->get_ok( '/shodan?tag=honeypot&tag=!cloud&port=22&ip='
+			. '&order_by=max_cvss&order_dir=ASC&limit=50&offset=10&fetched_within_minutes=60' )
+		->status_is( 200, 'GET /shodan renders 200' )
+		->content_like( qr/45\.0\.0\.1/,         'the row address renders' )
+		->content_like( qr/honeypot/,            'the tag badge renders' )
+		->content_like( qr/1 CVE/,               'the CVE badge renders' )
+		->content_like( qr/gate1\.example\.org/, 'the hostnames render' )
+		->content_like( qr/Example Hosting LLC/, 'the org renders' );
+
+	is_deeply( $captured->{tag},  [ 'honeypot', '!cloud' ], 'a multi-value filter forwards one parameter per value' );
+	is_deeply( $captured->{port}, ['22'],                   'the port filter forwards' );
+	ok( !exists $captured->{ip}, 'a blank filter is not forwarded at all' );
+	is( $captured->{order_by},               'max_cvss', 'order_by forwards' );
+	is( $captured->{order_dir},              'ASC',      'order_dir forwards' );
+	is( $captured->{limit},                  50,         'limit forwards' );
+	is( $captured->{offset},                 10,         'offset forwards' );
+	is( $captured->{fetched_within_minutes}, 60,         'the fetched window forwards' );
+
+	# out-of-vocabulary control values fall back rather than dying
+	$t->get_ok('/shodan?order_by=raw&order_dir=UP&limit=-5&offset=x&fetched_within_minutes=week')
+		->status_is( 200, 'bad control values still render 200' );
+	is( $captured->{order_by},               'fetched', 'a bad order_by falls back' );
+	is( $captured->{order_dir},              'DESC',    'a bad order_dir falls back' );
+	is( $captured->{limit},                  100,       'a bad limit falls back' );
+	is( $captured->{offset},                 0,         'a bad offset falls back' );
+	is( $captured->{fetched_within_minutes}, 0,         'a bad fetched window falls back' );
+
+	# a search that dies is an error on the page rather than a 500
+	{
+		no warnings qw(redefine once);
+		local *Lilith::shodan_cache_search = sub { die "shodan cache exploded\n" };
+		use warnings qw(redefine once);
+		$t->get_ok('/shodan')
+			->status_is( 200, 'a dying search still renders 200' )
+			->content_like( qr/shodan cache exploded/, 'with the error on the page' );
+	}
+
+	# the IP cell's cross-links: alerts always, logs only with Allani configured
+	$t->get_ok('/shodan')
+		->status_is( 200, 'GET /shodan renders 200 without Allani' )
+		->content_like( qr/alerts naming this address/, 'the alerts link renders' )
+		->content_unlike( qr/log lines mentioning/, 'no logs link without an Allani store' );
+	{
+		my $t_allani = _make_app( "enable_shodan = true\n\n[allani]\ndsn = \"dbi:Pg:dbname=allani\"\n" );
+		$t_allani->get_ok('/shodan')
+			->status_is( 200, 'GET /shodan renders 200 with Allani' )
+			->content_like( qr{/logs\?message=45\.0\.0\.1}, 'the logs link searches the message field for the address' );
+	}
+
+	# the filter fields' value suggestions
+	{
+		my $values_captured;
+		no warnings qw(redefine once);
+		local *Lilith::shodan_cache_values = sub {
+			my ( $self, %opts ) = @_;
+			$values_captured = \%opts;
+			die( '"' . $opts{column} . '" for column is not a shodan_cache filter with values to offer' )
+				if $opts{column} eq 'raw';
+			return [ { value => 'honeypot', count => 3 } ];
+		};
+		use warnings qw(redefine once);
+
+		$t->get_ok('/api/shodan/values?column=tag&fetched_within_minutes=60')
+			->status_is( 200, 'GET /api/shodan/values renders 200' )
+			->json_is( '/column',         'tag',      'the response names the column' )
+			->json_is( '/values/0/value', 'honeypot', 'and carries the values' )
+			->json_is( '/values/0/count', 3,          'with their counts' );
+		is( $values_captured->{column},                 'tag', 'the column forwards' );
+		is( $values_captured->{fetched_within_minutes}, 60,    'the fetched window forwards' );
+
+		$t->get_ok('/api/shodan/values?column=tag&fetched_within_minutes=week')
+			->status_is( 200, 'a bad fetched window still renders 200' );
+		is( $values_captured->{fetched_within_minutes}, 0, 'and falls back to the whole cache' );
+
+		$t->get_ok('/api/shodan/values?column=raw')
+			->status_is( 400, 'a column with no values to offer is a 400' )
+			->json_like( '/error', qr/not a shodan_cache filter/, 'naming the problem' );
+	}
+}
+
 done_testing();
